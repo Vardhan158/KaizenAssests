@@ -111,6 +111,34 @@ export function ProfileScreen({ user, onLogout }: ProfileScreenProps) {
         </View>
       </View>
 
+      {/* Section 30 - Security Officer Role Scope & Permissions */}
+      <Text style={tw`text-slate-400 text-xs font-black tracking-wider mb-2.5 uppercase`}>
+        ROLE PERMISSIONS SCOPE (SECTION 30)
+      </Text>
+      <View style={tw`bg-slate-800 rounded-2xl p-4 mb-5 border border-white/10 shadow-xl`}>
+        <Text style={tw`text-emerald-400 text-xs font-black mb-2 uppercase`}>
+          ✓ ALLOWED SECURITY ACTIONS
+        </Text>
+        <View style={tw`gap-1 mb-3 bg-slate-900 p-3 rounded-xl`}>
+          <Text style={tw`text-slate-300 text-[11px]`}>• View expected vehicles & active inbound queue</Text>
+          <Text style={tw`text-slate-300 text-[11px]`}>• Start Gate Entry & scan ASN/PO/Pass QR</Text>
+          <Text style={tw`text-slate-300 text-[11px]`}>• Capture vehicle plate & driver details</Text>
+          <Text style={tw`text-slate-300 text-[11px]`}>• Upload invoice, transport documents & photos</Text>
+          <Text style={tw`text-slate-300 text-[11px]`}>• Verify 8-point document checklist & view assigned dock</Text>
+          <Text style={tw`text-slate-300 text-[11px]`}>• Generate Gate Pass & confirm vehicle entrance</Text>
+        </View>
+
+        <Text style={tw`text-red-400 text-xs font-black mb-2 uppercase`}>
+          🚫 RESTRICTED WMS / PROCUREMENT ACTIONS
+        </Text>
+        <View style={tw`gap-1 bg-slate-900 p-3 rounded-xl`}>
+          <Text style={tw`text-slate-400 text-[11px]`}>× Create or modify PO / ASN commercial information</Text>
+          <Text style={tw`text-slate-400 text-[11px]`}>× Allocate or reassign warehouse docks</Text>
+          <Text style={tw`text-slate-400 text-[11px]`}>× Perform quality inspection or generate GRN</Text>
+          <Text style={tw`text-slate-400 text-[11px]`}>× Change inventory stock or assign rack/bin putaway</Text>
+        </View>
+      </View>
+
       {/* Server & Connectivity Settings */}
       <Text style={tw`text-slate-400 text-xs font-black tracking-wider mb-2.5 uppercase`}>
         BACKEND API CONFIGURATION

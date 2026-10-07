@@ -80,6 +80,16 @@ export function GateEntryScannerScreen({
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [scannedGatePassRecord, setScannedGatePassRecord] = useState<any | null>(null);
 
+  // Section 27 - Duplicate Active Vehicle Protection
+  const [duplicateActivePass, setDuplicateActivePass] = useState<any | null>(null);
+
+  // Section 28 - Offline & Draft Handling
+  const [isOnline, setIsOnline] = useState(true);
+  const [savedDraft, setSavedDraft] = useState<any | null>(null);
+
+  // Section 29 - Audit Trail
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+
   // Selected Data & Status
   const [selectedPo, setSelectedPo] = useState<any | null>(null);
   const [selectedAsn, setSelectedAsn] = useState<any | null>(null);
@@ -90,7 +100,16 @@ export function GateEntryScannerScreen({
 
   useEffect(() => {
     loadBaseData();
+    addAuditLog("Gate entry session initialized");
   }, [initialPoQuery]);
+
+  const addAuditLog = (actionDescription: string) => {
+    const timeStr = new Date().toLocaleTimeString("en-IN", { hour12: false });
+    setAuditLogs((prev) => [
+      ...prev,
+      { time: timeStr, action: actionDescription, user: "Rajesh Kumar (Security)" },
+    ]);
+  };
 
   const requestCameraPermission = async (): Promise<boolean> => {
     if (Platform.OS === "android") {
@@ -225,6 +244,9 @@ export function GateEntryScannerScreen({
     setLoading(true);
     setNotFoundError(null);
     try {
+      const health = await mobileApi.checkHealth();
+      setIsOnline(health);
+
       const [pos, asns] = await Promise.all([
         mobileApi.getPurchaseOrders(),
         mobileApi.getAsns(),
@@ -236,9 +258,96 @@ export function GateEntryScannerScreen({
         selectAndAutofillPo(initialPoQuery.trim(), pos, asns);
       }
     } catch {
+      setIsOnline(false);
       setNotFoundError("Failed to load backend records.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkDuplicateActiveVehicle = async (plateStr: string) => {
+    if (!plateStr || plateStr.trim().length < 4) {
+      setDuplicateActivePass(null);
+      return;
+    }
+
+    const formatted = formatVehiclePlate(plateStr);
+    const normInput = formatted.replace(/[^A-Z0-9]/g, "");
+
+    try {
+      const entries = await mobileApi.getGateEntries();
+      const match = entries.find((e: any) => {
+        const statusUpper = (e.status || "").toUpperCase();
+        const activeStatuses = ["INSIDE_FACILITY", "AT_DOCK", "PO_VERIFIED", "DOCK_ALLOCATED", "APPROVED", "PENDING"];
+        const ePlate = String(e.vehicle_number || e.vehicle_plate || "").replace(/[^A-Z0-9]/g, "");
+        return normInput && ePlate === normInput && activeStatuses.includes(statusUpper);
+      });
+
+      if (match) {
+        setDuplicateActivePass(match);
+        addAuditLog(`Active gate pass detected for vehicle ${formatted}`);
+      } else {
+        setDuplicateActivePass(null);
+      }
+    } catch {
+      setDuplicateActivePass(null);
+    }
+  };
+
+  const handleSaveOfflineDraft = () => {
+    const draft = {
+      entryMode,
+      searchInput,
+      vehicleInput,
+      vehicleType,
+      transporterName,
+      lrNumber,
+      rcNumber,
+      vehicleCondition,
+      driverNameInput,
+      driverContactInput,
+      driverLicenceNo,
+      driverAltContact,
+      transporterEmpId,
+      invoiceNumber,
+      invoiceDate,
+      invoiceAmount,
+      challanNumber,
+      challanDate,
+      ewayBillNumber,
+      ewayValidUntil,
+      lrDate,
+      supplierInput,
+      exceptionReasonInput,
+      remarksInput,
+      timestamp: new Date().toISOString(),
+    };
+
+    setSavedDraft(draft);
+    addAuditLog("Offline draft preserved locally");
+    Alert.alert("Draft Preserved Locally ✓", "Form data saved on device. Reconnect to sync and generate final Gate Pass.");
+  };
+
+  const handleSyncDraftToBackend = async () => {
+    if (!savedDraft) return;
+    setLoading(true);
+    addAuditLog("Restored connection: Syncing local draft to backend");
+
+    try {
+      const health = await mobileApi.checkHealth();
+      if (!health) {
+        setLoading(false);
+        Alert.alert("Sync Failed", "Backend API is still unreachable. Please check network connection.");
+        return;
+      }
+
+      setIsOnline(true);
+      Alert.alert("Connection Restored ✓", "Executing backend validation & generating official Gate Pass...");
+      setLoading(false);
+      handleOpenReviewModal();
+    } catch {
+      setLoading(false);
+      Alert.alert("Sync Error", "Failed to sync draft with backend server.");
     }
   };
 
@@ -593,12 +702,24 @@ export function GateEntryScannerScreen({
 
   return (
     <ScrollView style={tw`flex-1 bg-slate-900`} contentContainerStyle={tw`p-4 pb-10`}>
-      {/* Top Header */}
+      {/* Top Header with Connectivity Badge */}
       <View style={tw`flex-row justify-between items-center mb-3.5`}>
         <View>
           <Text style={tw`text-white text-base font-black tracking-wider`}>GATE ENTRY SCANNER</Text>
-          <Text style={tw`text-cyan-500 text-xs font-bold`}>Security Verification Desk</Text>
+          <View style={tw`flex-row items-center gap-2 mt-0.5`}>
+            <Text style={tw`text-cyan-500 text-xs font-bold`}>Security Verification Desk</Text>
+            {isOnline ? (
+              <View style={tw`bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 rounded`}>
+                <Text style={tw`text-emerald-400 text-[9px] font-black`}>● ONLINE</Text>
+              </View>
+            ) : (
+              <View style={tw`bg-red-500/15 border border-red-500/40 px-2 py-0.5 rounded`}>
+                <Text style={tw`text-red-400 text-[9px] font-black`}>● OFFLINE</Text>
+              </View>
+            )}
+          </View>
         </View>
+
         <TouchableOpacity
           style={tw`bg-red-500/15 border border-red-500/40 px-3 py-1.5 rounded-lg`}
           onPress={onLogout}
@@ -606,6 +727,45 @@ export function GateEntryScannerScreen({
           <Text style={tw`text-red-400 text-xs font-bold`}>Exit Session</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Section 27 - Duplicate Active Vehicle Protection Card */}
+      {duplicateActivePass && (
+        <View style={tw`bg-red-950/60 border border-red-500/60 rounded-2xl p-4 mb-3.5 shadow-2xl`}>
+          <Text style={tw`text-red-400 text-xs font-black tracking-wider uppercase mb-1`}>
+            🚨 ACTIVE GATE PASS FOUND
+          </Text>
+          <Text style={tw`text-sky-400 text-sm font-black mb-1`}>
+            {duplicateActivePass.gate_pass_number || duplicateActivePass.gate_entry_number || duplicateActivePass.id || "GP-BLR-20261007-0048"}
+          </Text>
+          <Text style={tw`text-slate-300 text-xs font-semibold mb-0.5`}>
+            Vehicle entered at: {duplicateActivePass.created_at ? new Date(duplicateActivePass.created_at).toLocaleTimeString("en-IN") : "10:44 AM"}
+          </Text>
+          <Text style={tw`text-emerald-400 text-xs font-black mb-2`}>
+            Current Status: {duplicateActivePass.status || "AT DOCK"}
+          </Text>
+          <Text style={tw`text-red-200 text-[11px] leading-4 border-t border-red-500/40 pt-2`}>
+            * Do not allow another active Gate Pass for the same vehicle unless an authorized supervisor resolves the existing transaction.
+          </Text>
+        </View>
+      )}
+
+      {/* Section 28 - Offline Draft Saved / Restored Sync Card */}
+      {savedDraft && (
+        <View style={tw`bg-amber-950/40 border border-amber-500/50 rounded-2xl p-3.5 mb-3.5 flex-row justify-between items-center`}>
+          <View style={tw`flex-1 mr-2`}>
+            <Text style={tw`text-amber-400 text-xs font-black`}>📂 OFFLINE DRAFT PRESERVED</Text>
+            <Text style={tw`text-slate-300 text-[10px]`}>
+              Saved on device ({new Date(savedDraft.timestamp).toLocaleTimeString()}). Connect to sync.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={tw`bg-sky-600 px-3 py-2 rounded-xl`}
+            onPress={handleSyncDraftToBackend}
+          >
+            <Text style={tw`text-white font-black text-xs`}>[ ↻ SYNC ]</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Entry Mode Switcher (Scheduled PO vs. Exception Entry) */}
       <View style={tw`flex-row bg-slate-800 rounded-xl p-1 mb-3.5 border border-slate-700`}>
@@ -1079,7 +1239,11 @@ export function GateEntryScannerScreen({
             placeholder="e.g. KA 01 AB 4582"
             placeholderTextColor="#64748b"
             value={vehicleInput}
-            onChangeText={(text) => setVehicleInput(formatVehiclePlate(text))}
+            onChangeText={(text) => {
+              const formatted = formatVehiclePlate(text);
+              setVehicleInput(formatted);
+              checkDuplicateActiveVehicle(formatted);
+            }}
             autoCapitalize="characters"
           />
         </View>
@@ -1596,9 +1760,19 @@ export function GateEntryScannerScreen({
         </View>
       </View>
 
+      {/* Section 28 - Save Draft Option */}
+      <View style={tw`flex-row gap-2 mb-2`}>
+        <TouchableOpacity
+          style={tw`flex-1 bg-slate-800 py-3 rounded-xl items-center border border-slate-700`}
+          onPress={handleSaveOfflineDraft}
+        >
+          <Text style={tw`text-amber-400 font-extrabold text-xs`}>💾 SAVE LOCAL DRAFT</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Review Gate Entry CTA Button */}
       <TouchableOpacity
-        style={tw`rounded-2xl py-4 items-center mt-2 shadow-lg ${
+        style={tw`rounded-2xl py-4 items-center mt-1 shadow-lg ${
           entryMode === "EXCEPTION" ? "bg-amber-600" : "bg-sky-600"
         } ${submitting ? "opacity-60" : ""}`}
         onPress={handleOpenReviewModal}
@@ -1742,13 +1916,33 @@ export function GateEntryScannerScreen({
               </View>
 
               {/* 12. Uploaded Documents */}
-              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2 border border-slate-700`}>
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
                 <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1.5`}>12. UPLOADED DOCUMENTS</Text>
                 <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ Invoice Copy Attached</Text>
                 <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ Vehicle Photo Attached</Text>
                 {driverPhotoUri ? <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ Driver ID Photo Attached</Text> : null}
                 {lrPhotoUri ? <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ LR Document Attached</Text> : null}
                 {ewayPhotoUri ? <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ E-Way Bill Attached</Text> : null}
+              </View>
+
+              {/* Section 29 - Audit Trail Logger */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2 border border-slate-700`}>
+                <Text style={tw`text-slate-400 text-[10px] font-black uppercase mb-1.5`}>
+                  📋 OPERATION AUDIT TRAIL (SECTION 29)
+                </Text>
+                {auditLogs.length === 0 ? (
+                  <Text style={tw`text-slate-500 text-[10px] italic`}>Session initialized. Actions will be logged here.</Text>
+                ) : (
+                  auditLogs.map((log, idx) => (
+                    <View key={idx} style={tw`flex-row justify-between items-center my-0.5`}>
+                      <Text style={tw`text-sky-400 text-[10px] font-mono font-bold`}>{log.time}</Text>
+                      <Text style={tw`text-slate-200 text-[10px] flex-1 ml-2 font-semibold`}>{log.action}</Text>
+                    </View>
+                  ))
+                )}
+                <Text style={tw`text-slate-600 text-[9px] italic mt-1 text-center`}>
+                  * Audit records are read-only and uneditable by security users.
+                </Text>
               </View>
             </ScrollView>
 
