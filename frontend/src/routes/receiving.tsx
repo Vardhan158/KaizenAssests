@@ -193,7 +193,7 @@ const INITIAL_RECORDS: InboundRecord[] = [
   },
 ];
 
-export function ReceivingControlCenter() {
+function ReceivingControlCenter() {
   const [records, setRecords] = useState<InboundRecord[]>(INITIAL_RECORDS);
   const [selectedRecord, setSelectedRecord] = useState<InboundRecord | null>(INITIAL_RECORDS[0]);
   const [searchQuery, setSearchQuery] = useState("");
