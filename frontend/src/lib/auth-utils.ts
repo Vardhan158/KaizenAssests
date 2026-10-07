@@ -107,7 +107,6 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
     return ["DISPATCH", "DISPATCH_MANAGER", "ADMIN", "SUPERUSER"];
   if (
     pathname === "/gate-dashboard" ||
-    pathname === "/gate-entry" ||
     pathname === "/vehicle-exit" ||
     pathname === "/unscheduled-arrivals"
   )
@@ -180,7 +179,7 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
   if (roles.includes("ADMIN") || roles.includes("SUPERUSER")) return "/admin/users";
   if (roles.includes("FINANCE")) return "/finance-dashboard";
   if (roles.includes("PROCUREMENT")) return "/procurement-dashboard";
-  if (roles.includes("GATE_SECURITY")) return "/gate-entry";
+  if (roles.includes("GATE_SECURITY")) return "/gate-dashboard";
   if (roles.includes("SUPPLIER")) return "/submit-quotation";
   if (roles.includes("ASSEMBLY_MANAGER") || roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_OPERATOR")) return "/assembly-dashboard";
   if (roles.includes("DISPATCH") || roles.includes("DISPATCH_MANAGER") || user?.username?.toLowerCase() === "dispatch") return "/dispatch";

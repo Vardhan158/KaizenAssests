@@ -172,7 +172,7 @@ const receivingFlow = [
   { label: "PO Approval", to: "/finance/approvals", icon: CheckCircle2, detail: "Controlled release" },
   { label: "Supplier Confirmation", to: "/procurement/purchase-orders", icon: Clock3, detail: "Acknowledgement" },
   { label: "ASN", to: "/procurement/asns", icon: Truck, detail: "Shipment notice" },
-  { label: "Gate Entry", to: "/gate-entry", icon: DoorOpen, detail: "Vehicle verified" },
+  { label: "Gate Entry", to: "/gate-dashboard", icon: DoorOpen, detail: "Mobile App scan" },
   { label: "Dock", to: "/dock-management", icon: Warehouse, detail: "Bay allocated" },
   { label: "GRN", to: "/grn", icon: FileText, detail: "Goods received" },
   { label: "Quality Inspection", to: "/procurement/quality-issues", icon: ShieldCheck, detail: "Pass or claim" },

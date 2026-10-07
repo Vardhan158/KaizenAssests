@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ClipboardCheck, Clock3, Loader2, LogOut, Plus, ShieldCheck, Truck, Warehouse } from "lucide-react";
+import { ClipboardCheck, Clock3, Loader2, LogOut, ShieldCheck, Smartphone, Truck, Warehouse } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { StatCard } from "@/components/wms/primitives";
 import { Button } from "@/components/ui/button";
@@ -90,13 +90,26 @@ function GateDashboard() {
       title="Gate Security Dashboard"
       subtitle="Live vehicle arrivals, PO verification and gate operations"
       actions={
-        <Button asChild className="rounded-xl shadow-glow">
-          <Link to="/gate-entry">
-            <Plus className="size-4" /> New Gate Entry
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2 rounded-xl bg-sky-500/10 border border-sky-500/30 px-3 py-1.5 text-xs font-semibold text-sky-400">
+          <Smartphone className="size-4 text-sky-400" />
+          <span>Gate Entry is conducted via KaizenX Mobile App</span>
+        </div>
       }
     >
+      <div className="mb-4 rounded-2xl border border-sky-500/30 bg-sky-950/20 p-4 text-sky-200 shadow-sm flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl bg-sky-500/20 p-2.5 text-sky-400">
+            <Smartphone className="size-5" />
+          </div>
+          <div>
+            <h4 className="font-bold text-white text-sm">Mobile-Exclusive Gate Entry</h4>
+            <p className="text-xs text-sky-300/80">
+              Inbound truck scanning, PO verification, document capture, and gate pass generation are handled via the KaizenX Mobile Application.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard
           label="Total arrivals"
@@ -104,7 +117,7 @@ function GateDashboard() {
           delta="Vehicles recorded today"
           icon={Truck}
           tone="primary"
-          to="/gate-entry"
+          to="/vehicle-queue"
         />
         <StatCard
           label="Verified POs"
@@ -112,7 +125,7 @@ function GateDashboard() {
           delta="PO matched at the gate"
           icon={ShieldCheck}
           tone="success"
-          to="/gate-entry"
+          to="/vehicle-queue"
         />
         <StatCard
           label="Unscheduled"
@@ -136,7 +149,7 @@ function GateDashboard() {
           delta="Cleared & exited facility"
           icon={LogOut}
           tone="success"
-          to="/gate-entry"
+          to="/vehicle-exit"
         />
         <StatCard
           label="Pending clearance"
@@ -144,7 +157,7 @@ function GateDashboard() {
           delta="Not yet in dock queue"
           icon={Clock3}
           tone="teal"
-          to="/gate-entry"
+          to="/vehicle-queue"
         />
       </div>
 

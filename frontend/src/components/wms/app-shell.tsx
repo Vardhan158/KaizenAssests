@@ -215,7 +215,6 @@ const managerNav = [
 
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
-  { label: "Gate Entry", to: "/gate-entry", icon: ShieldCheck },
   { label: "Inbound Arrivals", to: "/vehicle-queue", icon: Truck },
   { label: "Outbound Arrivals", to: "/vehicle-exit", icon: Truck },
   { label: "Gate Exit", to: "/dispatch-gate-exit", icon: LogOut },
@@ -501,7 +500,6 @@ export function AppShell({
     );
   const isGateSecurityRoute =
     [
-      "/gate-entry",
       "/vehicle-queue",
       "/vehicle-exit",
       "/gate-dashboard",
