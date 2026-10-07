@@ -646,3 +646,34 @@ class NotificationModel(Base):
     idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class PickTaskModel(Base):
+    __tablename__ = "pick_task"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    request_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, nullable=True)
+    request_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    material_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    material_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4), nullable=True)
+    uom: Mapped[Optional[str]] = mapped_column(String(32), default="PCS")
+    status: Mapped[Optional[str]] = mapped_column(String(64), default="PICKED")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class MaterialIssueModel(Base):
+    __tablename__ = "material_issue"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    pick_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("pick_task.id"), nullable=True)
+    requisition_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    material_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    material_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4), nullable=True)
+    uom: Mapped[Optional[str]] = mapped_column(String(32), default="PCS")
+    status: Mapped[Optional[str]] = mapped_column(String(64), default="ISSUED")
+    issued_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    received_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

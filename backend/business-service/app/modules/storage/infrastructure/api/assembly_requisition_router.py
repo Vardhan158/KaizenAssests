@@ -1365,19 +1365,12 @@ async def create_material_request_for_shortage(
     now_utc = datetime.now(timezone.utc)
     current_year = now_utc.year
     try:
-        count_stmt = select(func.count(MaterialRequestModel.id)).where(
-            extract('year', MaterialRequestModel.created_at) == current_year
-        )
+        count_stmt = select(func.count(MaterialRequestModel.id))
         count_res = await uow.session.execute(count_stmt)
         req_count = count_res.scalar_one() or 0
         req_no = f"MR-{current_year}-{req_count + 1:06d}"
     except Exception:
         req_no = f"MR-{current_year}-{int(now_utc.timestamp())}"
-            MaterialRequestModel.request_number.like(f"MR-{current_year}-%")
-        )
-        count_res = await uow.session.execute(count_stmt)
-        seq = (count_res.scalar() or 0) + 1
-        req_no = f"MR-{current_year}-{seq:04d}"
 
     mr = MaterialRequestModel(
         id=uuid.uuid4(),
