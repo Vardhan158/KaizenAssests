@@ -998,7 +998,7 @@ export function GateEntryScannerScreen({
           ) : null}
         </View>
 
-        /* Screen 10 & Section 16 - Dock Allocation Card */
+        {/* Screen 10 & Section 16 - Dock Allocation Card */}
         {selectedPo || selectedAsn ? (
           (() => {
             const currentDock = selectedPo?.dock_number || selectedAsn?.dock_number;
