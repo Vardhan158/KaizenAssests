@@ -47,8 +47,6 @@ const roleModules: Record<string, { label: string; links: { label: string; to: s
       { label: "Warehouse dashboard", to: "/warehouse-dashboard" },
     ],
   },
-    ],
-  },
 };
 
 function getModule() {
