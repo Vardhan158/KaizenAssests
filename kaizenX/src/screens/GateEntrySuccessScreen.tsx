@@ -239,6 +239,29 @@ export function GateEntrySuccessScreen({
         </TouchableOpacity>
       </View>
 
+      {/* Section 35 - Scope Boundary Banner */}
+      <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10 shadow-lg`}>
+        <Text style={tw`text-slate-400 text-[10px] font-black tracking-widest text-center uppercase mb-1.5`}>
+          ─── GATE MOBILE APP SCOPE BOUNDARY (SECTION 35) ───
+        </Text>
+        <Text style={tw`text-emerald-400 text-xs font-black text-center mb-1`}>
+          Vehicle Status: INSIDE FACILITY • Directed to Dock {dockNo}
+        </Text>
+        <Text style={tw`text-slate-400 text-[10px] text-center leading-4`}>
+          Operational responsibility for Gate Entry ends here. Downstream processes (Dock Arrival → Unloading → Quality Inspection → GRN → Material QR → Putaway) belong to Warehouse WMS receiving modules.
+        </Text>
+      </View>
+
+      {/* Section 36 - V1 Audit Traceability Chain */}
+      <View style={tw`bg-slate-800 rounded-2xl p-3.5 mb-4 border border-slate-700`}>
+        <Text style={tw`text-sky-400 text-[10px] font-black tracking-wider uppercase mb-1.5 text-center`}>
+          V1 AUDIT TRACEABILITY CHAIN (SECTION 36)
+        </Text>
+        <Text style={tw`text-slate-300 text-[10px] font-mono text-center leading-4`}>
+          {vehicleNo} ➔ {gatePassNo} ➔ {supplierName.slice(0, 18)} ➔ {poNo} ➔ {asnNo} ➔ Inv #{entryResult?.invoice_number || "9901"} ➔ {entryResult?.driver_name || "Driver"} ➔ Gate 01 ➔ Dock {dockNo} ➔ {currentTimeFormatted}
+        </Text>
+      </View>
+
       <TouchableOpacity
         style={tw`bg-slate-800 py-3.5 rounded-xl items-center border border-slate-700`}
         onPress={entryConfirmed ? onViewHistory : onNewScan}
