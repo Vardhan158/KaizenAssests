@@ -181,9 +181,7 @@ const procurementNav = [
 ];
 
 const supplierNav = [
-  { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
-  { label: "Quotation Portal", to: "/submit-quotation", icon: FileBadge },
-  { label: "ASNs", to: "/supplier/asns/new", icon: Truck },
+  { label: "Advanced Shipping Notices (ASNs)", to: "/supplier/asns/new", icon: Truck },
 ];
 
 const managerNav = [

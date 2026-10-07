@@ -170,7 +170,7 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
   if (roles.includes("MANAGER")) return "/manager-dashboard";
   if (roles.includes("ADMIN") || roles.includes("SUPERUSER")) return "/admin/users";
   if (roles.includes("GATE_SECURITY")) return "/gate-dashboard";
-  if (roles.includes("SUPPLIER")) return "/submit-quotation";
+  if (roles.includes("SUPPLIER")) return "/supplier/asns/new";
   if (roles.includes("ASSEMBLY_MANAGER") || roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_OPERATOR")) return "/assembly-dashboard";
   if (roles.includes("DISPATCH") || roles.includes("DISPATCH_MANAGER") || user?.username?.toLowerCase() === "dispatch") return "/dispatch";
   if (roles.includes("STORE_MANAGER") || roles.includes("STORE_KEEPER"))
