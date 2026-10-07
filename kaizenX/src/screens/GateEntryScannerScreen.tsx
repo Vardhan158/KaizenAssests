@@ -2043,7 +2043,6 @@ export function GateEntryScannerScreen({
           </View>
         </View>
       </Modal>
-      </TouchableOpacity>
 
       {/* PO / ASN DB PICKER MODAL */}
       <Modal visible={showPoPickerModal} animationType="fade" transparent>
