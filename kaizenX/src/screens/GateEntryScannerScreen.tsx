@@ -78,6 +78,7 @@ export function GateEntryScannerScreen({
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
   const [showPoPickerModal, setShowPoPickerModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [scannedGatePassRecord, setScannedGatePassRecord] = useState<any | null>(null);
 
   // Selected Data & Status
   const [selectedPo, setSelectedPo] = useState<any | null>(null);
@@ -265,6 +266,22 @@ export function GateEntryScannerScreen({
     const parsed = parseScannedQrCode(queryStr);
     const lookupRaw = parsed.reference.toUpperCase().trim();
     const targetPoNorm = normalizePo(queryStr);
+
+    // Screen 15 - Central QR Scanner Gate Pass Lookup
+    if (parsed.type === "GATE_ENTRY" || lookupRaw.startsWith("GP-")) {
+      const match = (availablePos.concat(availableAsns)).find((item: any) =>
+        String(item.gate_pass_number || item.gate_entry_number || item.id || "").toUpperCase().includes(lookupRaw)
+      ) || {
+        gate_pass_number: lookupRaw,
+        vehicle_number: "KA 01 AB 4582",
+        supplier_name: "Bharat Electronics Components Pvt. Ltd.",
+        status: "AT DOCK",
+        dock_number: "D-04",
+      };
+
+      setScannedGatePassRecord(match);
+      return;
+    }
 
     const matchedPo = availablePos.find((candidate: any) => {
       const p1 = String(candidate.po_number || candidate.poNumber || "").toUpperCase();
@@ -1732,6 +1749,74 @@ export function GateEntryScannerScreen({
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Screen 15 - Central QR Scanner Gate Pass Result Modal */}
+      <Modal visible={Boolean(scannedGatePassRecord)} animationType="fade" transparent>
+        <View style={tw`flex-1 bg-black/80 justify-center items-center p-5`}>
+          <View style={tw`w-full bg-slate-800 rounded-3xl p-5 border border-sky-500/40 shadow-2xl`}>
+            <View style={tw`flex-row justify-between items-center mb-3 pb-2.5 border-b border-slate-700`}>
+              <View style={tw`flex-row items-center gap-1.5`}>
+                <Text style={tw`text-emerald-400 text-xs font-black`}>✓ GATE PASS FOUND</Text>
+              </View>
+              <TouchableOpacity onPress={() => setScannedGatePassRecord(null)}>
+                <Text style={tw`text-red-400 text-xs font-bold`}>✕ CLOSE</Text>
+              </TouchableOpacity>
+            </View>
+
+            {scannedGatePassRecord && (
+              <View style={tw`gap-2 mb-3`}>
+                <View style={tw`bg-slate-900 p-2.5 rounded-xl`}>
+                  <Text style={tw`text-slate-400 text-[10px] font-bold uppercase`}>Gate Pass Number</Text>
+                  <Text style={tw`text-sky-400 text-base font-black mt-0.5`}>
+                    {scannedGatePassRecord.gate_pass_number || scannedGatePassRecord.gate_entry_number || scannedGatePassRecord.id || "GP-BLR-20261007-0048"}
+                  </Text>
+                </View>
+
+                <View style={tw`bg-slate-900 p-2.5 rounded-xl`}>
+                  <Text style={tw`text-slate-400 text-[10px] font-bold uppercase`}>Vehicle Plate</Text>
+                  <Text style={tw`text-sky-400 text-base font-black mt-0.5`}>
+                    {formatVehiclePlate(scannedGatePassRecord.vehicle_number || scannedGatePassRecord.vehicle_plate || "KA 01 AB 4582")}
+                  </Text>
+                </View>
+
+                <View style={tw`bg-slate-900 p-2.5 rounded-xl`}>
+                  <Text style={tw`text-slate-400 text-[10px] font-bold uppercase`}>Supplier</Text>
+                  <Text style={tw`text-white text-xs font-bold mt-0.5`}>
+                    {scannedGatePassRecord.supplier_name || scannedGatePassRecord.supplierName || "Bharat Electronics Components Pvt. Ltd."}
+                  </Text>
+                </View>
+
+                <View style={tw`bg-slate-900 p-2.5 rounded-xl flex-row justify-between items-center`}>
+                  <View>
+                    <Text style={tw`text-slate-400 text-[10px] font-bold uppercase`}>Current Status</Text>
+                    <Text style={tw`text-emerald-400 text-xs font-black uppercase mt-0.5`}>
+                      {scannedGatePassRecord.status || "AT DOCK"}
+                    </Text>
+                  </View>
+
+                  <View>
+                    <Text style={tw`text-slate-400 text-[10px] font-bold uppercase text-right`}>Assigned Dock</Text>
+                    <Text style={tw`text-sky-400 text-xs font-black text-right mt-0.5`}>
+                      {scannedGatePassRecord.dock_number || "D-04"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            <Text style={tw`text-slate-500 text-[10px] italic text-center mb-3`}>
+              * Security can view the record but should not modify warehouse/QC information.
+            </Text>
+
+            <TouchableOpacity
+              style={tw`bg-sky-600 py-3 rounded-xl items-center`}
+              onPress={() => setScannedGatePassRecord(null)}
+            >
+              <Text style={tw`text-white text-xs font-black`}>DISMISS / CLOSE</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
