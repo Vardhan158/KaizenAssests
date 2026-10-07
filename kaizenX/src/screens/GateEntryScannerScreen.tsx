@@ -20,12 +20,17 @@ import { formatVehiclePlate, parseScannedQrCode } from "../utils/vehicleFormatte
 interface GateEntryScannerScreenProps {
   onSuccess: (entryResult: any) => void;
   onLogout: () => void;
+  initialPoQuery?: string;
 }
 
-export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScannerScreenProps) {
+export function GateEntryScannerScreen({
+  onSuccess,
+  onLogout,
+  initialPoQuery,
+}: GateEntryScannerScreenProps) {
   const [entryMode, setEntryMode] = useState<"SCHEDULED" | "EXCEPTION">("SCHEDULED");
 
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(initialPoQuery || "");
   const [vehicleInput, setVehicleInput] = useState("");
   const [driverNameInput, setDriverNameInput] = useState("");
   const [driverContactInput, setDriverContactInput] = useState("");
@@ -52,7 +57,7 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
 
   useEffect(() => {
     loadBaseData();
-  }, []);
+  }, [initialPoQuery]);
 
   const requestCameraPermission = async (): Promise<boolean> => {
     if (Platform.OS === "android") {
@@ -129,6 +134,10 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       ]);
       setPoList(pos);
       setAsnList(asns);
+      if (initialPoQuery && initialPoQuery.trim()) {
+        setSearchInput(initialPoQuery.trim());
+        selectAndAutofillPo(initialPoQuery.trim(), pos, asns);
+      }
     } catch {
       setNotFoundError("Failed to load backend records.");
     } finally {

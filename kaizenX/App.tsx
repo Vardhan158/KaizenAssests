@@ -24,6 +24,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>("HOME");
   const [currentScreenOverride, setCurrentScreenOverride] = useState<"success" | null>(null);
   const [lastEntryResult, setLastEntryResult] = useState<any | null>(null);
+  const [scannerPoQuery, setScannerPoQuery] = useState<string>("");
 
   const handleSplashFinish = (authenticatedUser: any | null) => {
     setUser(authenticatedUser);
@@ -42,6 +43,7 @@ export default function App() {
     setActiveTab("HOME");
     setCurrentScreenOverride(null);
     setLastEntryResult(null);
+    setScannerPoQuery("");
   };
 
   const handleScanSuccess = (entryResult: any) => {
@@ -50,6 +52,13 @@ export default function App() {
   };
 
   const handleNewScanFromSuccess = () => {
+    setCurrentScreenOverride(null);
+    setScannerPoQuery("");
+    setActiveTab("SCAN");
+  };
+
+  const handleStartEntryFromDashboard = (poOrAsnQuery: string) => {
+    setScannerPoQuery(poOrAsnQuery);
     setCurrentScreenOverride(null);
     setActiveTab("SCAN");
   };
@@ -60,6 +69,9 @@ export default function App() {
   };
 
   const handleTabPress = (tab: TabType) => {
+    if (tab !== "SCAN") {
+      setScannerPoQuery("");
+    }
     setCurrentScreenOverride(null);
     setActiveTab(tab);
   };
@@ -87,11 +99,13 @@ export default function App() {
                   user={user}
                   onNewEntry={() => handleTabPress("SCAN")}
                   onViewVehicles={() => handleTabPress("VEHICLES")}
+                  onStartEntry={handleStartEntryFromDashboard}
                 />
               ) : activeTab === "SCAN" ? (
                 <GateEntryScannerScreen
                   onSuccess={handleScanSuccess}
                   onLogout={handleLogout}
+                  initialPoQuery={scannerPoQuery}
                 />
               ) : activeTab === "VEHICLES" ? (
                 <RecentEntriesScreen
