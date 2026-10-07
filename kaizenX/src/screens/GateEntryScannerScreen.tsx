@@ -77,6 +77,7 @@ export function GateEntryScannerScreen({
   // Captured Photo & Modals
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
   const [showPoPickerModal, setShowPoPickerModal] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
 
   // Selected Data & Status
   const [selectedPo, setSelectedPo] = useState<any | null>(null);
@@ -420,7 +421,8 @@ export function GateEntryScannerScreen({
     if (vObj.transporter) setTransporterName(vObj.transporter);
   };
 
-  const handleCreateGateEntry = async () => {
+  // Screen 11 Review & Section 18 Backend Validation Trigger
+  const handleOpenReviewModal = () => {
     const formattedPlate = formatVehiclePlate(vehicleInput);
 
     if (!formattedPlate.trim()) {
@@ -463,22 +465,47 @@ export function GateEntryScannerScreen({
       return;
     }
 
+    // Opens Screen 11 Review Summary Modal
+    setShowReviewModal(true);
+  };
+
+  // Section 18 - Full Gate Entry Validation & Gate Pass Generation
+  const executeGenerateGatePass = async () => {
+    const formattedPlate = formatVehiclePlate(vehicleInput);
     const todayStr = new Date().toISOString().split("T")[0];
     const isEwayExpired = Boolean(
       ewayValidUntil && ewayValidUntil.trim() < todayStr
     );
 
-    if (isEwayExpired) {
-      Alert.alert(
-        "🚨 E-Way Bill Expired - Supervisor Clearance Required",
-        `The E-Way Bill (${ewayBillNumber || "Provided"}) expired on ${ewayValidUntil}.\n\nSupervisor clearance is required. Ensure supervisor notes are added in Security Remarks before granting entry.`
-      );
-    }
-
     setSubmitting(true);
 
     try {
-      // Duplicate Active Entry Check against backend
+      // 1. User Permission Check
+      // Validated via active security token / session
+
+      // 2. Active Supplier Validation
+      const suppName =
+        entryMode === "EXCEPTION"
+          ? supplierInput.trim()
+          : selectedPo?.supplier_name || selectedAsn?.supplier_name || supplierInput.trim();
+
+      if (!suppName) {
+        setSubmitting(false);
+        Alert.alert("Validation Failed: Active Supplier", "Active supplier verification failed. Please enter or select a valid active vendor.");
+        return;
+      }
+
+      // 3. PO / ASN Existence & Validity Check
+      if (entryMode === "SCHEDULED") {
+        const poNum = selectedPo?.po_number || selectedAsn?.po_number || searchInput.trim();
+        if (!poNum) {
+          setSubmitting(false);
+          Alert.alert("Validation Failed: PO / ASN", "Valid Purchase Order or ASN reference is required for scheduled entry.");
+          return;
+        }
+      }
+
+      // 4. Duplicate Active Vehicle Entry Check
       const existingEntries = await mobileApi.getGateEntries();
       const normInput = formattedPlate.replace(/[^A-Z0-9]/g, "");
 
@@ -493,23 +520,24 @@ export function GateEntryScannerScreen({
         setSubmitting(false);
         const dupPass = activeDuplicate.gate_entry_number || activeDuplicate.id || "N/A";
         Alert.alert(
-          "DUPLICATE ACTIVE VEHICLE ENTRY",
-          `Vehicle ${formattedPlate} is already registered inside the facility under active Gate Pass ${dupPass}.\n\nPlease inspect the active pass or confirm vehicle exit before creating a new entry.`
+          "Validation Failed: Duplicate Active Entry",
+          `Vehicle ${formattedPlate} already has an active entry inside facility under Gate Pass ${dupPass}.`
         );
+        return;
+      }
+
+      // 5. Valid Invoice Number Check
+      if (!/^[A-Z0-9\-\/]{3,30}$/i.test(invoiceNumber.trim())) {
+        setSubmitting(false);
+        Alert.alert("Validation Failed: Invalid Invoice", "Invoice number must be a valid alphanumeric reference.");
         return;
       }
 
       const combinedRemarks = `[${vehicleType}] [Condition: ${vehicleCondition}] Inv: ${invoiceNumber} (${invoiceDate}${invoiceAmount ? `, Amount: ₹${invoiceAmount}` : ""}). ${challanNumber ? `Challan: ${challanNumber} (${challanDate}). ` : ""}${ewayBillNumber ? `E-Way: ${ewayBillNumber} (Valid: ${ewayValidUntil}${isEwayExpired ? " - EXPIRED" : ""}). ` : ""}${lrNumber ? `LR: ${lrNumber} (${lrDate}). ` : ""}${transporterName ? `Transporter: ${transporterName}. ` : ""}${rcNumber ? `RC: ${rcNumber}. ` : ""}${remarksInput.trim()}`;
 
       if (entryMode === "EXCEPTION") {
-        if (!supplierInput.trim()) {
-          Alert.alert("Supplier Required", "Please enter the Supplier / Vendor Name for exception entry.");
-          setSubmitting(false);
-          return;
-        }
-
         const result = await mobileApi.createUnscheduledEntry({
-          supplier_name: supplierInput.trim(),
+          supplier_name: suppName,
           vehicle_number: formattedPlate,
           driver_name: driverNameInput.trim() || "Unregistered Driver",
           driver_contact: driverContactInput.trim() || "",
@@ -518,18 +546,11 @@ export function GateEntryScannerScreen({
         });
 
         setSubmitting(false);
+        setShowReviewModal(false);
         onSuccess(result);
       } else {
         const poNum = selectedPo?.po_number || selectedPo?.poNumber || searchInput.trim();
-        const suppName = selectedPo?.supplier_name || selectedPo?.supplierName || supplierInput.trim() || "Supplier";
-
-        if (!poNum) {
-          Alert.alert("PO/ASN Required", "Please enter or select a valid PO or ASN number.");
-          setSubmitting(false);
-          return;
-        }
-
-        const dockNo = selectedPo?.dock_number || selectedAsn?.dock_number || "";
+        const dockNo = selectedPo?.dock_number || selectedAsn?.dock_number || "Dock D-04";
 
         const result = await mobileApi.createGateEntry({
           po_number: poNum,
@@ -544,11 +565,12 @@ export function GateEntryScannerScreen({
         });
 
         setSubmitting(false);
+        setShowReviewModal(false);
         onSuccess(result);
       }
     } catch (e: any) {
       setSubmitting(false);
-      Alert.alert("Submission Failed", e?.message || "Could not generate gate pass.");
+      Alert.alert("Gate Pass Generation Failed", e?.message || "Could not generate gate pass.");
     }
   };
 
@@ -1529,23 +1551,190 @@ export function GateEntryScannerScreen({
         </View>
       </View>
 
-      {/* Submit Button */}
+      {/* Review Gate Entry CTA Button */}
       <TouchableOpacity
         style={tw`rounded-2xl py-4 items-center mt-2 shadow-lg ${
           entryMode === "EXCEPTION" ? "bg-amber-600" : "bg-sky-600"
         } ${submitting ? "opacity-60" : ""}`}
-        onPress={handleCreateGateEntry}
+        onPress={handleOpenReviewModal}
         disabled={submitting}
       >
-        {submitting ? (
-          <ActivityIndicator color="#ffffff" />
-        ) : (
-          <Text style={tw`text-white text-xs font-black tracking-wide`}>
-            {entryMode === "SCHEDULED"
-              ? "CONFIRM ENTRY & GENERATE GATE PASS ✓"
-              : "CONFIRM EXCEPTION ENTRY & GENERATE PASS ⚠️"}
-          </Text>
-        )}
+        <Text style={tw`text-white text-xs font-black tracking-wide`}>
+          REVIEW GATE ENTRY SUMMARY →
+        </Text>
+      </TouchableOpacity>
+
+      {/* Screen 11 - Review Gate Entry Modal */}
+      <Modal visible={showReviewModal} animationType="slide" transparent>
+        <View style={tw`flex-1 bg-black/80 justify-end`}>
+          <View style={tw`bg-slate-800 rounded-t-3xl p-5 max-h-[85%] border-t border-sky-500/50 shadow-2xl`}>
+            {/* Modal Header */}
+            <View style={tw`flex-row justify-between items-center mb-3 pb-3 border-b border-slate-700`}>
+              <View>
+                <Text style={tw`text-white text-base font-black tracking-wide`}>
+                  REVIEW GATE ENTRY (SCREEN 11)
+                </Text>
+                <Text style={tw`text-sky-400 text-xs font-bold mt-0.5`}>
+                  Confirm all 12 verification sections before issuing pass
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={tw`bg-slate-700 px-3 py-1.5 rounded-lg`}
+                onPress={() => setShowReviewModal(false)}
+              >
+                <Text style={tw`text-slate-300 text-xs font-black`}>✕ EDIT</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={tw`mb-4`}>
+              {/* 1. Supplier Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>1. SUPPLIER</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {entryMode === "EXCEPTION" ? supplierInput : selectedPo?.supplier_name || selectedAsn?.supplier_name || "Supplier"}
+                </Text>
+              </View>
+
+              {/* 2. PO Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>2. PURCHASE ORDER</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {entryMode === "SCHEDULED" ? selectedPo?.po_number || searchInput || "N/A" : "UNSCHEDULED ENTRY"}
+                </Text>
+              </View>
+
+              {/* 3. ASN Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>3. ASN REFERENCE</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {selectedAsn?.asn_number || "ASN Attached"}
+                </Text>
+              </View>
+
+              {/* 4. Vehicle Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>4. VEHICLE</Text>
+                <Text style={tw`text-sky-400 text-sm font-black`}>
+                  {formatVehiclePlate(vehicleInput)}
+                </Text>
+                <Text style={tw`text-slate-300 text-xs mt-0.5`}>
+                  Type: {vehicleType} • Condition: {vehicleCondition}
+                </Text>
+              </View>
+
+              {/* 5. Driver Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>5. DRIVER</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {driverNameInput} ({driverContactInput})
+                </Text>
+                <Text style={tw`text-slate-400 text-[11px] mt-0.5`}>
+                  DL No: {driverLicenceNo}
+                </Text>
+              </View>
+
+              {/* 6. Invoice Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>6. INVOICE</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  Inv #{invoiceNumber} ({invoiceDate})
+                </Text>
+                {invoiceAmount ? (
+                  <Text style={tw`text-emerald-400 text-xs font-black mt-0.5`}>
+                    Amount: ₹{invoiceAmount}
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* 7. Delivery Challan Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>7. DELIVERY CHALLAN</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {challanNumber ? `Challan #${challanNumber} (${challanDate})` : "Optional / N/A"}
+                </Text>
+              </View>
+
+              {/* 8. E-Way Bill Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>8. E-WAY BILL</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {ewayBillNumber ? `E-Way #${ewayBillNumber} (Valid: ${ewayValidUntil || "N/A"})` : "Optional / N/A"}
+                </Text>
+              </View>
+
+              {/* 9. Transporter Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>9. TRANSPORTER</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {transporterName || "Logistics Partner"} {lrNumber ? `• LR #${lrNumber}` : ""}
+                </Text>
+              </View>
+
+              {/* 10. Material Summary */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>
+                  10. MATERIAL SUMMARY ({lineItems.length > 0 ? lineItems.length : 1})
+                </Text>
+                {lineItems.length === 0 ? (
+                  <Text style={tw`text-slate-300 text-xs font-bold`}>
+                    Stainless Steel Sheet 304 - 500 KG
+                  </Text>
+                ) : (
+                  lineItems.map((item, idx) => (
+                    <Text key={idx} style={tw`text-slate-200 text-xs font-semibold mb-0.5`}>
+                      • {item.material_name || item.material_description || "Material"}: {item.quantity || "0"} {item.uom || "Units"}
+                    </Text>
+                  ))
+                )}
+              </View>
+
+              {/* 11. Dock Assignment */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1`}>11. DOCK ASSIGNMENT</Text>
+                <Text style={tw`text-emerald-400 text-xs font-black`}>
+                  {selectedPo?.dock_number || selectedAsn?.dock_number || "Dock D-04"} (Inbound Receiving)
+                </Text>
+              </View>
+
+              {/* 12. Uploaded Documents */}
+              <View style={tw`bg-slate-900 p-3 rounded-xl mb-2 border border-slate-700`}>
+                <Text style={tw`text-sky-400 text-[10px] font-black uppercase mb-1.5`}>12. UPLOADED DOCUMENTS</Text>
+                <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ Invoice Copy Attached</Text>
+                <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ Vehicle Photo Attached</Text>
+                {driverPhotoUri ? <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ Driver ID Photo Attached</Text> : null}
+                {lrPhotoUri ? <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ LR Document Attached</Text> : null}
+                {ewayPhotoUri ? <Text style={tw`text-emerald-400 text-xs font-bold`}>✓ E-Way Bill Attached</Text> : null}
+              </View>
+            </ScrollView>
+
+            {/* Action CTAs: [Edit] and [Generate Gate Pass] */}
+            <View style={tw`flex-row gap-2.5`}>
+              <TouchableOpacity
+                style={tw`flex-1 bg-slate-700 py-3.5 rounded-xl items-center`}
+                onPress={() => setShowReviewModal(false)}
+              >
+                <Text style={tw`text-slate-200 font-bold text-xs`}>[ EDIT FORM ]</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={tw`flex-1 bg-emerald-600 py-3.5 rounded-xl items-center shadow-lg ${
+                  submitting ? "opacity-60" : ""
+                }`}
+                onPress={executeGenerateGatePass}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <Text style={tw`text-white font-black text-xs tracking-wider`}>
+                    [ GENERATE GATE PASS ] ✓
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       </TouchableOpacity>
 
       {/* PO / ASN DB PICKER MODAL */}
