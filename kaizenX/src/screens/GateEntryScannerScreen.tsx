@@ -831,8 +831,9 @@ export function GateEntryScannerScreen({
 
       {/* Screen 04 - Scan / Search Delivery */}
       {entryMode === "SCHEDULED" ? (
-        /* SCHEDULED PO / ASN MODE */
-        <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
+        <View>
+          {/* SCHEDULED PO / ASN MODE */}
+          <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
           <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-2.5 uppercase`}>
             SEARCH DELIVERY
           </Text>
