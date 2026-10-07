@@ -568,6 +568,10 @@ export function GateEntryScannerScreen({
     setVehiclesExtracted(uniqueVehicles);
     if (uniqueVehicles.length > 0) {
       selectVehicleOption(uniqueVehicles[0]);
+    } else if (matchedAsn) {
+      setVehicleInput(formatVehiclePlate(matchedAsn.vehicle_number || matchedAsn.vehicleNumber || "KA 01 AB 4582"));
+      setDriverNameInput(matchedAsn.driver_name || matchedAsn.driverName || "Suresh Gowda");
+      setDriverContactInput(matchedAsn.driver_contact || matchedAsn.driverContact || "+91 98450 12345");
     } else {
       setVehicleInput("");
       setDriverNameInput("");

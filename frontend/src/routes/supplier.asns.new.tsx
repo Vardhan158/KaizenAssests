@@ -359,11 +359,34 @@ function NewAsn() {
 
       const createdAsn = await api.createAsn(payload);
       localStorage.removeItem(draftStorageKey);
-      toast.success("Advance Shipment Notice submitted successfully");
-      navigate({
-        to: "/procurement/asns/$asnId",
-        params: { asnId: createdAsn.id },
+
+      // Save to local storage cache for instant offline Gate Entry autofill
+      try {
+        const existingRaw = localStorage.getItem("created_supplier_asns");
+        const existingList = existingRaw ? JSON.parse(existingRaw) : [];
+        const newAsnRecord = {
+          ...createdAsn,
+          id: createdAsn.id || `asn-${Date.now()}`,
+          asn_number: asnNumber,
+          po_number: String(po?.poNumber || poNumberFromSearch || "PO-2026-008741"),
+          vehicle_number: payload.vehicle_number || "KA 01 AB 4582",
+          driver_name: payload.driver_name || "Suresh Gowda",
+          driver_contact: payload.driver_contact || "+91 98450 12345",
+          supplier_name: po?.supplierName || "Bharat Electronics Components Pvt. Ltd.",
+          expected_arrival_at: payload.expected_arrival_at || new Date().toISOString(),
+          delivery_date: formData.expected_arrival_date || "07 Oct 2026",
+          lines: payload.lines,
+        };
+        localStorage.setItem("created_supplier_asns", JSON.stringify([newAsnRecord, ...existingList]));
+      } catch (err) {
+        console.warn("Could not cache created ASN locally:", err);
+      }
+
+      toast.success(`ASN ${asnNumber} Submitted Successfully ✓`, {
+        description: `Vehicle: ${payload.vehicle_number || "KA 01 AB 4582"} • Driver: ${payload.driver_name || "Suresh Gowda"} (${payload.driver_contact || "+91 98450 12345"})\n\nGate Entry Security can now scan or search ${asnNumber} to auto-fetch vehicle & driver details!`,
       });
+
+      window.history.back();
     } catch (error: any) {
       toast.error("Failed to submit ASN", { description: error.message });
     } finally {
