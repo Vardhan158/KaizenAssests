@@ -62,6 +62,9 @@ export function GateEntryScannerScreen({
   const [lrDate, setLrDate] = useState("");
   const [lrPhotoUri, setLrPhotoUri] = useState<string | null>(null);
 
+  // Screen 10 - Dock Allocation
+  const [dockAcknowledged, setDockAcknowledged] = useState(false);
+
   const [supplierInput, setSupplierInput] = useState("");
   const [exceptionReasonInput, setExceptionReasonInput] = useState("");
   const [remarksInput, setRemarksInput] = useState("");
@@ -795,6 +798,78 @@ export function GateEntryScannerScreen({
             </View>
           ) : null}
         </View>
+
+        /* Screen 10 - Dock Allocation Card */
+        {selectedPo || selectedAsn ? (
+          <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-sky-500/30 shadow-xl`}>
+            <View style={tw`flex-row justify-between items-center mb-3 pb-2 border-b border-slate-700`}>
+              <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase`}>
+                PRE-ALLOCATED DOCK ASSIGNMENT
+              </Text>
+              <View style={tw`bg-emerald-500/20 border border-emerald-500/50 px-2.5 py-0.5 rounded-lg`}>
+                <Text style={tw`text-emerald-400 text-[10px] font-black uppercase`}>
+                  DOCK ASSIGNED
+                </Text>
+              </View>
+            </View>
+
+            <View style={tw`bg-slate-900 rounded-xl p-3.5 mb-3 border border-slate-700`}>
+              <View style={tw`flex-row justify-between items-center mb-2`}>
+                <Text style={tw`text-slate-400 text-[10px] font-extrabold tracking-wider uppercase`}>
+                  ASSIGNED DOCK
+                </Text>
+                <Text style={tw`text-sky-400 text-base font-black`}>
+                  {selectedPo?.dock_number || selectedAsn?.dock_number || "Dock D-04"}
+                </Text>
+              </View>
+
+              <View style={tw`h-px bg-slate-800 my-1.5`} />
+
+              <View style={tw`flex-row justify-between items-center my-1`}>
+                <Text style={tw`text-slate-400 text-xs font-semibold`}>Warehouse</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {selectedPo?.warehouse || selectedAsn?.warehouse || "Raw Material Warehouse"}
+                </Text>
+              </View>
+
+              <View style={tw`flex-row justify-between items-center my-1`}>
+                <Text style={tw`text-slate-400 text-xs font-semibold`}>Zone</Text>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {selectedPo?.zone || selectedAsn?.zone || "Inbound Receiving"}
+                </Text>
+              </View>
+
+              <View style={tw`flex-row justify-between items-center my-1`}>
+                <Text style={tw`text-slate-400 text-xs font-semibold`}>Reporting Time</Text>
+                <Text style={tw`text-emerald-400 text-xs font-black`}>
+                  {selectedPo?.expected_time || "10:45 AM"}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={tw`text-slate-400 text-[10px] italic mb-2.5 text-center`}>
+              * Dock allocation is controlled by Warehouse Manager. Security cannot modify this assignment.
+            </Text>
+
+            {/* CTA: [Acknowledge Dock] */}
+            <TouchableOpacity
+              style={tw`py-3 rounded-xl items-center border ${
+                dockAcknowledged
+                  ? "bg-emerald-950/60 border-emerald-500/50"
+                  : "bg-sky-600 border-sky-500"
+              }`}
+              onPress={() => {
+                setDockAcknowledged(true);
+                Alert.alert("Dock Assignment Acknowledged ✓", "Pre-allocated dock assignment locked for gate pass.");
+              }}
+            >
+              <Text style={tw`text-white font-black text-xs tracking-wider`}>
+                {dockAcknowledged ? "✓ DOCK ACKNOWLEDGED" : "[ Acknowledge Dock ]"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
       ) : (
         /* EXCEPTION / UNSCHEDULED MODE */
         <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-amber-500/40`}>
