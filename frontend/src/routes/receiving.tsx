@@ -11,11 +11,13 @@ import {
   AlertTriangle,
   ArrowRight,
   BarChart3,
+  Bell,
   Check,
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
   Clock,
+  Database,
   DoorOpen,
   FileCheck2,
   FileText,
@@ -45,20 +47,22 @@ type ReceivingStatus =
   | "GRN_DRAFT"
   | "GRN_REVIEW"
   | "GRN_POSTED"
-  | "READY_FOR_PUTAWAY";
+  | "READY_FOR_PUTAWAY"
+  | "QC_HOLD";
 
 const statusLabels: Record<ReceivingStatus, string> = {
-  PENDING_RECEIVING: "Pending Receiving",
-  AT_DOCK: "At Dock",
-  UNLOADING: "Unloading",
-  UNLOADING_COMPLETED: "Unloading Completed",
-  QC_PENDING: "QC Pending",
+  PENDING_RECEIVING: "Gate Entry (8)",
+  AT_DOCK: "At Dock (4)",
+  UNLOADING: "Unloading (3)",
+  UNLOADING_COMPLETED: "Unloaded",
+  QC_PENDING: "QC Pending (6)",
   QC_IN_PROGRESS: "QC In Progress",
   QC_COMPLETED: "QC Completed",
   GRN_DRAFT: "GRN Draft",
-  GRN_REVIEW: "GRN Review",
+  GRN_REVIEW: "GRN Pending (5)",
   GRN_POSTED: "GRN Posted",
-  READY_FOR_PUTAWAY: "Ready for Putaway",
+  READY_FOR_PUTAWAY: "Ready for Putaway (9)",
+  QC_HOLD: "QC Hold (2)",
 };
 
 interface InboundRecord {
@@ -100,21 +104,21 @@ const INITIAL_RECORDS: InboundRecord[] = [
     vehicleNo: "KA 01 AB 4582",
     supplierName: "Bharat Electronics Components Pvt. Ltd.",
     supplierCode: "SUP-IND-1042",
-    poNo: "PO-8741",
+    poNo: "PO-2026-008741",
     asnNo: "ASN-2026-004582",
     dockNo: "D-04",
     warehouseName: "Raw Material Warehouse",
     zoneName: "Inbound Receiving Bay",
     status: "AT_DOCK",
-    entryTime: "07 Oct 2026 • 10:42 AM",
-    securityOfficer: "Rajesh Kumar (SEC-8042)",
+    entryTime: "07 Oct 2026 • 09:52 AM",
+    securityOfficer: "Rajesh Kumar (Security)",
     assignedOperator: "Ramesh Kumar (Operator)",
     assignedInspector: "Priya Sharma (QC Inspector)",
     expectedQty: 500,
-    receivedQty: 500,
-    damagedQty: 0,
-    acceptedQty: 480,
-    rejectedQty: 20,
+    receivedQty: 495,
+    damagedQty: 5,
+    acceptedQty: 490,
+    rejectedQty: 5,
     invoiceNo: "INV-2026-9901",
     invoiceDate: "2026-10-07",
     invoiceAmount: "₹ 2,45,000.00",
@@ -138,7 +142,7 @@ const INITIAL_RECORDS: InboundRecord[] = [
     zoneName: "Heavy Metals Dock",
     status: "UNLOADING",
     entryTime: "07 Oct 2026 • 11:15 AM",
-    securityOfficer: "Rajesh Kumar (SEC-8042)",
+    securityOfficer: "Rajesh Kumar (Security)",
     assignedOperator: "Amit Joshi (Operator)",
     assignedInspector: "Neha Kulkarni (QC Inspector)",
     expectedQty: 1000,
@@ -169,7 +173,7 @@ const INITIAL_RECORDS: InboundRecord[] = [
     zoneName: "Components Receiving",
     status: "QC_PENDING",
     entryTime: "07 Oct 2026 • 09:30 AM",
-    securityOfficer: "Rajesh Kumar (SEC-8042)",
+    securityOfficer: "Rajesh Kumar (Security)",
     assignedOperator: "Ramesh Kumar (Operator)",
     assignedInspector: "Priya Sharma (QC Inspector)",
     expectedQty: 250,
@@ -193,9 +197,10 @@ export function ReceivingControlCenter() {
   const [records, setRecords] = useState<InboundRecord[]>(INITIAL_RECORDS);
   const [selectedRecord, setSelectedRecord] = useState<InboundRecord | null>(INITIAL_RECORDS[0]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState<string>("ALL");
   const [activeTab, setActiveTab] = useState("overview");
 
-  // Operators & Inspectors for Assignment (Section 9)
+  // Operators & Inspectors
   const [assignedOp, setAssignedOp] = useState("Ramesh Kumar (Warehouse Operator)");
   const [assignedQc, setAssignedQc] = useState("Priya Sharma (Incoming Quality Inspector)");
 
@@ -204,8 +209,8 @@ export function ReceivingControlCenter() {
     if (selectedRecord) {
       setSelectedRecord({ ...selectedRecord, assignedOperator: opName });
     }
-    toast.success(`Operator assigned: ${opName}`, {
-      description: "Mobile notification dispatched to assigned Warehouse Operator.",
+    toast.success(`Operator Notification Sent: ${opName}`, {
+      description: "New Receiving Assignment: Vehicle KA 01 AB 4582 at Dock D-04",
     });
   };
 
@@ -214,12 +219,13 @@ export function ReceivingControlCenter() {
     if (selectedRecord) {
       setSelectedRecord({ ...selectedRecord, assignedInspector: qcName });
     }
-    toast.success(`Quality Inspector assigned: ${qcName}`, {
-      description: "Mobile notification dispatched to assigned Quality Inspector.",
+    toast.success(`Quality Inspector Notification Sent: ${qcName}`, {
+      description: "Material Ready for Inspection: RCV-BLR-0048 at Dock D-04",
     });
   };
 
   const filteredRecords = records.filter((r) => {
+    if (stageFilter !== "ALL" && r.status !== stageFilter) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -233,67 +239,55 @@ export function ReceivingControlCenter() {
 
   return (
     <AppShell
-      title="Warehouse Manager Inbound Receiving Control Center"
-      subtitle="Section 6–9: Dock control, operator assignment, receiving inspection and GRN orchestration"
+      title="Warehouse Manager Receiving Monitor"
+      subtitle="Section 41–45: Real-time receiving monitor, timestamped timeline, role notifications & traceability matrix"
     >
       <div className="space-y-6">
-        {/* Section 6 - KPI Dashboard Stat Cards */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <Card className="rounded-2xl border-primary/20 p-4 bg-card shadow-soft">
-            <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Truck className="size-5" />
-            </div>
-            <p className="text-2xl font-black">8</p>
-            <p className="text-xs font-semibold text-muted-foreground mt-1">Vehicles Inside</p>
-          </Card>
+        {/* Section 41 - Real-Time Receiving Stage Monitor */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xs font-black uppercase tracking-widest text-primary">
+              RECEIVING STAGE MONITOR (SECTION 41)
+            </h2>
+            {stageFilter !== "ALL" && (
+              <Button size="sm" variant="ghost" onClick={() => setStageFilter("ALL")} className="h-7 text-xs text-primary font-bold">
+                Clear Filter (Showing All)
+              </Button>
+            )}
+          </div>
 
-          <Card className="rounded-2xl border-amber-500/20 p-4 bg-card shadow-soft">
-            <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
-              <Clock className="size-5" />
-            </div>
-            <p className="text-2xl font-black text-amber-600">2</p>
-            <p className="text-xs font-semibold text-muted-foreground mt-1">Waiting for Dock</p>
-          </Card>
-
-          <Card className="rounded-2xl border-sky-500/20 p-4 bg-card shadow-soft">
-            <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600">
-              <PackageCheck className="size-5" />
-            </div>
-            <p className="text-2xl font-black text-sky-600">3</p>
-            <p className="text-xs font-semibold text-muted-foreground mt-1">Unloading</p>
-          </Card>
-
-          <Card className="rounded-2xl border-cyan-500/20 p-4 bg-card shadow-soft">
-            <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-600">
-              <ShieldCheck className="size-5" />
-            </div>
-            <p className="text-2xl font-black text-cyan-600">4</p>
-            <p className="text-xs font-semibold text-muted-foreground mt-1">QC Pending</p>
-          </Card>
-
-          <Card className="rounded-2xl border-emerald-500/20 p-4 bg-card shadow-soft">
-            <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
-              <FileCheck2 className="size-5" />
-            </div>
-            <p className="text-2xl font-black text-emerald-600">5</p>
-            <p className="text-xs font-semibold text-muted-foreground mt-1">GRN Pending</p>
-          </Card>
-
-          <Card className="rounded-2xl border-red-500/20 p-4 bg-card shadow-soft">
-            <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-red-500/10 text-red-600">
-              <AlertTriangle className="size-5" />
-            </div>
-            <p className="text-2xl font-black text-red-600">2</p>
-            <p className="text-xs font-semibold text-muted-foreground mt-1">Receiving Exceptions</p>
-          </Card>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+            {[
+              { label: "GATE ENTRY", count: 8, filter: "PENDING_RECEIVING", color: "text-slate-700 bg-slate-500/10 border-slate-500/30" },
+              { label: "AT DOCK", count: 4, filter: "AT_DOCK", color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/30" },
+              { label: "UNLOADING", count: 3, filter: "UNLOADING", color: "text-sky-600 bg-sky-500/10 border-sky-500/30" },
+              { label: "QC PENDING", count: 6, filter: "QC_PENDING", color: "text-amber-600 bg-amber-500/10 border-amber-500/30" },
+              { label: "QC HOLD", count: 2, filter: "QC_HOLD", color: "text-red-600 bg-red-500/10 border-red-500/30" },
+              { label: "GRN PENDING", count: 5, filter: "GRN_REVIEW", color: "text-purple-600 bg-purple-500/10 border-purple-500/30" },
+              { label: "READY FOR PUTAWAY", count: 9, filter: "READY_FOR_PUTAWAY", color: "text-emerald-700 bg-emerald-500/20 border-emerald-500/50" },
+            ].map((st) => (
+              <Card
+                key={st.label}
+                className={cn(
+                  "rounded-2xl p-3.5 border transition-all cursor-pointer hover:scale-[1.02]",
+                  st.color,
+                  stageFilter === st.filter && "ring-2 ring-primary"
+                )}
+                onClick={() => setStageFilter(st.filter)}
+              >
+                <p className="text-2xl font-black">{st.count}</p>
+                <p className="text-[10px] font-black uppercase tracking-wider mt-1">{st.label}</p>
+              </Card>
+            ))}
+          </div>
         </div>
 
-        {/* Section 6 - Main Table */}
+        {/* Section 41 & 43 - Main Table */}
         <Card className="rounded-2xl border-border/50 shadow-soft">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
-              <CardTitle className="text-base font-bold">INBOUND RECEIVING TABLE</CardTitle>
-              <CardDescription>Live inbound vehicles, assigned docks, and receiving status</CardDescription>
+              <CardTitle className="text-base font-bold">INBOUND RECEIVING TRANSACTIONS</CardTitle>
+              <CardDescription>Live inbound vehicles, assigned docks, and stage progression</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative w-64">
@@ -355,7 +349,7 @@ export function ReceivingControlCenter() {
           </CardContent>
         </Card>
 
-        {/* Section 7 - Receiving Detail Page */}
+        {/* Detail Page */}
         {selectedRecord && (
           <Card className="rounded-2xl border-primary/30 p-6 shadow-xl bg-card">
             {/* Header */}
@@ -386,21 +380,18 @@ export function ReceivingControlCenter() {
               </div>
             </div>
 
-            {/* Section 7 - Tabs */}
+            {/* Tabs */}
             <Tabs defaultValue="overview" value={activeTab} onValueChange={setActiveTab} className="mt-4">
               <TabsList className="bg-muted/50 p-1 rounded-xl flex-wrap">
                 <TabsTrigger value="overview" className="rounded-lg text-xs font-bold">OVERVIEW</TabsTrigger>
-                <TabsTrigger value="materials" className="rounded-lg text-xs font-bold">MATERIALS</TabsTrigger>
-                <TabsTrigger value="documents" className="rounded-lg text-xs font-bold">DOCUMENTS</TabsTrigger>
-                <TabsTrigger value="quality" className="rounded-lg text-xs font-bold">QUALITY</TabsTrigger>
-                <TabsTrigger value="grn" className="rounded-lg text-xs font-bold">GRN</TabsTrigger>
-                <TabsTrigger value="activity" className="rounded-lg text-xs font-bold">ACTIVITY LOG</TabsTrigger>
+                <TabsTrigger value="timeline" className="rounded-lg text-xs font-bold">TIMELINE (SEC 42)</TabsTrigger>
+                <TabsTrigger value="matrix" className="rounded-lg text-xs font-bold">PERMISSIONS (SEC 44)</TabsTrigger>
+                <TabsTrigger value="data" className="rounded-lg text-xs font-bold font-mono">TRACEABILITY (SEC 45)</TabsTrigger>
               </TabsList>
 
-              {/* Section 8 - Overview Tab */}
+              {/* Overview Tab */}
               <TabsContent value="overview" className="mt-4 space-y-4">
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {/* Gate Information */}
                   <Card className="rounded-xl p-4 bg-muted/20 border-border/60">
                     <h3 className="text-xs font-black uppercase text-primary mb-2">Gate Information</h3>
                     <div className="space-y-1 text-xs">
@@ -411,17 +402,6 @@ export function ReceivingControlCenter() {
                     </div>
                   </Card>
 
-                  {/* Supplier Information */}
-                  <Card className="rounded-xl p-4 bg-muted/20 border-border/60">
-                    <h3 className="text-xs font-black uppercase text-primary mb-2">Supplier Information</h3>
-                    <div className="space-y-1 text-xs">
-                      <p className="flex justify-between"><span className="text-muted-foreground">Supplier Name:</span> <span className="font-bold">{selectedRecord.supplierName}</span></p>
-                      <p className="flex justify-between"><span className="text-muted-foreground">Supplier Code:</span> <span className="font-bold font-mono">{selectedRecord.supplierCode}</span></p>
-                      <p className="flex justify-between"><span className="text-muted-foreground">Contact:</span> <span className="font-bold">+91 98765 43210</span></p>
-                    </div>
-                  </Card>
-
-                  {/* Procurement */}
                   <Card className="rounded-xl p-4 bg-muted/20 border-border/60">
                     <h3 className="text-xs font-black uppercase text-primary mb-2">Procurement Details</h3>
                     <div className="space-y-1 text-xs">
@@ -431,28 +411,7 @@ export function ReceivingControlCenter() {
                     </div>
                   </Card>
 
-                  {/* Transportation */}
-                  <Card className="rounded-xl p-4 bg-muted/20 border-border/60">
-                    <h3 className="text-xs font-black uppercase text-primary mb-2">Transportation</h3>
-                    <div className="space-y-1 text-xs">
-                      <p className="flex justify-between"><span className="text-muted-foreground">Vehicle:</span> <span className="font-bold text-sky-600">{selectedRecord.vehicleNo}</span></p>
-                      <p className="flex justify-between"><span className="text-muted-foreground">Driver:</span> <span className="font-bold">{selectedRecord.driverName}</span></p>
-                      <p className="flex justify-between"><span className="text-muted-foreground">Transporter:</span> <span className="font-bold">{selectedRecord.transporterName}</span></p>
-                      <p className="flex justify-between"><span className="text-muted-foreground">LR Number:</span> <span className="font-bold font-mono">{selectedRecord.lrNo} ({selectedRecord.lrDate})</span></p>
-                    </div>
-                  </Card>
-
-                  {/* Documents */}
-                  <Card className="rounded-xl p-4 bg-muted/20 border-border/60">
-                    <h3 className="text-xs font-black uppercase text-primary mb-2">Attached Documents</h3>
-                    <div className="space-y-1 text-xs">
-                      <p className="flex justify-between"><span className="text-muted-foreground">Invoice:</span> <span className="font-bold">{selectedRecord.invoiceNo} ({selectedRecord.invoiceAmount})</span></p>
-                      <p className="flex justify-between"><span className="text-muted-foreground">E-Way Bill:</span> <span className="font-bold">{selectedRecord.ewayNo} (Valid: {selectedRecord.ewayValidUntil})</span></p>
-                      <p className="flex justify-between"><span className="text-muted-foreground">Challan:</span> <span className="font-bold">DC-2026-4412</span></p>
-                    </div>
-                  </Card>
-
-                  {/* Section 9 - Assignments */}
+                  {/* Assignments */}
                   <Card className="rounded-xl p-4 bg-primary/5 border-primary/30">
                     <h3 className="text-xs font-black uppercase text-primary mb-2 flex items-center gap-1.5">
                       <UserCheck className="size-4" /> Receiving Assignments
@@ -488,81 +447,91 @@ export function ReceivingControlCenter() {
                 </div>
               </TabsContent>
 
-              {/* Materials Tab */}
-              <TabsContent value="materials" className="mt-4">
-                <Card className="rounded-xl p-4 bg-card border-border/60">
-                  <h3 className="text-xs font-black uppercase text-primary mb-3">Line Items Breakdown</h3>
+              {/* Section 42 - Timeline Tab */}
+              <TabsContent value="timeline" className="mt-4">
+                <Card className="rounded-xl p-5 bg-card border-border/60">
+                  <h3 className="text-xs font-black uppercase text-primary mb-4">
+                    RECEIVING TIMELINE (SECTION 42)
+                  </h3>
+                  <div className="space-y-3 text-xs">
+                    {[
+                      { time: "09:52 AM", actor: "Security – Rajesh", event: "Gate Entry Completed (GP-BLR-20261007-0048)" },
+                      { time: "10:01 AM", actor: "Warehouse Manager – Arun", event: "Dock D-04 Assigned & Operators Notified" },
+                      { time: "10:58 AM", actor: "Operator – Ramesh", event: "Vehicle Arrived at Dock D-04" },
+                      { time: "11:02 AM", actor: "Operator – Ramesh", event: "Unloading Started" },
+                      { time: "11:37 AM", actor: "Operator – Ramesh", event: "Unloading Completed (495 KG Received)" },
+                      { time: "11:42 AM", actor: "Inspector – Priya", event: "QC Inspection Started" },
+                      { time: "12:06 PM", actor: "Inspector – Priya", event: "QC Completed (Partially Accepted: 490 KG Accepted / 5 KG Rejected)" },
+                      { time: "12:18 PM", actor: "Store Manager – Suresh", event: "GRN Posted (GRN-BLR-2026-000184)" },
+                      { time: "12:21 PM", actor: "System", event: "Material Handling Unit QR Labels Generated (HU-BLR-20261007-00845)" },
+                    ].map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-3 border-b pb-2">
+                        <div className="grid size-6 place-items-center rounded-full bg-primary/10 text-primary text-[10px] font-black">
+                          {idx + 1}
+                        </div>
+                        <span className="font-mono text-xs font-bold text-sky-600 w-20">{item.time}</span>
+                        <div className="flex-1">
+                          <p className="font-bold text-foreground">{item.event}</p>
+                          <p className="text-[10px] text-muted-foreground">{item.actor}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </TabsContent>
+
+              {/* Section 44 - Permissions Matrix Tab */}
+              <TabsContent value="matrix" className="mt-4">
+                <Card className="rounded-xl p-5 bg-card border-border/60">
+                  <h3 className="text-xs font-black uppercase text-primary mb-3">
+                    PERMISSION MATRIX (SECTION 44)
+                  </h3>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="border-b bg-muted/40 font-bold uppercase text-muted-foreground">
+                    <table className="w-full text-left text-xs border">
+                      <thead className="bg-muted font-bold uppercase text-muted-foreground border-b">
                         <tr>
-                          <th className="px-3 py-2">Material Code</th>
-                          <th className="px-3 py-2">Description</th>
-                          <th className="px-3 py-2 text-right">Expected Qty</th>
-                          <th className="px-3 py-2 text-right">Received Qty</th>
-                          <th className="px-3 py-2 text-right">Damaged Qty</th>
+                          <th className="p-2.5">Function</th>
+                          <th className="p-2.5 text-center">Warehouse Manager</th>
+                          <th className="p-2.5 text-center">Operator</th>
+                          <th className="p-2.5 text-center">QC</th>
+                          <th className="p-2.5 text-center">Store Manager</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border/60">
-                        <tr>
-                          <td className="px-3 py-2 font-mono font-bold text-primary">MAT-SS-304-001</td>
-                          <td className="px-3 py-2 font-medium">Stainless Steel Sheet 304 Grade 2mm</td>
-                          <td className="px-3 py-2 text-right font-bold">{selectedRecord.expectedQty} KG</td>
-                          <td className="px-3 py-2 text-right font-bold text-emerald-600">{selectedRecord.receivedQty} KG</td>
-                          <td className="px-3 py-2 text-right font-bold text-amber-600">{selectedRecord.damagedQty} KG</td>
-                        </tr>
+                      <tbody className="divide-y font-semibold">
+                        <tr><td className="p-2.5">View Gate Pass / PO / ASN</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-emerald-600 font-black">✓</td></tr>
+                        <tr><td className="p-2.5">Assign Operator / QC Inspector</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-muted-foreground">—</td></tr>
+                        <tr><td className="p-2.5">Confirm Dock Arrival</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-muted-foreground">—</td></tr>
+                        <tr><td className="p-2.5">Start Unloading & Count Material</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-muted-foreground">—</td></tr>
+                        <tr><td className="p-2.5">Perform QC & Accept/Reject</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-muted-foreground">—</td></tr>
+                        <tr><td className="p-2.5">Create GRN Draft & Post GRN</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-emerald-600 font-black">✓</td></tr>
+                        <tr><td className="p-2.5">Generate Material / HU QR</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-amber-600">Limited</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-emerald-600 font-black">✓</td></tr>
+                        <tr><td className="p-2.5">Approve Exceptions (Over-receipt)</td><td className="text-center text-emerald-600 font-black">✓</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-muted-foreground">—</td><td className="text-center text-sky-600">Configurable</td></tr>
                       </tbody>
                     </table>
                   </div>
                 </Card>
               </TabsContent>
 
-              {/* Quality Tab */}
-              <TabsContent value="quality" className="mt-4">
-                <Card className="rounded-xl p-4 bg-card border-border/60 space-y-3">
-                  <h3 className="text-xs font-black uppercase text-primary">Quality Inspection Decision</h3>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 text-emerald-700 dark:text-emerald-400">
-                      <p className="text-[10px] uppercase font-bold">Accepted Quantity</p>
-                      <p className="text-xl font-black mt-1">{selectedRecord.acceptedQty} KG</p>
-                    </div>
-                    <div className="rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-red-700 dark:text-red-400">
-                      <p className="text-[10px] uppercase font-bold">Rejected Quantity</p>
-                      <p className="text-xl font-black mt-1">{selectedRecord.rejectedQty} KG</p>
-                    </div>
-                    <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-amber-700 dark:text-amber-400">
-                      <p className="text-[10px] uppercase font-bold">Defect Reason</p>
-                      <p className="text-xs font-bold mt-1">Surface Scratch / Dent</p>
-                    </div>
-                  </div>
-                </Card>
-              </TabsContent>
-
-              {/* GRN Tab */}
-              <TabsContent value="grn" className="mt-4">
-                <Card className="rounded-xl p-4 bg-card border-border/60 space-y-3">
-                  <h3 className="text-xs font-black uppercase text-primary">GRN & Handling Unit QR Labels</h3>
-                  <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/30 p-4 rounded-xl border">
-                    <div>
-                      <p className="text-sm font-bold font-mono text-primary">GRN-2026-80942</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Handling Unit Pallets: HU-PALLET-2026-901-01 / 02</p>
-                    </div>
-                    <Button onClick={() => toast.success("GRN Certificate & QR Labels Printed Successfully")} className="rounded-xl shadow-glow">
-                      <QrCode className="mr-2 size-4" /> Print GRN & HU QR Labels
-                    </Button>
-                  </div>
-                </Card>
-              </TabsContent>
-
-              {/* Activity Tab */}
-              <TabsContent value="activity" className="mt-4">
-                <Card className="rounded-xl p-4 bg-card border-border/60">
-                  <h3 className="text-xs font-black uppercase text-primary mb-3">Timestamped Audit Log</h3>
-                  <div className="space-y-2 text-xs">
-                    <p className="flex justify-between border-b pb-1"><span>10:42 AM · Security Officer</span> <span className="font-bold">Gate Entry Completed (GP-BLR-0048)</span></p>
-                    <p className="flex justify-between border-b pb-1"><span>10:45 AM · Warehouse Manager</span> <span className="font-bold">Dock D-04 Confirmed & Operator Assigned</span></p>
-                    <p className="flex justify-between border-b pb-1"><span>11:10 AM · Operator Ramesh</span> <span className="font-bold">Unloading Completed (500 KG Received)</span></p>
-                    <p className="flex justify-between"><span>11:30 AM · Quality Inspector Priya</span> <span className="font-bold">QC Decision Submitted (480 KG Accepted / 20 KG Rejected)</span></p>
+              {/* Section 45 - Traceability Tab */}
+              <TabsContent value="data" className="mt-4">
+                <Card className="rounded-xl p-5 bg-card border-border/60">
+                  <h3 className="text-xs font-black uppercase text-primary mb-3">
+                    CORE DATA RELATIONSHIP & TRACEABILITY (SECTION 45)
+                  </h3>
+                  <div className="bg-muted/30 p-4 rounded-xl border border-primary/20 text-center font-mono text-xs space-y-1 font-bold">
+                    <p className="text-primary">PurchaseOrder ➔ PurchaseOrderItem</p>
+                    <p>↓</p>
+                    <p>ASN ➔ ASNItem</p>
+                    <p>↓</p>
+                    <p>GateEntry ➔ GatePass</p>
+                    <p>↓</p>
+                    <p>DockReceiving ➔ ReceivingItem</p>
+                    <p>↓</p>
+                    <p className="text-amber-600">QualityInspection</p>
+                    <p>↓</p>
+                    <p className="text-emerald-600 font-black">GRN ➔ GRNItem</p>
+                    <p>↓</p>
+                    <p>MaterialLot ➔ HandlingUnit ➔ QR / Barcode</p>
                   </div>
                 </Card>
               </TabsContent>
