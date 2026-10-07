@@ -23,10 +23,14 @@ interface GateEntryScannerScreenProps {
 }
 
 export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScannerScreenProps) {
+  const [entryMode, setEntryMode] = useState<"SCHEDULED" | "EXCEPTION">("SCHEDULED");
+
   const [searchInput, setSearchInput] = useState("PO-2026-0001");
   const [vehicleInput, setVehicleInput] = useState("");
   const [driverNameInput, setDriverNameInput] = useState("");
   const [driverContactInput, setDriverContactInput] = useState("");
+  const [supplierInput, setSupplierInput] = useState("");
+  const [exceptionReasonInput, setExceptionReasonInput] = useState("Unscheduled Delivery / Emergency Replenishment");
   const [remarksInput, setRemarksInput] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -101,11 +105,13 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       if (response.assets && response.assets.length > 0) {
         const photo = response.assets[0];
         setCapturedImageUri(photo.uri || null);
-        if (searchInput.trim()) {
-          selectAndAutofillPo(searchInput);
-        } else if (poList.length > 0) {
-          const firstPo = poList[0]?.po_number || poList[0]?.poNumber;
-          if (firstPo) selectAndAutofillPo(firstPo);
+        if (entryMode === "SCHEDULED") {
+          if (searchInput.trim()) {
+            selectAndAutofillPo(searchInput);
+          } else if (poList.length > 0) {
+            const firstPo = poList[0]?.po_number || poList[0]?.poNumber;
+            if (firstPo) selectAndAutofillPo(firstPo);
+          }
         }
       }
     } catch (e: any) {
@@ -152,6 +158,7 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       setVehicleInput("");
       setDriverNameInput("");
       setDriverContactInput("");
+      setSupplierInput("");
       return;
     }
 
@@ -159,14 +166,12 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
     const lookupRaw = parsed.reference.toUpperCase().trim();
     const targetPoNorm = normalizePo(queryStr);
 
-    // 1. Find PO match (exact or normalized)
     const matchedPo = availablePos.find((candidate: any) => {
       const p1 = String(candidate.po_number || candidate.poNumber || "").toUpperCase();
       const p2 = normalizePo(p1);
       return p1 === lookupRaw || (p2 && p2 === targetPoNorm);
     });
 
-    // 2. Find ASN match (exact or normalized)
     const matchingAsns = availableAsns.filter((candidate: any) => {
       const a1 = String(candidate.asn_number || candidate.asnNumber || "").toUpperCase();
       const a2 = normalizePo(candidate.po_number || candidate.poNumber);
@@ -176,7 +181,6 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
     const matchedAsn = matchingAsns[0];
 
     if (!matchedPo && matchingAsns.length === 0) {
-      // Clear all fields and show NOT FOUND
       setSelectedPo(null);
       setSelectedAsn(null);
       setLineItems([]);
@@ -184,6 +188,7 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       setVehicleInput("");
       setDriverNameInput("");
       setDriverContactInput("");
+      setSupplierInput("");
       setNotFoundError(`NOT FOUND — PO / ASN '${lookupRaw}' does not exist in backend database.`);
       return;
     }
@@ -200,7 +205,6 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       matchedAsn?.supplierName ||
       "Supplier";
 
-    // Extract items list
     let itemsList: any[] = [];
     if (resolvedPo.items && Array.isArray(resolvedPo.items) && resolvedPo.items.length > 0) {
       itemsList = resolvedPo.items;
@@ -208,7 +212,6 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       itemsList = matchedAsn.lines || matchedAsn.items || [];
     }
 
-    // Extract vehicles list
     const extractedVehicles: any[] = [];
 
     matchingAsns.forEach((asn: any) => {
@@ -231,20 +234,15 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
             item.driver_phone ||
             item.driverPhone ||
             item.phone ||
-            asn.driver_contact ||
-            asn.driverContact ||
-            asn.driver_phone ||
-            asn.driverPhone ||
-            asn.phone ||
             "";
 
           if (rawVeh) {
             extractedVehicles.push({
               index: extractedVehicles.length,
               vehicleNumber: formatVehiclePlate(rawVeh),
-              driverName: item.driver_name || item.driverName || asn.driver_name || asn.driverName || "",
+              driverName: item.driver_name || item.driverName || "",
               driverContact: driverPhone,
-              transporter: item.transporter || asn.transporter || "Logistics Partner",
+              transporter: item.transporter || "Logistics Partner",
             });
           }
         });
@@ -252,43 +250,26 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
 
       const topVeh = String(asn.vehicle_number || asn.vehicleNumber || "");
       if (topVeh && !logList) {
-        const topDriverPhone =
-          asn.driver_contact ||
-          asn.driverContact ||
-          asn.driver_phone ||
-          asn.driverPhone ||
-          asn.phone ||
-          "";
-
         extractedVehicles.push({
           index: extractedVehicles.length,
           vehicleNumber: formatVehiclePlate(topVeh),
           driverName: asn.driver_name || asn.driverName || "",
-          driverContact: topDriverPhone,
+          driverContact: asn.driver_contact || asn.driverContact || "",
           transporter: asn.transporter || "Logistics Partner",
         });
       }
     });
 
     if (extractedVehicles.length === 0 && (resolvedPo.vehicle_number || resolvedPo.vehicleNumber)) {
-      const poDriverPhone =
-        resolvedPo.driver_contact ||
-        resolvedPo.driverContact ||
-        resolvedPo.driver_phone ||
-        resolvedPo.driverPhone ||
-        resolvedPo.phone ||
-        "";
-
       extractedVehicles.push({
         index: 0,
         vehicleNumber: formatVehiclePlate(resolvedPo.vehicle_number || resolvedPo.vehicleNumber),
         driverName: resolvedPo.driver_name || resolvedPo.driverName || "",
-        driverContact: poDriverPhone,
+        driverContact: resolvedPo.driver_contact || resolvedPo.driverContact || "",
         transporter: "Logistics Partner",
       });
     }
 
-    // Deduplicate vehicles by plate number
     const uniqueVehicles = extractedVehicles
       .filter(
         (v, index, self) =>
@@ -302,6 +283,7 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
 
     setSelectedPo(resolvedPo);
     if (matchedAsn) setSelectedAsn(matchedAsn);
+    setSupplierInput(supplierName);
 
     setVehiclesExtracted(uniqueVehicles);
     if (uniqueVehicles.length > 0) {
@@ -325,35 +307,59 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
   };
 
   const handleCreateGateEntry = async () => {
-    const poNum = selectedPo?.po_number || selectedPo?.poNumber || searchInput.trim();
-    const suppName = selectedPo?.supplier_name || selectedPo?.supplierName || selectedAsn?.supplier_name || "";
-
-    if (!poNum) {
-      Alert.alert("Required", "Please enter or select a valid PO or ASN number.");
-      return;
-    }
-
     if (!vehicleInput.trim()) {
-      Alert.alert("Required", "Please enter a valid truck/vehicle number plate.");
+      Alert.alert("Required", "Please enter a valid truck/vehicle plate number.");
       return;
     }
 
     setSubmitting(true);
 
     try {
-      const result = await mobileApi.createGateEntry({
-        po_number: poNum,
-        vehicle_number: formatVehiclePlate(vehicleInput),
-        driver_name: driverNameInput.trim(),
-        driver_contact: driverContactInput.trim(),
-        supplier_name: suppName,
-        asn_reference: selectedAsn?.asn_number || selectedAsn?.asnNumber || "",
-        line_items: lineItems,
-        remarks: remarksInput.trim(),
-      });
+      if (entryMode === "EXCEPTION") {
+        if (!supplierInput.trim()) {
+          Alert.alert("Required", "Please enter the Supplier Name for exception entry.");
+          setSubmitting(false);
+          return;
+        }
 
-      setSubmitting(false);
-      onSuccess(result);
+        const result = await mobileApi.createUnscheduledEntry({
+          supplier_name: supplierInput.trim(),
+          vehicle_number: formatVehiclePlate(vehicleInput),
+          driver_name: driverNameInput.trim() || "Unregistered Driver",
+          driver_contact: driverContactInput.trim() || "",
+          reason: exceptionReasonInput.trim(),
+          remarks: remarksInput.trim(),
+        });
+
+        setSubmitting(false);
+        onSuccess(result);
+      } else {
+        const poNum = selectedPo?.po_number || selectedPo?.poNumber || searchInput.trim();
+        const suppName = selectedPo?.supplier_name || selectedPo?.supplierName || supplierInput.trim() || "Supplier";
+
+        if (!poNum) {
+          Alert.alert("Required", "Please enter or select a valid PO or ASN number.");
+          setSubmitting(false);
+          return;
+        }
+
+        const dockNo = selectedPo?.dock_number || selectedAsn?.dock_number || "DOCK-01";
+
+        const result = await mobileApi.createGateEntry({
+          po_number: poNum,
+          vehicle_number: formatVehiclePlate(vehicleInput),
+          driver_name: driverNameInput.trim(),
+          driver_contact: driverContactInput.trim(),
+          supplier_name: suppName,
+          asn_reference: selectedAsn?.asn_number || selectedAsn?.asnNumber || "",
+          line_items: lineItems,
+          dock_number: dockNo,
+          remarks: remarksInput.trim(),
+        });
+
+        setSubmitting(false);
+        onSuccess(result);
+      }
     } catch (e: any) {
       setSubmitting(false);
       Alert.alert("Submission Failed", e?.message || "Could not generate gate pass.");
@@ -365,11 +371,38 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       {/* Top Header */}
       <View style={styles.navHeader}>
         <View>
-          <Text style={styles.navTitle}>GATE SECURITY SCANNER</Text>
-          <Text style={styles.navSub}>KaizenX Mobile • Active Duty</Text>
+          <Text style={styles.navTitle}>GATE ENTRY SCANNER</Text>
+          <Text style={styles.navSub}>Security Verification Desk</Text>
         </View>
         <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
-          <Text style={styles.logoutBtnText}>Exit</Text>
+          <Text style={styles.logoutBtnText}>Exit Session</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Entry Mode Switcher (Scheduled PO vs. Exception Entry) */}
+      <View style={styles.modeToggleRow}>
+        <TouchableOpacity
+          style={[styles.modeTab, entryMode === "SCHEDULED" && styles.modeTabActive]}
+          onPress={() => {
+            setEntryMode("SCHEDULED");
+            setNotFoundError(null);
+          }}
+        >
+          <Text style={[styles.modeTabText, entryMode === "SCHEDULED" && styles.modeTabTextActive]}>
+            ✓ SCHEDULED PO / ASN
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.modeTab, entryMode === "EXCEPTION" && styles.modeTabActiveAlert]}
+          onPress={() => {
+            setEntryMode("EXCEPTION");
+            setNotFoundError(null);
+          }}
+        >
+          <Text style={[styles.modeTabText, entryMode === "EXCEPTION" && styles.modeTabTextActiveAlert]}>
+            ⚠️ EXCEPTION / UNSCHEDULED
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -378,75 +411,127 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
         style={styles.openCameraBtn}
         onPress={handleLaunchNativeCamera}
       >
-        <Text style={styles.openCameraBtnText}>📷 OPEN CAMERA SCANNER</Text>
-        <Text style={styles.openCameraSub}>Launches phone camera to scan truck pass / barcode</Text>
+        <Text style={styles.openCameraBtnText}>📷 OPEN CAMERA BARCODE SCANNER</Text>
+        <Text style={styles.openCameraSub}>Scan PO QR Code, ASN Barcode, or Vehicle Plate</Text>
       </TouchableOpacity>
 
       {/* Display Captured Photo Preview */}
       {capturedImageUri && (
         <View style={styles.capturedPhotoBox}>
-          <Text style={styles.photoBoxTitle}>📷 CAPTURED SCAN PHOTO</Text>
+          <Text style={styles.photoBoxTitle}>📷 CAPTURED VEHICLE / PASS PHOTO</Text>
           <Image source={{ uri: capturedImageUri }} style={styles.photoPreview} />
         </View>
       )}
 
-      {/* Section 1: Scan / Select PO / ASN */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>1. PURCHASE ORDER / ASN INPUT</Text>
-        <View style={styles.searchRow}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Type PO / ASN (e.g. PO-2026-0001)"
-            placeholderTextColor="#64748b"
-            value={searchInput}
-            onChangeText={(text) => {
-              setSearchInput(text);
-              if (text.trim().length >= 3) {
-                selectAndAutofillPo(text);
-              }
-            }}
-            onSubmitEditing={() => selectAndAutofillPo(searchInput)}
-            autoCapitalize="characters"
-          />
-
-          <TouchableOpacity
-            style={styles.dbListBtn}
-            onPress={() => setShowPoPickerModal(true)}
-          >
-            <Text style={styles.dbListBtnText}>BROWSE DB ▼</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.matchBtn}
-            onPress={() => selectAndAutofillPo(searchInput)}
-          >
-            <Text style={styles.matchBtnText}>FETCH</Text>
-          </TouchableOpacity>
-        </View>
-
-        {loading ? (
-          <ActivityIndicator color="#0284c7" style={{ marginTop: 12 }} />
-        ) : notFoundMessage ? (
-          <View style={styles.notFoundBox}>
-            <Text style={styles.notFoundTitle}>⚠️ NOT FOUND</Text>
-            <Text style={styles.notFoundDesc}>{notFoundMessage}</Text>
-          </View>
-        ) : selectedPo || selectedAsn ? (
-          <View style={styles.matchedBox}>
-            <Text style={styles.matchedTitle}>
-              ✓ {selectedPo?.po_number || selectedAsn?.asn_number} VERIFIED
-            </Text>
-            <Text style={styles.matchedDesc}>
-              Supplier: {selectedPo?.supplier_name || selectedAsn?.supplier_name || "N/A"}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-
-      {/* Section 2: Multi-Vehicle Picker */}
-      {vehiclesExtracted.length > 0 && (
+      {entryMode === "SCHEDULED" ? (
+        /* --- SCHEDULED PO / ASN MODE --- */
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>2. SELECT ARRIVING VEHICLE</Text>
+          <Text style={styles.sectionTitle}>1. SEARCH / SCAN PO OR ASN</Text>
+          <View style={styles.searchRow}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Type PO / ASN (e.g. PO-2026-0001)"
+              placeholderTextColor="#64748b"
+              value={searchInput}
+              onChangeText={(text) => {
+                setSearchInput(text);
+                if (text.trim().length >= 3) {
+                  selectAndAutofillPo(text);
+                }
+              }}
+              onSubmitEditing={() => selectAndAutofillPo(searchInput)}
+              autoCapitalize="characters"
+            />
+
+            <TouchableOpacity
+              style={styles.dbListBtn}
+              onPress={() => setShowPoPickerModal(true)}
+            >
+              <Text style={styles.dbListBtnText}>BROWSE DB ▼</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.matchBtn}
+              onPress={() => selectAndAutofillPo(searchInput)}
+            >
+              <Text style={styles.matchBtnText}>FETCH</Text>
+            </TouchableOpacity>
+          </View>
+
+          {loading ? (
+            <ActivityIndicator color="#0284c7" style={{ marginTop: 12 }} />
+          ) : notFoundMessage ? (
+            <View style={styles.notFoundBox}>
+              <Text style={styles.notFoundTitle}>⚠️ EXPECTED DELIVERY NOT FOUND</Text>
+              <Text style={styles.notFoundDesc}>{notFoundMessage}</Text>
+              <TouchableOpacity
+                style={styles.exceptionSwitchBtn}
+                onPress={() => {
+                  setEntryMode("EXCEPTION");
+                  setNotFoundError(null);
+                }}
+              >
+                <Text style={styles.exceptionSwitchBtnText}>
+                  → REGISTER AS EXCEPTION / UNSCHEDULED ENTRY
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : selectedPo || selectedAsn ? (
+            <View style={styles.matchedBox}>
+              <View style={styles.matchedTop}>
+                <Text style={styles.matchedTitle}>
+                  ✓ {selectedPo?.po_number || selectedAsn?.asn_number} VERIFIED
+                </Text>
+                <View style={styles.dockBadge}>
+                  <Text style={styles.dockBadgeText}>
+                    📍 DOCK: {selectedPo?.dock_number || selectedAsn?.dock_number || "DOCK-01"}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.matchedDesc}>
+                Supplier: {selectedPo?.supplier_name || selectedAsn?.supplier_name || "N/A"}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : (
+        /* --- EXCEPTION / UNSCHEDULED MODE --- */
+        <View style={[styles.card, styles.cardAlertBorder]}>
+          <Text style={[styles.sectionTitle, { color: "#fbbf24" }]}>
+            ⚠️ EXCEPTION / UNSCHEDULED DELIVERY REGISTRATION
+          </Text>
+          <Text style={styles.exceptionHelpText}>
+            Use this workflow for ad-hoc deliveries, emergency spares, or unannounced supplier trucks.
+          </Text>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>SUPPLIER / VENDOR NAME *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Acme Components Pvt Ltd"
+              placeholderTextColor="#64748b"
+              value={supplierInput}
+              onChangeText={setSupplierInput}
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>UNSCHEDULED ENTRY REASON</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Reason for ad-hoc arrival"
+              placeholderTextColor="#64748b"
+              value={exceptionReasonInput}
+              onChangeText={setExceptionReasonInput}
+            />
+          </View>
+        </View>
+      )}
+
+      {/* Multi-Vehicle Picker */}
+      {entryMode === "SCHEDULED" && vehiclesExtracted.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>2. SELECT EXPECTED VEHICLE</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.vehicleScroll}>
             {vehiclesExtracted.map((v) => {
               const isSelected = selectedVehicleIdx === v.index;
@@ -468,12 +553,14 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
         </View>
       )}
 
-      {/* Section 3: Vehicle & Driver Details Form */}
+      {/* Vehicle & Driver Details Form */}
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>3. VEHICLE & DRIVER DETAILS</Text>
+        <Text style={styles.sectionTitle}>
+          {entryMode === "SCHEDULED" ? "3. VEHICLE & DRIVER DETAILS" : "2. VEHICLE & DRIVER DETAILS"}
+        </Text>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>VEHICLE PLATE NUMBER</Text>
+          <Text style={styles.label}>VEHICLE PLATE NUMBER *</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. KA-01-AB-1234"
@@ -509,10 +596,10 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
         </View>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>SECURITY REMARKS (OPTIONAL)</Text>
+          <Text style={styles.label}>SECURITY REMARKS / SEAL NO.</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. Physical seal intact"
+            placeholder="e.g. Physical seal intact, container locked"
             placeholderTextColor="#64748b"
             value={remarksInput}
             onChangeText={setRemarksInput}
@@ -520,46 +607,56 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
         </View>
       </View>
 
-      {/* Section 4: Line Items Verification Checklist */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>
-          4. VERIFIED MATERIAL LINE ITEMS ({lineItems.length})
-        </Text>
-        {lineItems.length === 0 ? (
-          <Text style={styles.emptyItemsText}>No line items recorded for this PO / ASN in database.</Text>
-        ) : (
-          lineItems.map((item, idx) => (
-            <View key={idx} style={styles.itemRow}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={styles.itemCode}>
-                  {item.material_code || item.item_code || `ITEM-${idx + 1}`}
-                </Text>
-                <Text style={styles.itemName}>
-                  {item.material_name || item.material_description || item.description || "Material Component"}
+      {/* Material Line Items Verification Checklist */}
+      {entryMode === "SCHEDULED" && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>
+            4. VERIFIED MATERIAL ITEMS ({lineItems.length})
+          </Text>
+          {lineItems.length === 0 ? (
+            <Text style={styles.emptyItemsText}>No line items recorded for this PO / ASN in database.</Text>
+          ) : (
+            lineItems.map((item, idx) => (
+              <View key={idx} style={styles.itemRow}>
+                <View style={{ flex: 1, marginRight: 8 }}>
+                  <Text style={styles.itemCode}>
+                    {item.material_code || item.item_code || `ITEM-${idx + 1}`}
+                  </Text>
+                  <Text style={styles.itemName}>
+                    {item.material_name || item.material_description || item.description || "Material Component"}
+                  </Text>
+                </View>
+                <Text style={styles.itemQty}>
+                  {item.quantity || item.shipped_quantity || "0"} {item.uom || "Units"}
                 </Text>
               </View>
-              <Text style={styles.itemQty}>
-                {item.quantity || item.shipped_quantity || "0"} {item.uom || "Units"}
-              </Text>
-            </View>
-          ))
-        )}
-      </View>
+            ))
+          )}
+        </View>
+      )}
 
       {/* Submit Button */}
       <TouchableOpacity
-        style={[styles.submitBtn, submitting && styles.btnDisabled]}
+        style={[
+          styles.submitBtn,
+          entryMode === "EXCEPTION" && styles.submitBtnAlert,
+          submitting && styles.btnDisabled,
+        ]}
         onPress={handleCreateGateEntry}
         disabled={submitting}
       >
         {submitting ? (
           <ActivityIndicator color="#ffffff" />
         ) : (
-          <Text style={styles.submitBtnText}>GRANT GATE ENTRY PASS ✓</Text>
+          <Text style={styles.submitBtnText}>
+            {entryMode === "SCHEDULED"
+              ? "CONFIRM ENTRY & GENERATE GATE PASS ✓"
+              : "CONFIRM EXCEPTION ENTRY & GENERATE PASS ⚠️"}
+          </Text>
         )}
       </TouchableOpacity>
 
-      {/* --- PO / ASN DB PICKER MODAL --- */}
+      {/* PO / ASN DB PICKER MODAL */}
       <Modal visible={showPoPickerModal} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -612,7 +709,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 14,
   },
   navTitle: {
     color: "#ffffff",
@@ -638,9 +735,43 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
   },
+  modeToggleRow: {
+    flexDirection: "row",
+    backgroundColor: "#1e293b",
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  modeTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderRadius: 8,
+  },
+  modeTabActive: {
+    backgroundColor: "#0284c7",
+  },
+  modeTabActiveAlert: {
+    backgroundColor: "#d97706",
+  },
+  modeTabText: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  modeTabTextActive: {
+    color: "#ffffff",
+    fontWeight: "900",
+  },
+  modeTabTextActiveAlert: {
+    color: "#ffffff",
+    fontWeight: "900",
+  },
   openCameraBtn: {
     backgroundColor: "#0284c7",
-    borderRadius: 16,
+    borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 16,
     alignItems: "center",
@@ -653,9 +784,9 @@ const styles = StyleSheet.create({
   },
   openCameraBtnText: {
     color: "#ffffff",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "900",
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   openCameraSub: {
     color: "#e0f2fe",
@@ -664,7 +795,7 @@ const styles = StyleSheet.create({
   },
   capturedPhotoBox: {
     backgroundColor: "#1e293b",
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 12,
     marginBottom: 14,
     borderWidth: 1,
@@ -681,7 +812,7 @@ const styles = StyleSheet.create({
   photoPreview: {
     width: "100%",
     height: 160,
-    borderRadius: 12,
+    borderRadius: 10,
   },
   card: {
     backgroundColor: "#1e293b",
@@ -691,6 +822,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
   },
+  cardAlertBorder: {
+    borderColor: "rgba(251, 191, 36, 0.4)",
+  },
   sectionTitle: {
     color: "#38bdf8",
     fontSize: 11,
@@ -698,117 +832,147 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 12,
   },
+  exceptionHelpText: {
+    color: "#94a3b8",
+    fontSize: 11,
+    marginBottom: 12,
+    lineHeight: 16,
+  },
   searchRow: {
     flexDirection: "row",
     gap: 8,
+    marginBottom: 10,
   },
   searchInput: {
     flex: 1,
     backgroundColor: "#0f172a",
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#38bdf8",
+    color: "#ffffff",
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: "#38bdf8",
-    fontSize: 13,
-    fontWeight: "800",
+    fontSize: 12,
+    borderWidth: 1,
+    borderColor: "#334155",
   },
   dbListBtn: {
-    backgroundColor: "#1e293b",
-    borderWidth: 1,
-    borderColor: "#38bdf8",
+    backgroundColor: "#334155",
+    borderRadius: 10,
     paddingHorizontal: 10,
     justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 10,
   },
   dbListBtnText: {
-    color: "#38bdf8",
-    fontWeight: "800",
+    color: "#cbd5e1",
     fontSize: 10,
+    fontWeight: "800",
   },
   matchBtn: {
     backgroundColor: "#0284c7",
-    paddingHorizontal: 14,
-    justifyContent: "center",
-    alignItems: "center",
     borderRadius: 10,
+    paddingHorizontal: 12,
+    justifyContent: "center",
   },
   matchBtnText: {
     color: "#ffffff",
-    fontWeight: "900",
-    fontSize: 12,
-  },
-  matchedBox: {
-    backgroundColor: "rgba(16, 185, 129, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(16, 185, 129, 0.4)",
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 12,
-  },
-  matchedTitle: {
-    color: "#34d399",
-    fontWeight: "800",
-    fontSize: 12,
-  },
-  matchedDesc: {
-    color: "#a7f3d0",
     fontSize: 11,
-    marginTop: 2,
+    fontWeight: "900",
   },
   notFoundBox: {
     backgroundColor: "rgba(239, 68, 68, 0.12)",
+    borderRadius: 12,
+    padding: 14,
     borderWidth: 1,
     borderColor: "rgba(239, 68, 68, 0.4)",
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 12,
+    marginTop: 6,
   },
   notFoundTitle: {
     color: "#f87171",
-    fontWeight: "900",
     fontSize: 12,
+    fontWeight: "900",
   },
   notFoundDesc: {
     color: "#fca5a5",
     fontSize: 11,
     marginTop: 2,
   },
+  exceptionSwitchBtn: {
+    marginTop: 10,
+    backgroundColor: "#d97706",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  exceptionSwitchBtnText: {
+    color: "#ffffff",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  matchedBox: {
+    backgroundColor: "rgba(16, 185, 129, 0.12)",
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.4)",
+    marginTop: 6,
+  },
+  matchedTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  matchedTitle: {
+    color: "#34d399",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  dockBadge: {
+    backgroundColor: "#0284c7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  dockBadgeText: {
+    color: "#ffffff",
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  matchedDesc: {
+    color: "#a7f3d0",
+    fontSize: 11,
+    marginTop: 4,
+  },
   vehicleScroll: {
     flexDirection: "row",
   },
   vehicleChip: {
     backgroundColor: "#0f172a",
-    padding: 12,
     borderRadius: 12,
+    padding: 12,
+    marginRight: 10,
     borderWidth: 1,
     borderColor: "#334155",
-    marginRight: 10,
-    minWidth: 140,
+    minWidth: 120,
   },
   vehicleChipSelected: {
+    borderColor: "#0284c7",
     backgroundColor: "rgba(2, 132, 199, 0.2)",
-    borderColor: "#38bdf8",
   },
   vehiclePlateText: {
     color: "#94a3b8",
-    fontWeight: "900",
     fontSize: 13,
+    fontWeight: "900",
   },
   vehiclePlateSelectedText: {
     color: "#38bdf8",
   },
   vehicleDriverText: {
-    color: "#ffffff",
+    color: "#cbd5e1",
     fontSize: 11,
-    fontWeight: "700",
-    marginTop: 4,
+    marginTop: 2,
   },
   vehicleTransporterText: {
     color: "#64748b",
-    fontSize: 10,
+    fontSize: 9,
     marginTop: 2,
   },
   fieldGroup: {
@@ -818,118 +982,121 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
     fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 1,
+    letterSpacing: 0.5,
     marginBottom: 4,
   },
   input: {
     backgroundColor: "#0f172a",
-    borderWidth: 1,
-    borderColor: "#334155",
     borderRadius: 10,
+    color: "#ffffff",
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: "#ffffff",
     fontSize: 13,
-    fontWeight: "600",
+    borderWidth: 1,
+    borderColor: "#334155",
   },
   row: {
     flexDirection: "row",
   },
+  emptyItemsText: {
+    color: "#64748b",
+    fontSize: 11,
+    fontStyle: "italic",
+  },
   itemRow: {
-    backgroundColor: "#0f172a",
-    padding: 10,
-    borderRadius: 10,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    backgroundColor: "#0f172a",
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 6,
   },
   itemCode: {
     color: "#38bdf8",
-    fontWeight: "800",
     fontSize: 11,
+    fontWeight: "800",
   },
   itemName: {
-    color: "#94a3b8",
+    color: "#cbd5e1",
     fontSize: 11,
-    marginTop: 2,
   },
   itemQty: {
-    color: "#10b981",
+    color: "#34d399",
+    fontSize: 12,
     fontWeight: "900",
-    fontSize: 12,
-  },
-  emptyItemsText: {
-    color: "#64748b",
-    fontSize: 12,
-    paddingVertical: 8,
   },
   submitBtn: {
-    backgroundColor: "#10b981",
-    paddingVertical: 14,
+    backgroundColor: "#0284c7",
+    paddingVertical: 16,
     borderRadius: 14,
     alignItems: "center",
     marginTop: 8,
-    shadowColor: "#10b981",
+    shadowColor: "#0284c7",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 10,
-    elevation: 4,
+    elevation: 6,
+  },
+  submitBtnAlert: {
+    backgroundColor: "#d97706",
   },
   btnDisabled: {
     opacity: 0.6,
   },
   submitBtnText: {
     color: "#ffffff",
+    fontSize: 13,
     fontWeight: "900",
-    fontSize: 14,
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.85)",
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
     justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   modalCard: {
+    width: "100%",
     backgroundColor: "#1e293b",
-    borderRadius: 20,
+    borderRadius: 18,
     padding: 20,
     borderWidth: 1,
-    borderColor: "#38bdf8",
+    borderColor: "#334155",
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 14,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#334155",
   },
   modalTitle: {
     color: "#ffffff",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "900",
-    letterSpacing: 0.5,
   },
   modalCloseText: {
     color: "#f87171",
+    fontSize: 11,
     fontWeight: "800",
-    fontSize: 12,
   },
   poListItem: {
-    backgroundColor: "#0f172a",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#334155",
+    backgroundColor: "#0f172a",
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 8,
   },
   poListNumber: {
     color: "#38bdf8",
-    fontWeight: "800",
     fontSize: 13,
+    fontWeight: "800",
   },
   poListSupplier: {
     color: "#94a3b8",
@@ -937,14 +1104,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   poListSelect: {
-    color: "#10b981",
-    fontWeight: "800",
+    color: "#34d399",
     fontSize: 12,
+    fontWeight: "800",
   },
   emptyText: {
-    color: "#94a3b8",
-    textAlign: "center",
-    paddingVertical: 20,
+    color: "#64748b",
     fontSize: 12,
+    textAlign: "center",
+    marginVertical: 20,
   },
 });

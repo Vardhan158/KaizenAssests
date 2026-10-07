@@ -31,7 +31,7 @@ export async function mobileRequest<T>(endpoint: string, options: RequestInit = 
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2000);
+  const timeoutId = setTimeout(() => controller.abort(), 2500);
 
   try {
     const response = await fetch(url, {
@@ -69,6 +69,7 @@ const DEFAULT_POS = [
     vehicle_number: "KA-13-V-5848",
     driver_name: "Srujan",
     driver_contact: "9876543210",
+    dock_number: "DOCK-01",
     items: [
       { material_code: "MAT-001-V001", material_name: "RAM", quantity: 100, uom: "PCS" },
       { material_code: "MAT-002-V001", material_name: "SSD", quantity: 100, uom: "PCS" },
@@ -81,6 +82,7 @@ const DEFAULT_POS = [
     vehicle_number: "KA-04-MH-9988",
     driver_name: "Suresh Gowda",
     driver_contact: "9845012345",
+    dock_number: "DOCK-02",
     items: [
       { material_code: "MAT-BEARING-09", material_name: "Precision Ball Bearing 6205", quantity: 500, uom: "PCS" },
       { material_code: "MAT-SHAFT-02", material_name: "Hardened Steel Drive Shaft", quantity: 200, uom: "PCS" },
@@ -93,6 +95,7 @@ const DEFAULT_POS = [
     vehicle_number: "KA-09-EF-5544",
     driver_name: "Anand Murthy",
     driver_contact: "9731234567",
+    dock_number: "DOCK-03",
     items: [
       { material_code: "MAT-CABLE-05", material_name: "Copper Armored Power Cable 4-Core", quantity: 1000, uom: "Meters" },
     ],
@@ -108,6 +111,7 @@ const DEFAULT_ASNS = [
     vehicle_number: "KA-13-V-5848",
     driver_name: "Srujan",
     driver_contact: "9876543210",
+    dock_number: "DOCK-01",
     logistics: [
       { vehicle_number: "KA-13-V-5848", driver_name: "Srujan", driver_contact: "9876543210", transporter: "VRL Logistics" },
     ],
@@ -203,7 +207,7 @@ export const mobileApi = {
     return [];
   },
 
-  // Submit New Gate Entry directly to backend
+  // Submit New Scheduled Gate Entry
   async createGateEntry(data: {
     po_number: string;
     vehicle_number: string;
@@ -212,6 +216,7 @@ export const mobileApi = {
     supplier_name: string;
     asn_reference?: string;
     line_items?: any[];
+    dock_number?: string;
     remarks?: string;
   }): Promise<any> {
     const payload = {
@@ -222,8 +227,9 @@ export const mobileApi = {
       supplier_name: data.supplier_name,
       asn_reference: data.asn_reference || "",
       line_items: data.line_items || [],
+      dock_number: data.dock_number || "DOCK-01",
       remarks: data.remarks || "Gate Entry recorded via KaizenX Mobile Scanner",
-      status: "PO_VERIFIED",
+      status: "INSIDE_FACILITY",
     };
 
     const endpoints = [
@@ -251,7 +257,61 @@ export const mobileApi = {
       driver_contact: data.driver_contact,
       supplier_name: data.supplier_name,
       asn_reference: data.asn_reference,
-      status: "PO_VERIFIED",
+      dock_number: data.dock_number || "DOCK-01",
+      status: "INSIDE_FACILITY",
+      created_at: new Date().toISOString(),
+    };
+  },
+
+  // Submit Unscheduled / Exception Gate Entry
+  async createUnscheduledEntry(data: {
+    supplier_name: string;
+    vehicle_number: string;
+    driver_name: string;
+    driver_contact?: string;
+    reason: string;
+    remarks?: string;
+  }): Promise<any> {
+    const payload = {
+      supplier_name: data.supplier_name,
+      vehicle_number: data.vehicle_number,
+      driver_name: data.driver_name,
+      driver_contact: data.driver_contact || "",
+      po_number: "UNSCHEDULED",
+      remarks: `UNSCHEDULED ENTRY: ${data.reason}. ${data.remarks || ""}`,
+      status: "INSIDE_FACILITY",
+      is_unscheduled: true,
+    };
+
+    const endpoints = [
+      "/api/v1/gate/entries/unscheduled",
+      "/api/gate-entries/unscheduled",
+      "/api/gate-entries",
+      "/api/v1/gate/entries",
+    ];
+
+    for (const ep of endpoints) {
+      try {
+        return await mobileRequest<any>(ep, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // try next
+      }
+    }
+
+    return {
+      id: `GE-UNSCH-${Date.now()}`,
+      gate_entry_number: `GE-EXC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      po_number: "UNSCHEDULED",
+      vehicle_number: data.vehicle_number,
+      driver_name: data.driver_name,
+      driver_contact: data.driver_contact,
+      supplier_name: data.supplier_name,
+      dock_number: "UNASSIGNED",
+      status: "INSIDE_FACILITY",
+      is_unscheduled: true,
       created_at: new Date().toISOString(),
     };
   },
