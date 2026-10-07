@@ -1328,33 +1328,74 @@ export function GateEntryScannerScreen({
         </View>
       </View>
 
-      {/* Material Line Items Verification Checklist */}
-      {entryMode === "SCHEDULED" && (
-        <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
-          <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-3`}>
-            4. VERIFIED MATERIAL ITEMS ({lineItems.length})
+      {/* Screen 09 - Document Checklist */}
+      <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10 shadow-xl`}>
+        <View style={tw`flex-row justify-between items-center mb-3 pb-2 border-b border-slate-700`}>
+          <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase`}>
+            DOCUMENT VERIFICATION CHECKLIST
           </Text>
-          {lineItems.length === 0 ? (
-            <Text style={tw`text-slate-500 text-xs italic`}>No line items recorded for this PO / ASN in database.</Text>
-          ) : (
-            lineItems.map((item, idx) => (
-              <View key={idx} style={tw`flex-row justify-between items-center bg-slate-900 p-2.5 rounded-lg mb-1.5`}>
-                <View style={tw`flex-1 mr-2`}>
-                  <Text style={tw`text-sky-400 text-xs font-bold`}>
-                    {item.material_code || item.item_code || `ITEM-${idx + 1}`}
-                  </Text>
-                  <Text style={tw`text-slate-300 text-xs`}>
-                    {item.material_name || item.material_description || item.description || "Material Component"}
-                  </Text>
-                </View>
-                <Text style={tw`text-emerald-400 text-xs font-black`}>
-                  {item.quantity || item.shipped_quantity || "0"} {item.uom || "Units"}
+          {(() => {
+            const checklistItems = [
+              { label: "Purchase Order", ok: Boolean(selectedPo || selectedAsn || searchInput.trim()) },
+              { label: "ASN", ok: Boolean(selectedAsn || searchInput.toUpperCase().includes("ASN") || entryMode === "SCHEDULED") },
+              { label: "Invoice", ok: Boolean(invoiceNumber.trim() && invoiceDate.trim() && invoicePhotoUri) },
+              { label: "Delivery Challan", ok: Boolean(challanNumber.trim() || invoicePhotoUri || challanPhotoUri) },
+              {
+                label: "E-Way Bill",
+                ok: Boolean(ewayBillNumber.trim() && !(ewayValidUntil && ewayValidUntil.trim() < new Date().toISOString().split("T")[0])),
+                warning: Boolean(ewayValidUntil && ewayValidUntil.trim() < new Date().toISOString().split("T")[0]),
+              },
+              { label: "Vehicle Number", ok: Boolean(vehicleInput.trim()) },
+              { label: "Driver Licence", ok: Boolean(driverLicenceNo.trim()) },
+              { label: "Vehicle Photo", ok: Boolean(capturedImageUri) },
+            ];
+            const count = checklistItems.filter((i) => i.ok).length;
+            const isFull = count === 8;
+            return (
+              <View style={tw`px-2.5 py-1 rounded-xl ${isFull ? "bg-emerald-500/20 border border-emerald-500/50" : "bg-amber-500/20 border border-amber-500/50"}`}>
+                <Text style={tw`text-xs font-black ${isFull ? "text-emerald-400" : "text-amber-400"}`}>
+                  {count} / 8 Verified
                 </Text>
               </View>
-            ))
-          )}
+            );
+          })()}
         </View>
-      )}
+
+        {/* 8 Item Checklist Grid */}
+        <View style={tw`gap-2`}>
+          {[
+            { label: "Purchase Order", ok: Boolean(selectedPo || selectedAsn || searchInput.trim()), detail: selectedPo?.po_number || selectedAsn?.po_number || searchInput || "Missing PO" },
+            { label: "ASN", ok: Boolean(selectedAsn || searchInput.toUpperCase().includes("ASN") || entryMode === "SCHEDULED"), detail: selectedAsn?.asn_number || "ASN Attached" },
+            { label: "Invoice", ok: Boolean(invoiceNumber.trim() && invoiceDate.trim() && invoicePhotoUri), detail: invoiceNumber ? `Inv #${invoiceNumber}` : "Invoice & Upload Required *" },
+            { label: "Delivery Challan", ok: Boolean(challanNumber.trim() || invoicePhotoUri || challanPhotoUri), detail: challanNumber ? `Challan #${challanNumber}` : "Optional / Attached" },
+            {
+              label: "E-Way Bill",
+              ok: Boolean(ewayBillNumber.trim() && !(ewayValidUntil && ewayValidUntil.trim() < new Date().toISOString().split("T")[0])),
+              warning: Boolean(ewayValidUntil && ewayValidUntil.trim() < new Date().toISOString().split("T")[0]),
+              detail: ewayValidUntil && ewayValidUntil.trim() < new Date().toISOString().split("T")[0] ? "EXPIRED — Supervisor Review" : ewayBillNumber ? `E-Way #${ewayBillNumber}` : "Optional"
+            },
+            { label: "Vehicle Number", ok: Boolean(vehicleInput.trim()), detail: vehicleInput ? formatVehiclePlate(vehicleInput) : "Plate Number Required *" },
+            { label: "Driver Licence", ok: Boolean(driverLicenceNo.trim()), detail: driverLicenceNo ? `DL #${driverLicenceNo}` : "DL Number Required *" },
+            { label: "Vehicle Photo", ok: Boolean(capturedImageUri), detail: capturedImageUri ? "Photo Captured ✓" : "Photo Capture Required *" },
+          ].map((item, idx) => (
+            <View key={idx} style={tw`flex-row items-center justify-between bg-slate-900 px-3 py-2 rounded-xl`}>
+              <View style={tw`flex-row items-center gap-2.5 flex-1`}>
+                <View style={tw`w-6 h-6 rounded-full items-center justify-center ${item.ok ? "bg-emerald-500/20 border border-emerald-500/50" : item.warning ? "bg-red-500/20 border border-red-500/50" : "bg-slate-800 border border-slate-700"}`}>
+                  <Text style={tw`text-xs font-black ${item.ok ? "text-emerald-400" : item.warning ? "text-red-400" : "text-slate-500"}`}>
+                    {item.ok ? "✓" : item.warning ? "⚠️" : "✕"}
+                  </Text>
+                </View>
+
+                <Text style={tw`text-xs font-bold text-slate-200`}>{item.label}</Text>
+              </View>
+
+              <Text style={tw`text-[10px] font-semibold ${item.ok ? "text-emerald-400" : item.warning ? "text-red-400" : "text-slate-500"}`}>
+                {item.detail}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
 
       {/* Submit Button */}
       <TouchableOpacity
