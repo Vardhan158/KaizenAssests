@@ -122,17 +122,44 @@ export function QualityInspectionScreen({
         </Text>
       </View>
 
-      {/* Material Summary Banner */}
+      {/* Section 20 - Material Summary Banner */}
       <View style={tw`bg-slate-800 rounded-2xl p-4 mb-4 border border-sky-500/30 shadow-lg`}>
-        <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase mb-1`}>
-          AWAITING QUALITY INSPECTION
+        <View style={tw`flex-row justify-between items-center mb-1`}>
+          <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase`}>
+            QC MATERIAL INSPECTION (SECTION 20)
+          </Text>
+          <View style={tw`bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40`}>
+            <Text style={tw`text-emerald-400 text-[9px] font-black`}>INSPECTION REQUIRED: YES</Text>
+          </View>
+        </View>
+
+        <Text style={tw`text-white text-base font-black`}>
+          Stainless Steel Sheet 304
         </Text>
-        <Text style={tw`text-white text-sm font-black`}>
-          Stainless Steel Sheet 304 (MAT-SS-304-001)
+        <Text style={tw`text-sky-400 text-xs font-mono font-bold mt-0.5`}>
+          Material Code: MAT-SS-304-001
         </Text>
-        <Text style={tw`text-slate-300 text-xs mt-1`}>
-          Vehicle: {formatVehiclePlate(unloadedRecord?.vehicle_number || "KA 01 AB 4582")} • PO: {unloadedRecord?.po_number || "PO-2026-008741"}
-        </Text>
+
+        <View style={tw`bg-slate-900 p-3 rounded-xl mt-3 border border-slate-700 gap-1.5`}>
+          <View style={tw`flex-row justify-between`}>
+            <Text style={tw`text-slate-400 text-xs`}>PO Quantity:</Text>
+            <Text style={tw`text-white text-xs font-bold`}>500 KG</Text>
+          </View>
+
+          <View style={tw`flex-row justify-between`}>
+            <Text style={tw`text-slate-400 text-xs`}>Physically Received Qty:</Text>
+            <Text style={tw`text-emerald-400 text-xs font-black`}>
+              {unloadedRecord?.received_quantity || 495} KG
+            </Text>
+          </View>
+
+          <View style={tw`flex-row justify-between border-t border-slate-800 pt-1`}>
+            <Text style={tw`text-slate-400 text-xs`}>Supplier Batch Number:</Text>
+            <Text style={tw`text-sky-400 text-xs font-mono font-bold`}>
+              {unloadedRecord?.supplier_batch || "BATCH-SS-1045"}
+            </Text>
+          </View>
+        </View>
       </View>
 
       {/* Inspection Quantities Form */}
