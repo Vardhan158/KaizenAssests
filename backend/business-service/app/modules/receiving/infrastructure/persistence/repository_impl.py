@@ -29,7 +29,7 @@ from sqlalchemy.orm import selectinload
 
 from app.events.outbox_repository import to_outbox_row
 
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     AsnModel,
     MaterialModel,
     MaterialVariantModel,

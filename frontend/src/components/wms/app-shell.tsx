@@ -175,16 +175,9 @@ const warehouseNav = [
 ];
 
 const procurementNav = [
-  { label: "Dashboard", to: "/procurement-dashboard", icon: LayoutDashboard },
-  { label: "Finished Goods Requests", to: "/procurement/finished-goods", icon: Boxes },
-  { label: "Material Requests", to: "/procurement/material-requests", icon: ClipboardList },
-  { label: "Suppliers", to: "/master-data", icon: Building2 },
-  { label: "RFQs", to: "/procurement/rfqs", icon: FileQuestion },
-  { label: "Quotations", to: "/procurement/quotations", icon: FileBadge },
-  { label: "Purchase Orders", to: "/procurement/purchase-orders", icon: FileText },
-  { label: "ASNs", to: "/procurement/asns", icon: Truck },
-  { label: "Damage Claims", to: "/damage-claims", icon: ShieldAlert },
-  { label: "Finance Reports", to: "/procurement/reports", icon: BarChart3 },
+  { label: "Warehouse Dashboard", to: "/warehouse-dashboard", icon: LayoutDashboard },
+  { label: "Receiving Control", to: "/receiving", icon: PackageCheck },
+  { label: "GRN Control", to: "/grn", icon: FileCheck2 },
 ];
 
 const supplierNav = [
@@ -196,7 +189,6 @@ const supplierNav = [
 const financeNav = [
   { label: "Dashboard", to: "/finance-dashboard", icon: LayoutDashboard },
   { label: "Pending Approvals", to: "/finance/approvals", icon: FileCheck2 },
-  { label: "Finance Reports", to: "/procurement/reports", icon: BarChart3 },
 ];
 
 const managerNav = [
@@ -205,11 +197,6 @@ const managerNav = [
     label: "Suppliers",
     to: "/master-data?module=manager&status=pending-approval",
     icon: Building2,
-  },
-  {
-    label: "Material Requests",
-    to: "/procurement/material-requests?module=manager&status=manager-approval",
-    icon: ClipboardList,
   },
 ];
 
@@ -223,9 +210,7 @@ const gateSecurityNav = [
 const adminNav = [
   { label: "User Management", to: "/admin/users", icon: Users },
   { label: "Warehouse", to: "/warehouse-dashboard", icon: Warehouse },
-  { label: "Procurement", to: "/procurement-dashboard", icon: ClipboardList },
   { label: "Finance", to: "/finance-dashboard", icon: FileCheck2 },
-  { label: "Finance Reports", to: "/procurement/reports", icon: BarChart3 },
 ];
 
 const ICON_MAP: Record<string, any> = {

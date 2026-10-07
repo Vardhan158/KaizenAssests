@@ -26,8 +26,6 @@ from app.modules.gate.infrastructure.api.dashboard import router as dashboard_ro
 from app.modules.gate.infrastructure.api.quality import router as quality_router
 from app.modules.gate.infrastructure.api.damage_claims import router as damage_claims_router
 from app.modules.notification.infrastructure.api.router import router as notification_router
-from app.modules.procurement.infrastructure.api.material_router import router as material_router
-from app.modules.procurement.infrastructure.api.router import router as procurement_router
 from app.modules.receiving.infrastructure.api.router import router as receiving_router
 from app.modules.returns.infrastructure.api.router import router as returns_router
 from app.modules.storage.infrastructure.api.router import router as storage_router
@@ -64,9 +62,8 @@ async def lifespan(app: FastAPI):
 
         # Import every model module so its tables are registered in metadata.
         from app.events import outbox_model  # noqa: F401
+        from app.common.persistence import models as common_models  # noqa: F401
         from app.modules.gate.infrastructure.persistence import models as gate_models  # noqa: F401
-        from app.modules.notification.infrastructure.persistence import models as notification_models  # noqa: F401
-        from app.modules.procurement.infrastructure.persistence import models as procurement_models  # noqa: F401
         from app.modules.receiving.infrastructure.persistence import models as receiving_models  # noqa: F401
         from app.modules.returns.infrastructure.persistence import models as returns_models  # noqa: F401
         from app.modules.storage.infrastructure.persistence import models as storage_models  # noqa: F401
@@ -1499,17 +1496,6 @@ async def lifespan(app: FastAPI):
         coalesce=True,
     )
 
-    # Add arrival notification check (every hour in prod, more frequent for dev demo)
-    from app.modules.procurement.infrastructure.api.router import check_upcoming_arrivals
-    scheduler.add_job(
-        check_upcoming_arrivals,
-        "interval",
-        minutes=1, # Check every minute for real-time demo feel
-        id="arrival-notification-check",
-        max_instances=1,
-        coalesce=True
-    )
-
     scheduler.start()
 
     try:
@@ -1593,14 +1579,12 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(quality_router)
     app.include_router(damage_claims_router)
-    app.include_router(procurement_router)
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():
         return {"status": "ok"}
-    app.include_router(material_router)
     app.include_router(store_router)
     app.include_router(zone_router)
     app.include_router(bin_router)

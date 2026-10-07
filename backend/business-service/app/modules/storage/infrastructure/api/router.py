@@ -19,7 +19,7 @@ from app.modules.dock.infrastructure.persistence.models import (
     DockMasterModel,
 )
 from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialStockModel,
     NotificationModel,
 )
@@ -86,7 +86,7 @@ async def _sync_finished_goods_putaway_status(uow: UnitOfWork, finished_goods_id
         order.updated_at = completed_at.replace(tzinfo=None) if completed_at.tzinfo else completed_at
         # A Finished Goods Request is fulfilled only after the produced goods
         # have physically reached the Finished Goods Store.
-        from app.modules.procurement.infrastructure.persistence.models import FinishedGoodsRequestModel
+        from app.common.persistence.models import FinishedGoodsRequestModel
         request = await uow.session.scalar(select(FinishedGoodsRequestModel).where(
             FinishedGoodsRequestModel.request_number == order.request_number
         ).with_for_update())

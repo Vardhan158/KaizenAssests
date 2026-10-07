@@ -19,12 +19,11 @@ from app.modules.gate.infrastructure.persistence.models import (
     ReceivingLineModel,
     SupplierDamageClaimModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     AsnModel,
     SupplierModel,
     SupplierContactModel,
     NotificationModel,
-    SupplierUserModel,
 )
 from app.security.dependencies import get_current_user, CurrentUser
 from sqlalchemy import func, select

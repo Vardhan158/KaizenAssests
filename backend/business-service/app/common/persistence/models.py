@@ -1,6 +1,5 @@
 """
-SQLAlchemy ORM models for procurement module.
-Inherits from Base declarative base.
+SQLAlchemy ORM models shared across WMS modules (Supplier, PO, ASN, Material, Notification, etc.)
 """
 from __future__ import annotations
 
@@ -13,7 +12,6 @@ from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, GUID
-
 
 
 rfq_supplier_link = Table(
@@ -211,7 +209,6 @@ class RfqModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     closing_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-
     selected_supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("supplier.id"), nullable=True)
     selection_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     selected_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -258,7 +255,6 @@ class QuotationModel(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
 
     discount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4), nullable=True)
     tax: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4), nullable=True)
@@ -424,7 +420,6 @@ class PurchaseOrderModel(Base):
     procurement_officer: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     department: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
-
     supplier_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     supplier_contact_person: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     supplier_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -432,10 +427,8 @@ class PurchaseOrderModel(Base):
     supplier_gstin: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     supplier_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-
     delivery_warehouse_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     delivery_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
 
     subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
@@ -443,12 +436,10 @@ class PurchaseOrderModel(Base):
     freight_charges: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     additional_charges: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
 
-
     selection_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     procurement_comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     selection_date: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now)
     selected_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-
 
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -548,20 +539,59 @@ class MaterialRequestItemModel(Base):
     __tablename__ = "material_request_item"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("material_request.id"), nullable=False)
+    request_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("material_request.id", ondelete="CASCADE"), nullable=False
+    )
     material_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material.id", ondelete="SET NULL"), nullable=True)
     material_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material_variant.id", ondelete="SET NULL"), nullable=True)
-    material_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_code: Mapped[str] = mapped_column(String(64), nullable=False)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    material_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    item_name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
-    is_custom: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, default=False)
-    custom_material_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_custom: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    custom_material_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
     request: Mapped[MaterialRequestModel] = relationship("MaterialRequestModel", back_populates="items")
     material: Mapped[Optional["MaterialModel"]] = relationship("MaterialModel")
     variant: Mapped[Optional["MaterialVariantModel"]] = relationship("MaterialVariantModel")
+
+
+class MaterialStockModel(Base):
+    __tablename__ = "material_stock"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    material_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        GUID, ForeignKey("material.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    material_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        GUID, ForeignKey("material_variant.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    material_code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    variant_code: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
+    location_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, default="Main Warehouse")
+    on_hand_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    allocated_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    available_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    material: Mapped[Optional["MaterialModel"]] = relationship("MaterialModel")
+    variant: Mapped[Optional["MaterialVariantModel"]] = relationship("MaterialVariantModel")
+
+
+class QuotationMagicLinkModel(Base):
+    __tablename__ = "quotation_magic_link"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    token: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    rfq_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("rfq.id", ondelete="CASCADE"), nullable=False)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("supplier.id", ondelete="CASCADE"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
 
 
 class FinishedGoodsRequestModel(Base):
@@ -569,114 +599,24 @@ class FinishedGoodsRequestModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     request_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, default="MAIN")
-    finished_goods_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    finished_goods_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    material_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    variant_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
-    required_date: Mapped[date] = mapped_column(Date, nullable=False)
+    warehouse: Mapped[str] = mapped_column(String(128), nullable=False)
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
-    requested_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, default=date.today)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="SENT_TO_ASSEMBLY")
-    bom_attachment_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    bom_attachment_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    department: Mapped[str] = mapped_column(String(128), nullable=False)
+    priority: Mapped[str] = mapped_column(String(32), nullable=False, default="MEDIUM")
+    required_date: Mapped[date] = mapped_column(Date, nullable=False)
+    requested_date: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
     remarks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="SUBMITTED")
+    work_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, nullable=True)
+    work_order_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    completed_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-
-class StockReservationModel(Base):
-    __tablename__ = "stock_reservation"
-    __table_args__ = (UniqueConstraint("request_item_id", name="uq_stock_reservation_request_item"),)
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("material_request.id", ondelete="RESTRICT"), nullable=False, index=True)
-    request_item_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("material_request_item.id", ondelete="RESTRICT"), nullable=False)
-    material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
-    uom: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="RESERVED")
-    allocations: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    reserved_by: Mapped[str] = mapped_column(String(128), nullable=False)
-    reserved_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
-
-
-class PickTaskModel(Base):
-    __tablename__ = "pick_task"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    task_number: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("material_request.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
-    request_number: Mapped[str] = mapped_column(String(64), nullable=False)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    department: Mapped[str] = mapped_column(String(64), nullable=False)
-    items: Mapped[list] = mapped_column(JSON, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="OPEN")
-    destination: Mapped[str] = mapped_column(String(128), nullable=False, default="Production Staging Area")
-    assigned_to: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
-
-
-class MaterialIssueModel(Base):
-    __tablename__ = "material_issue"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    issue_number: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    pick_task_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("pick_task.id", ondelete="RESTRICT"), nullable=False, unique=True)
-    request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("material_request.id", ondelete="RESTRICT"), nullable=False)
-    department: Mapped[str] = mapped_column(String(64), nullable=False)
-    items: Mapped[list] = mapped_column(JSON, nullable=False)
-    issued_by: Mapped[str] = mapped_column(String(128), nullable=False)
-    received_by: Mapped[str] = mapped_column(String(128), nullable=False)
-    issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
-
-
-class MaterialStockModel(Base):
-    __tablename__ = "material_stock"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    material_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material.id", ondelete="SET NULL"), nullable=True)
-    material_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material_variant.id", ondelete="SET NULL"), nullable=True)
-    material_code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
-    variant_code: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
-    material_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    category: Mapped[str] = mapped_column(String(128), nullable=False)
-    on_hand: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    allocated: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    available: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    reorder_point: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("10.0"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-    material: Mapped[Optional["MaterialModel"]] = relationship("MaterialModel")
-    variant: Mapped[Optional["MaterialVariantModel"]] = relationship("MaterialVariantModel")
-
-
-class ArrivalNotificationModel(Base):
-    __tablename__ = "arrival_notification"
-
-    id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    asn_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("asn.id", ondelete="CASCADE"), nullable=False)
-    asn_number: Mapped[str] = mapped_column(String(64), nullable=False)
-    po_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    po_number: Mapped[str] = mapped_column(String(64), nullable=False)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    supplier_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    vehicle_number: Mapped[str] = mapped_column(String(64), nullable=False)
-    expected_arrival_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    driver_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    recipients: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
 class NotificationModel(Base):
@@ -687,12 +627,10 @@ class NotificationModel(Base):
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     link: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    is_read: Mapped[bool] = mapped_column(default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     dock_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     dock_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    dock_location: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    dock_location: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     dock_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     warehouse_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     allocation_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -707,33 +645,4 @@ class NotificationModel(Base):
     notification_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-
-class SupplierUserModel(Base):
-    __tablename__ = "supplier_user"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    supplier_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("supplier.id", ondelete="CASCADE"), nullable=False, unique=True
-    )
-    username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
-    must_change_password: Mapped[bool] = mapped_column(default=False, nullable=False)
-
-    supplier: Mapped[SupplierModel] = relationship("SupplierModel")
-
-
-class QuotationMagicLinkModel(Base):
-    __tablename__ = "quotation_magic_link"
-
-    code: Mapped[str] = mapped_column(String(32), primary_key=True, index=True)
-    rfq_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    po_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    link_type: Mapped[str] = mapped_column(String(32), default="RFQ", nullable=False)
-    supplier_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    username: Mapped[str] = mapped_column(String(64), nullable=False)
-    email: Mapped[str] = mapped_column(String(256), nullable=False)
-    token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    expires_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    used_at: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

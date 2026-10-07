@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from app.database.session import UnitOfWork, get_uow
 from app.modules.gate.infrastructure.persistence.models import DamageReportModel, ReceivingLineModel, ReplacementShipmentModel, SupplierDamageClaimModel, SupplierReturnModel
-from app.modules.procurement.infrastructure.persistence.models import MaterialStockModel, NotificationModel
+from app.common.persistence.models import MaterialStockModel, NotificationModel
 from app.security.dependencies import CurrentUser, get_current_user
 
 router = APIRouter(prefix="/api/damage-claims", tags=["damage-claims"])

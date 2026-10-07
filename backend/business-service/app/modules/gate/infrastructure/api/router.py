@@ -23,7 +23,7 @@ from app.common.email_utils import render_premium_email, send_email
 from app.database.session import UnitOfWork, get_uow
 from app.modules.gate.adapters.mock_adapters import InMemoryGateEntryRepository
 from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, VehicleExitApprovalModel
-from app.modules.procurement.infrastructure.persistence.models import PurchaseOrderModel, AsnModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel
+from app.common.persistence.models import PurchaseOrderModel, AsnModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel
 from app.modules.receiving.infrastructure.persistence.models import GrnLineModel, GrnModel, InventoryReceiptPostingModel
 from app.modules.receiving.domain.events import GrnPostedEvent, PostedInventoryLine
 from app.events.outbox_repository import to_outbox_row

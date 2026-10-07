@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from sqlalchemy import select
 
-from app.modules.procurement.infrastructure.persistence.models import MaterialStockModel
+from app.common.persistence.models import MaterialStockModel
 from app.modules.storage.infrastructure.persistence.models import InventoryLocationBalanceModel, StorageLocationModel
 
 

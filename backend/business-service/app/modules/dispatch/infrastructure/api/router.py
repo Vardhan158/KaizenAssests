@@ -6,7 +6,7 @@ from sqlalchemy import String, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.modules.procurement.infrastructure.persistence.models import NotificationModel
+from app.common.persistence.models import NotificationModel
 from app.modules.dispatch.application.commands import (
     CreateDispatchCommand,
     PickItemsCommand,

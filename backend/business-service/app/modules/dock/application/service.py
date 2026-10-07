@@ -22,7 +22,7 @@ from app.modules.dock.infrastructure.persistence.models import (
     DockMasterModel,
     DockStatusHistoryModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import NotificationModel
+from app.common.persistence.models import NotificationModel
 
 
 class DockAllocationService:
@@ -427,7 +427,7 @@ class DockAllocationService:
         # Fetch Gate Entry for additional details (driver, ASN, PO)
         try:
             from app.modules.gate.infrastructure.persistence.models import GateEntryModel
-            from app.modules.procurement.infrastructure.persistence.models import AsnModel
+            from app.common.persistence.models import AsnModel
             from sqlalchemy import or_
 
             ge_res = await session.execute(
@@ -507,7 +507,7 @@ class DockAllocationService:
 
         if not asn_number:
             try:
-                from app.modules.procurement.infrastructure.persistence.models import AsnModel
+                from app.common.persistence.models import AsnModel
                 asn_res = await session.execute(
                     select(AsnModel).where(AsnModel.vehicle_number == req.vehicle_number).order_by(AsnModel.created_at.desc())
                 )

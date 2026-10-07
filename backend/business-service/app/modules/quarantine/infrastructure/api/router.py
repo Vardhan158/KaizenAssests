@@ -19,7 +19,7 @@ from app.modules.storage.infrastructure.persistence.models import (
     HandlingUnitModel,
     StorageLocationModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import NotificationModel
+from app.common.persistence.models import NotificationModel
 
 router = APIRouter(prefix="/api/quarantine", tags=["quarantine"])
 

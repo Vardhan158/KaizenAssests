@@ -26,7 +26,7 @@ from app.modules.assembly.infrastructure.persistence.models import (
     BillOfMaterialsModel,
     BillOfMaterialsItemModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialIssueModel,
     MaterialStockModel,
     MaterialRequestModel,

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.common.api_model import ApiModel
 from app.database.session import UnitOfWork, get_uow
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialModel,
     MaterialRequestItemModel,
     MaterialRequestModel,
@@ -1364,15 +1364,15 @@ async def create_material_request_for_shortage(
     # Generate sequential Material Request number
     now_utc = datetime.now(timezone.utc)
     current_year = now_utc.year
-    from app.modules.procurement.infrastructure.persistence.repository_impl import SqlAlchemyMaterialRequestRepository
-    from app.modules.procurement.application.use_cases import GetNextMaterialRequestNumberUseCase
-
     try:
-        repo = SqlAlchemyMaterialRequestRepository(uow.session)
-        use_case = GetNextMaterialRequestNumberUseCase(repo)
-        req_no = await use_case.handle()
-    except Exception:
         count_stmt = select(func.count(MaterialRequestModel.id)).where(
+            extract('year', MaterialRequestModel.created_at) == current_year
+        )
+        count_res = await uow.session.execute(count_stmt)
+        req_count = count_res.scalar_one() or 0
+        req_no = f"MR-{current_year}-{req_count + 1:06d}"
+    except Exception:
+        req_no = f"MR-{current_year}-{int(now_utc.timestamp())}"
             MaterialRequestModel.request_number.like(f"MR-{current_year}-%")
         )
         count_res = await uow.session.execute(count_stmt)

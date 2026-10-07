@@ -789,7 +789,7 @@ async def _build_store_dashboard_metrics(uow: UnitOfWork, store: StoreModel) -> 
         InventoryMovementHistoryModel,
     )
     from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
-    from app.modules.procurement.infrastructure.persistence.models import MaterialModel, MaterialStockModel
+    from app.common.persistence.models import MaterialModel, MaterialStockModel
     from app.modules.dock.infrastructure.persistence.models import DockMasterModel, DockAllocationRequestModel
 
     # 1. Zones & Bins in store

@@ -52,8 +52,6 @@ import { Route as MasterDataRouteImport } from './routes/master-data'
 import { Route as MyStoreRouteImport } from './routes/my-store'
 import { Route as NewSupplierRouteImport } from './routes/new-supplier'
 import { Route as NotificationsRouteImport } from './routes/notifications'
-import { Route as ProcurementDashboardRouteImport } from './routes/procurement-dashboard'
-import { Route as PurchaseOrderRouteImport } from './routes/purchase-order'
 import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -69,15 +67,6 @@ import { Route as AssemblyFinishedGoodsRequestsRouteImport } from './routes/asse
 import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
 import { Route as FinanceApprovalsRouteImport } from './routes/finance.approvals'
 import { Route as PoCodeRouteImport } from './routes/po.$code'
-import { Route as ProcurementAsnsRouteImport } from './routes/procurement.asns'
-import { Route as ProcurementFinishedGoodsRouteImport } from './routes/procurement.finished-goods'
-import { Route as ProcurementMaterialRequestsRouteImport } from './routes/procurement.material-requests'
-import { Route as ProcurementNewRfqRouteImport } from './routes/procurement.new-rfq'
-import { Route as ProcurementPurchaseOrdersRouteImport } from './routes/procurement.purchase-orders'
-import { Route as ProcurementQualityIssuesRouteImport } from './routes/procurement.quality-issues'
-import { Route as ProcurementQuotationsRouteImport } from './routes/procurement.quotations'
-import { Route as ProcurementReportsRouteImport } from './routes/procurement.reports'
-import { Route as ProcurementRfqsRouteImport } from './routes/procurement.rfqs'
 import { Route as QCodeRouteImport } from './routes/q.$code'
 import { Route as SupplierSupplierIdRouteImport } from './routes/supplier.$supplierId'
 import { Route as SupplierQualityIssuesRouteImport } from './routes/supplier.quality-issues'
@@ -91,8 +80,6 @@ import { Route as WarehouseQuarantineRouteImport } from './routes/warehouse.quar
 import { Route as WarehouseStoresRouteImport } from './routes/warehouse.stores'
 import { Route as FinanceApprovalsIndexRouteImport } from './routes/finance.approvals.index'
 import { Route as FinanceApprovalsApprovalIdRouteImport } from './routes/finance.approvals.$approvalId'
-import { Route as ProcurementAsnsIndexRouteImport } from './routes/procurement.asns.index'
-import { Route as ProcurementAsnsAsnIdRouteImport } from './routes/procurement.asns.$asnId'
 import { Route as SupplierAsnsNewRouteImport } from './routes/supplier.asns.new'
 import { Route as FinanceApprovalsCompareRfqIdRouteImport } from './routes/finance.approvals.compare.$rfqId'
 
@@ -317,16 +304,6 @@ const NotificationsRoute = NotificationsRouteImport.update({
   path: '/notifications',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProcurementDashboardRoute = ProcurementDashboardRouteImport.update({
-  id: '/procurement-dashboard',
-  path: '/procurement-dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PurchaseOrderRoute = PurchaseOrderRouteImport.update({
-  id: '/purchase-order',
-  path: '/purchase-order',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const PutawayTasksRoute = PutawayTasksRouteImport.update({
   id: '/putaway-tasks',
   path: '/putaway-tasks',
@@ -403,55 +380,6 @@ const PoCodeRoute = PoCodeRouteImport.update({
   path: '/po/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProcurementAsnsRoute = ProcurementAsnsRouteImport.update({
-  id: '/procurement/asns',
-  path: '/procurement/asns',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProcurementFinishedGoodsRoute =
-  ProcurementFinishedGoodsRouteImport.update({
-    id: '/procurement/finished-goods',
-    path: '/procurement/finished-goods',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ProcurementMaterialRequestsRoute =
-  ProcurementMaterialRequestsRouteImport.update({
-    id: '/procurement/material-requests',
-    path: '/procurement/material-requests',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ProcurementNewRfqRoute = ProcurementNewRfqRouteImport.update({
-  id: '/procurement/new-rfq',
-  path: '/procurement/new-rfq',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProcurementPurchaseOrdersRoute =
-  ProcurementPurchaseOrdersRouteImport.update({
-    id: '/procurement/purchase-orders',
-    path: '/procurement/purchase-orders',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ProcurementQualityIssuesRoute =
-  ProcurementQualityIssuesRouteImport.update({
-    id: '/procurement/quality-issues',
-    path: '/procurement/quality-issues',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ProcurementQuotationsRoute = ProcurementQuotationsRouteImport.update({
-  id: '/procurement/quotations',
-  path: '/procurement/quotations',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProcurementReportsRoute = ProcurementReportsRouteImport.update({
-  id: '/procurement/reports',
-  path: '/procurement/reports',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProcurementRfqsRoute = ProcurementRfqsRouteImport.update({
-  id: '/procurement/rfqs',
-  path: '/procurement/rfqs',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const QCodeRoute = QCodeRouteImport.update({
   id: '/q/$code',
   path: '/q/$code',
@@ -523,16 +451,6 @@ const FinanceApprovalsApprovalIdRoute =
     path: '/$approvalId',
     getParentRoute: () => FinanceApprovalsRoute,
   } as any)
-const ProcurementAsnsIndexRoute = ProcurementAsnsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ProcurementAsnsRoute,
-} as any)
-const ProcurementAsnsAsnIdRoute = ProcurementAsnsAsnIdRouteImport.update({
-  id: '/$asnId',
-  path: '/$asnId',
-  getParentRoute: () => ProcurementAsnsRoute,
-} as any)
 const SupplierAsnsNewRoute = SupplierAsnsNewRouteImport.update({
   id: '/supplier/asns/new',
   path: '/supplier/asns/new',
@@ -589,8 +507,6 @@ export interface FileRoutesByFullPath {
   '/my-store': typeof MyStoreRoute
   '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
-  '/procurement-dashboard': typeof ProcurementDashboardRoute
-  '/purchase-order': typeof PurchaseOrderRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
@@ -606,15 +522,6 @@ export interface FileRoutesByFullPath {
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/finance/approvals': typeof FinanceApprovalsRouteWithChildren
   '/po/$code': typeof PoCodeRoute
-  '/procurement/asns': typeof ProcurementAsnsRouteWithChildren
-  '/procurement/finished-goods': typeof ProcurementFinishedGoodsRoute
-  '/procurement/material-requests': typeof ProcurementMaterialRequestsRoute
-  '/procurement/new-rfq': typeof ProcurementNewRfqRoute
-  '/procurement/purchase-orders': typeof ProcurementPurchaseOrdersRoute
-  '/procurement/quality-issues': typeof ProcurementQualityIssuesRoute
-  '/procurement/quotations': typeof ProcurementQuotationsRoute
-  '/procurement/reports': typeof ProcurementReportsRoute
-  '/procurement/rfqs': typeof ProcurementRfqsRoute
   '/q/$code': typeof QCodeRoute
   '/supplier/$supplierId': typeof SupplierSupplierIdRoute
   '/supplier/quality-issues': typeof SupplierQualityIssuesRoute
@@ -627,10 +534,8 @@ export interface FileRoutesByFullPath {
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
   '/finance/approvals/$approvalId': typeof FinanceApprovalsApprovalIdRoute
-  '/procurement/asns/$asnId': typeof ProcurementAsnsAsnIdRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
   '/finance/approvals/': typeof FinanceApprovalsIndexRoute
-  '/procurement/asns/': typeof ProcurementAsnsIndexRoute
   '/finance/approvals/compare/$rfqId': typeof FinanceApprovalsCompareRfqIdRoute
 }
 export interface FileRoutesByTo {
@@ -677,8 +582,6 @@ export interface FileRoutesByTo {
   '/my-store': typeof MyStoreRoute
   '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
-  '/procurement-dashboard': typeof ProcurementDashboardRoute
-  '/purchase-order': typeof PurchaseOrderRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
@@ -693,14 +596,6 @@ export interface FileRoutesByTo {
   '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/po/$code': typeof PoCodeRoute
-  '/procurement/finished-goods': typeof ProcurementFinishedGoodsRoute
-  '/procurement/material-requests': typeof ProcurementMaterialRequestsRoute
-  '/procurement/new-rfq': typeof ProcurementNewRfqRoute
-  '/procurement/purchase-orders': typeof ProcurementPurchaseOrdersRoute
-  '/procurement/quality-issues': typeof ProcurementQualityIssuesRoute
-  '/procurement/quotations': typeof ProcurementQuotationsRoute
-  '/procurement/reports': typeof ProcurementReportsRoute
-  '/procurement/rfqs': typeof ProcurementRfqsRoute
   '/q/$code': typeof QCodeRoute
   '/supplier/$supplierId': typeof SupplierSupplierIdRoute
   '/supplier/quality-issues': typeof SupplierQualityIssuesRoute
@@ -713,10 +608,8 @@ export interface FileRoutesByTo {
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
   '/finance/approvals/$approvalId': typeof FinanceApprovalsApprovalIdRoute
-  '/procurement/asns/$asnId': typeof ProcurementAsnsAsnIdRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
   '/finance/approvals': typeof FinanceApprovalsIndexRoute
-  '/procurement/asns': typeof ProcurementAsnsIndexRoute
   '/finance/approvals/compare/$rfqId': typeof FinanceApprovalsCompareRfqIdRoute
 }
 export interface FileRoutesById {
@@ -764,8 +657,6 @@ export interface FileRoutesById {
   '/my-store': typeof MyStoreRoute
   '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
-  '/procurement-dashboard': typeof ProcurementDashboardRoute
-  '/purchase-order': typeof PurchaseOrderRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
@@ -781,15 +672,6 @@ export interface FileRoutesById {
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/finance/approvals': typeof FinanceApprovalsRouteWithChildren
   '/po/$code': typeof PoCodeRoute
-  '/procurement/asns': typeof ProcurementAsnsRouteWithChildren
-  '/procurement/finished-goods': typeof ProcurementFinishedGoodsRoute
-  '/procurement/material-requests': typeof ProcurementMaterialRequestsRoute
-  '/procurement/new-rfq': typeof ProcurementNewRfqRoute
-  '/procurement/purchase-orders': typeof ProcurementPurchaseOrdersRoute
-  '/procurement/quality-issues': typeof ProcurementQualityIssuesRoute
-  '/procurement/quotations': typeof ProcurementQuotationsRoute
-  '/procurement/reports': typeof ProcurementReportsRoute
-  '/procurement/rfqs': typeof ProcurementRfqsRoute
   '/q/$code': typeof QCodeRoute
   '/supplier/$supplierId': typeof SupplierSupplierIdRoute
   '/supplier/quality-issues': typeof SupplierQualityIssuesRoute
@@ -802,10 +684,8 @@ export interface FileRoutesById {
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
   '/finance/approvals/$approvalId': typeof FinanceApprovalsApprovalIdRoute
-  '/procurement/asns/$asnId': typeof ProcurementAsnsAsnIdRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
   '/finance/approvals/': typeof FinanceApprovalsIndexRoute
-  '/procurement/asns/': typeof ProcurementAsnsIndexRoute
   '/finance/approvals/compare/$rfqId': typeof FinanceApprovalsCompareRfqIdRoute
 }
 export interface FileRouteTypes {
@@ -854,8 +734,6 @@ export interface FileRouteTypes {
     | '/my-store'
     | '/new-supplier'
     | '/notifications'
-    | '/procurement-dashboard'
-    | '/purchase-order'
     | '/putaway-tasks'
     | '/receiving'
     | '/reports'
@@ -871,15 +749,6 @@ export interface FileRouteTypes {
     | '/assembly/requests'
     | '/finance/approvals'
     | '/po/$code'
-    | '/procurement/asns'
-    | '/procurement/finished-goods'
-    | '/procurement/material-requests'
-    | '/procurement/new-rfq'
-    | '/procurement/purchase-orders'
-    | '/procurement/quality-issues'
-    | '/procurement/quotations'
-    | '/procurement/reports'
-    | '/procurement/rfqs'
     | '/q/$code'
     | '/supplier/$supplierId'
     | '/supplier/quality-issues'
@@ -892,10 +761,8 @@ export interface FileRouteTypes {
     | '/warehouse/quarantine'
     | '/warehouse/stores'
     | '/finance/approvals/$approvalId'
-    | '/procurement/asns/$asnId'
     | '/supplier/asns/new'
     | '/finance/approvals/'
-    | '/procurement/asns/'
     | '/finance/approvals/compare/$rfqId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -942,8 +809,6 @@ export interface FileRouteTypes {
     | '/my-store'
     | '/new-supplier'
     | '/notifications'
-    | '/procurement-dashboard'
-    | '/purchase-order'
     | '/putaway-tasks'
     | '/receiving'
     | '/reports'
@@ -958,14 +823,6 @@ export interface FileRouteTypes {
     | '/assembly/finished-goods-requests'
     | '/assembly/requests'
     | '/po/$code'
-    | '/procurement/finished-goods'
-    | '/procurement/material-requests'
-    | '/procurement/new-rfq'
-    | '/procurement/purchase-orders'
-    | '/procurement/quality-issues'
-    | '/procurement/quotations'
-    | '/procurement/reports'
-    | '/procurement/rfqs'
     | '/q/$code'
     | '/supplier/$supplierId'
     | '/supplier/quality-issues'
@@ -978,10 +835,8 @@ export interface FileRouteTypes {
     | '/warehouse/quarantine'
     | '/warehouse/stores'
     | '/finance/approvals/$approvalId'
-    | '/procurement/asns/$asnId'
     | '/supplier/asns/new'
     | '/finance/approvals'
-    | '/procurement/asns'
     | '/finance/approvals/compare/$rfqId'
   id:
     | '__root__'
@@ -1028,8 +883,6 @@ export interface FileRouteTypes {
     | '/my-store'
     | '/new-supplier'
     | '/notifications'
-    | '/procurement-dashboard'
-    | '/purchase-order'
     | '/putaway-tasks'
     | '/receiving'
     | '/reports'
@@ -1045,15 +898,6 @@ export interface FileRouteTypes {
     | '/assembly/requests'
     | '/finance/approvals'
     | '/po/$code'
-    | '/procurement/asns'
-    | '/procurement/finished-goods'
-    | '/procurement/material-requests'
-    | '/procurement/new-rfq'
-    | '/procurement/purchase-orders'
-    | '/procurement/quality-issues'
-    | '/procurement/quotations'
-    | '/procurement/reports'
-    | '/procurement/rfqs'
     | '/q/$code'
     | '/supplier/$supplierId'
     | '/supplier/quality-issues'
@@ -1066,10 +910,8 @@ export interface FileRouteTypes {
     | '/warehouse/quarantine'
     | '/warehouse/stores'
     | '/finance/approvals/$approvalId'
-    | '/procurement/asns/$asnId'
     | '/supplier/asns/new'
     | '/finance/approvals/'
-    | '/procurement/asns/'
     | '/finance/approvals/compare/$rfqId'
   fileRoutesById: FileRoutesById
 }
@@ -1117,8 +959,6 @@ export interface RootRouteChildren {
   MyStoreRoute: typeof MyStoreRoute
   NewSupplierRoute: typeof NewSupplierRoute
   NotificationsRoute: typeof NotificationsRoute
-  ProcurementDashboardRoute: typeof ProcurementDashboardRoute
-  PurchaseOrderRoute: typeof PurchaseOrderRoute
   PutawayTasksRoute: typeof PutawayTasksRoute
   ReceivingRoute: typeof ReceivingRoute
   ReportsRoute: typeof ReportsRoute
@@ -1134,15 +974,6 @@ export interface RootRouteChildren {
   AssemblyRequestsRoute: typeof AssemblyRequestsRoute
   FinanceApprovalsRoute: typeof FinanceApprovalsRouteWithChildren
   PoCodeRoute: typeof PoCodeRoute
-  ProcurementAsnsRoute: typeof ProcurementAsnsRouteWithChildren
-  ProcurementFinishedGoodsRoute: typeof ProcurementFinishedGoodsRoute
-  ProcurementMaterialRequestsRoute: typeof ProcurementMaterialRequestsRoute
-  ProcurementNewRfqRoute: typeof ProcurementNewRfqRoute
-  ProcurementPurchaseOrdersRoute: typeof ProcurementPurchaseOrdersRoute
-  ProcurementQualityIssuesRoute: typeof ProcurementQualityIssuesRoute
-  ProcurementQuotationsRoute: typeof ProcurementQuotationsRoute
-  ProcurementReportsRoute: typeof ProcurementReportsRoute
-  ProcurementRfqsRoute: typeof ProcurementRfqsRoute
   QCodeRoute: typeof QCodeRoute
   SupplierSupplierIdRoute: typeof SupplierSupplierIdRoute
   SupplierQualityIssuesRoute: typeof SupplierQualityIssuesRoute
@@ -1460,20 +1291,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NotificationsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/procurement-dashboard': {
-      id: '/procurement-dashboard'
-      path: '/procurement-dashboard'
-      fullPath: '/procurement-dashboard'
-      preLoaderRoute: typeof ProcurementDashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/purchase-order': {
-      id: '/purchase-order'
-      path: '/purchase-order'
-      fullPath: '/purchase-order'
-      preLoaderRoute: typeof PurchaseOrderRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/putaway-tasks': {
       id: '/putaway-tasks'
       path: '/putaway-tasks'
@@ -1579,69 +1396,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PoCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/procurement/asns': {
-      id: '/procurement/asns'
-      path: '/procurement/asns'
-      fullPath: '/procurement/asns'
-      preLoaderRoute: typeof ProcurementAsnsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/procurement/finished-goods': {
-      id: '/procurement/finished-goods'
-      path: '/procurement/finished-goods'
-      fullPath: '/procurement/finished-goods'
-      preLoaderRoute: typeof ProcurementFinishedGoodsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/procurement/material-requests': {
-      id: '/procurement/material-requests'
-      path: '/procurement/material-requests'
-      fullPath: '/procurement/material-requests'
-      preLoaderRoute: typeof ProcurementMaterialRequestsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/procurement/new-rfq': {
-      id: '/procurement/new-rfq'
-      path: '/procurement/new-rfq'
-      fullPath: '/procurement/new-rfq'
-      preLoaderRoute: typeof ProcurementNewRfqRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/procurement/purchase-orders': {
-      id: '/procurement/purchase-orders'
-      path: '/procurement/purchase-orders'
-      fullPath: '/procurement/purchase-orders'
-      preLoaderRoute: typeof ProcurementPurchaseOrdersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/procurement/quality-issues': {
-      id: '/procurement/quality-issues'
-      path: '/procurement/quality-issues'
-      fullPath: '/procurement/quality-issues'
-      preLoaderRoute: typeof ProcurementQualityIssuesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/procurement/quotations': {
-      id: '/procurement/quotations'
-      path: '/procurement/quotations'
-      fullPath: '/procurement/quotations'
-      preLoaderRoute: typeof ProcurementQuotationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/procurement/reports': {
-      id: '/procurement/reports'
-      path: '/procurement/reports'
-      fullPath: '/procurement/reports'
-      preLoaderRoute: typeof ProcurementReportsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/procurement/rfqs': {
-      id: '/procurement/rfqs'
-      path: '/procurement/rfqs'
-      fullPath: '/procurement/rfqs'
-      preLoaderRoute: typeof ProcurementRfqsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/q/$code': {
       id: '/q/$code'
       path: '/q/$code'
@@ -1733,20 +1487,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FinanceApprovalsApprovalIdRouteImport
       parentRoute: typeof FinanceApprovalsRoute
     }
-    '/procurement/asns/': {
-      id: '/procurement/asns/'
-      path: '/'
-      fullPath: '/procurement/asns/'
-      preLoaderRoute: typeof ProcurementAsnsIndexRouteImport
-      parentRoute: typeof ProcurementAsnsRoute
-    }
-    '/procurement/asns/$asnId': {
-      id: '/procurement/asns/$asnId'
-      path: '/$asnId'
-      fullPath: '/procurement/asns/$asnId'
-      preLoaderRoute: typeof ProcurementAsnsAsnIdRouteImport
-      parentRoute: typeof ProcurementAsnsRoute
-    }
     '/supplier/asns/new': {
       id: '/supplier/asns/new'
       path: '/supplier/asns/new'
@@ -1778,20 +1518,6 @@ const FinanceApprovalsRouteChildren: FinanceApprovalsRouteChildren = {
 
 const FinanceApprovalsRouteWithChildren =
   FinanceApprovalsRoute._addFileChildren(FinanceApprovalsRouteChildren)
-
-interface ProcurementAsnsRouteChildren {
-  ProcurementAsnsAsnIdRoute: typeof ProcurementAsnsAsnIdRoute
-  ProcurementAsnsIndexRoute: typeof ProcurementAsnsIndexRoute
-}
-
-const ProcurementAsnsRouteChildren: ProcurementAsnsRouteChildren = {
-  ProcurementAsnsAsnIdRoute: ProcurementAsnsAsnIdRoute,
-  ProcurementAsnsIndexRoute: ProcurementAsnsIndexRoute,
-}
-
-const ProcurementAsnsRouteWithChildren = ProcurementAsnsRoute._addFileChildren(
-  ProcurementAsnsRouteChildren,
-)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -1837,8 +1563,6 @@ const rootRouteChildren: RootRouteChildren = {
   MyStoreRoute: MyStoreRoute,
   NewSupplierRoute: NewSupplierRoute,
   NotificationsRoute: NotificationsRoute,
-  ProcurementDashboardRoute: ProcurementDashboardRoute,
-  PurchaseOrderRoute: PurchaseOrderRoute,
   PutawayTasksRoute: PutawayTasksRoute,
   ReceivingRoute: ReceivingRoute,
   ReportsRoute: ReportsRoute,
@@ -1854,15 +1578,6 @@ const rootRouteChildren: RootRouteChildren = {
   AssemblyRequestsRoute: AssemblyRequestsRoute,
   FinanceApprovalsRoute: FinanceApprovalsRouteWithChildren,
   PoCodeRoute: PoCodeRoute,
-  ProcurementAsnsRoute: ProcurementAsnsRouteWithChildren,
-  ProcurementFinishedGoodsRoute: ProcurementFinishedGoodsRoute,
-  ProcurementMaterialRequestsRoute: ProcurementMaterialRequestsRoute,
-  ProcurementNewRfqRoute: ProcurementNewRfqRoute,
-  ProcurementPurchaseOrdersRoute: ProcurementPurchaseOrdersRoute,
-  ProcurementQualityIssuesRoute: ProcurementQualityIssuesRoute,
-  ProcurementQuotationsRoute: ProcurementQuotationsRoute,
-  ProcurementReportsRoute: ProcurementReportsRoute,
-  ProcurementRfqsRoute: ProcurementRfqsRoute,
   QCodeRoute: QCodeRoute,
   SupplierSupplierIdRoute: SupplierSupplierIdRoute,
   SupplierQualityIssuesRoute: SupplierQualityIssuesRoute,

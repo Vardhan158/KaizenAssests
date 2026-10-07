@@ -69,7 +69,7 @@ from app.modules.receiving.infrastructure.persistence.models import (
     GrnLineModel,
     GrnModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialModel,
     MaterialVariantModel,
     PurchaseOrderModel,
@@ -831,7 +831,7 @@ async def notify_vendor_damage(
     # ------------------------------------------------------------------------
     # DYNAMIC RECIPIENT RESOLUTION
     # ------------------------------------------------------------------------
-    from app.modules.procurement.infrastructure.persistence.models import (
+    from app.common.persistence.models import (
         PurchaseOrderModel,
         SupplierModel,
         SupplierContactModel,
@@ -1739,7 +1739,7 @@ async def get_grn_detail(
 
     resolved_supplier_email = None
     if grn.po_number:
-        from app.modules.procurement.infrastructure.persistence.models import PurchaseOrderModel, SupplierContactModel, SupplierModel
+        from app.common.persistence.models import PurchaseOrderModel, SupplierContactModel, SupplierModel
         po_res = await uow.session.execute(
             select(PurchaseOrderModel).where(PurchaseOrderModel.po_number.ilike(grn.po_number.strip()))
         )
@@ -1756,7 +1756,7 @@ async def get_grn_detail(
                 resolved_supplier_email = po_obj.supplier_email
 
     if not resolved_supplier_email and (grn.supplier_name or grn.supplier_company_name):
-        from app.modules.procurement.infrastructure.persistence.models import SupplierModel
+        from app.common.persistence.models import SupplierModel
         sup_res = await uow.session.execute(
             select(SupplierModel)
             .options(selectinload(SupplierModel.contact))
