@@ -799,75 +799,132 @@ export function GateEntryScannerScreen({
           ) : null}
         </View>
 
-        /* Screen 10 - Dock Allocation Card */
+        /* Screen 10 & Section 16 - Dock Allocation Card */
         {selectedPo || selectedAsn ? (
-          <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-sky-500/30 shadow-xl`}>
-            <View style={tw`flex-row justify-between items-center mb-3 pb-2 border-b border-slate-700`}>
-              <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase`}>
-                PRE-ALLOCATED DOCK ASSIGNMENT
-              </Text>
-              <View style={tw`bg-emerald-500/20 border border-emerald-500/50 px-2.5 py-0.5 rounded-lg`}>
-                <Text style={tw`text-emerald-400 text-[10px] font-black uppercase`}>
-                  DOCK ASSIGNED
-                </Text>
+          (() => {
+            const currentDock = selectedPo?.dock_number || selectedAsn?.dock_number;
+            const hasDock = Boolean(currentDock && currentDock.trim() && currentDock.toUpperCase() !== "UNASSIGNED");
+
+            if (hasDock) {
+              return (
+                <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-sky-500/30 shadow-xl`}>
+                  <View style={tw`flex-row justify-between items-center mb-3 pb-2 border-b border-slate-700`}>
+                    <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase`}>
+                      PRE-ALLOCATED DOCK ASSIGNMENT
+                    </Text>
+                    <View style={tw`bg-emerald-500/20 border border-emerald-500/50 px-2.5 py-0.5 rounded-lg`}>
+                      <Text style={tw`text-emerald-400 text-[10px] font-black uppercase`}>
+                        DOCK ASSIGNED
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={tw`bg-slate-900 rounded-xl p-3.5 mb-3 border border-slate-700`}>
+                    <View style={tw`flex-row justify-between items-center mb-2`}>
+                      <Text style={tw`text-slate-400 text-[10px] font-extrabold tracking-wider uppercase`}>
+                        ASSIGNED DOCK
+                      </Text>
+                      <Text style={tw`text-sky-400 text-base font-black`}>
+                        {currentDock}
+                      </Text>
+                    </View>
+
+                    <View style={tw`h-px bg-slate-800 my-1.5`} />
+
+                    <View style={tw`flex-row justify-between items-center my-1`}>
+                      <Text style={tw`text-slate-400 text-xs font-semibold`}>Warehouse</Text>
+                      <Text style={tw`text-white text-xs font-bold`}>
+                        {selectedPo?.warehouse || selectedAsn?.warehouse || "Raw Material Warehouse"}
+                      </Text>
+                    </View>
+
+                    <View style={tw`flex-row justify-between items-center my-1`}>
+                      <Text style={tw`text-slate-400 text-xs font-semibold`}>Zone</Text>
+                      <Text style={tw`text-white text-xs font-bold`}>
+                        {selectedPo?.zone || selectedAsn?.zone || "Inbound Receiving"}
+                      </Text>
+                    </View>
+
+                    <View style={tw`flex-row justify-between items-center my-1`}>
+                      <Text style={tw`text-slate-400 text-xs font-semibold`}>Reporting Time</Text>
+                      <Text style={tw`text-emerald-400 text-xs font-black`}>
+                        {selectedPo?.expected_time || "10:45 AM"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={tw`text-slate-400 text-[10px] italic mb-2.5 text-center`}>
+                    * Dock allocation is controlled by Warehouse Manager. Security cannot modify this assignment.
+                  </Text>
+
+                  {/* CTA: [Acknowledge Dock] */}
+                  <TouchableOpacity
+                    style={tw`py-3 rounded-xl items-center border ${
+                      dockAcknowledged
+                        ? "bg-emerald-950/60 border-emerald-500/50"
+                        : "bg-sky-600 border-sky-500"
+                    }`}
+                    onPress={() => {
+                      setDockAcknowledged(true);
+                      Alert.alert("Dock Assignment Acknowledged ✓", "Pre-allocated dock assignment locked for gate pass.");
+                    }}
+                  >
+                    <Text style={tw`text-white font-black text-xs tracking-wider`}>
+                      {dockAcknowledged ? "✓ DOCK ACKNOWLEDGED" : "[ Acknowledge Dock ]"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            }
+
+            // Section 16 - Dock Allocation Pending Scenario
+            return (
+              <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-amber-500/40 shadow-xl`}>
+                <View style={tw`flex-row justify-between items-center mb-3 pb-2 border-b border-slate-700`}>
+                  <Text style={tw`text-amber-400 text-xs font-black tracking-wider uppercase`}>
+                    DOCK ALLOCATION STATUS
+                  </Text>
+                  <View style={tw`bg-amber-500/20 border border-amber-500/50 px-2.5 py-0.5 rounded-lg`}>
+                    <Text style={tw`text-amber-400 text-[10px] font-black uppercase`}>
+                      DOCK ALLOCATION PENDING ⚠️
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={tw`bg-slate-900 rounded-xl p-3.5 mb-3 border border-slate-700`}>
+                  <Text style={tw`text-amber-300 text-xs font-bold mb-1.5`}>
+                    Warehouse Manager has been notified.
+                  </Text>
+                  <Text style={tw`text-slate-300 text-xs mb-2`}>
+                    Vehicle should remain in: <Text style={tw`text-white font-black`}>Gate Waiting Area</Text>
+                  </Text>
+                  <View style={tw`flex-row items-center gap-1.5 bg-amber-950/40 px-2.5 py-1.5 rounded-lg border border-amber-500/30`}>
+                    <Text style={tw`text-amber-400 text-[10px] font-mono font-bold`}>
+                      Vehicle status: WAITING_FOR_DOCK
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={tw`bg-amber-600 py-3 rounded-xl items-center shadow`}
+                  onPress={() => {
+                    const assigned = "Dock D-04";
+                    if (selectedPo) setSelectedPo({ ...selectedPo, dock_number: assigned });
+                    if (selectedAsn) setSelectedAsn({ ...selectedAsn, dock_number: assigned });
+                    setDockAcknowledged(true);
+                    Alert.alert(
+                      "Dock Assigned ✓",
+                      `Vehicle ${formatVehiclePlate(vehicleInput) || "KA 01 AB 4582"}\n\nAssigned Dock: ${assigned}\n\nProceed with Gate Entry.`
+                    );
+                  }}
+                >
+                  <Text style={tw`text-white font-black text-xs tracking-wider`}>
+                    [ ↻ CHECK FOR MANAGER DOCK ALLOCATION ]
+                  </Text>
+                </TouchableOpacity>
               </View>
-            </View>
-
-            <View style={tw`bg-slate-900 rounded-xl p-3.5 mb-3 border border-slate-700`}>
-              <View style={tw`flex-row justify-between items-center mb-2`}>
-                <Text style={tw`text-slate-400 text-[10px] font-extrabold tracking-wider uppercase`}>
-                  ASSIGNED DOCK
-                </Text>
-                <Text style={tw`text-sky-400 text-base font-black`}>
-                  {selectedPo?.dock_number || selectedAsn?.dock_number || "Dock D-04"}
-                </Text>
-              </View>
-
-              <View style={tw`h-px bg-slate-800 my-1.5`} />
-
-              <View style={tw`flex-row justify-between items-center my-1`}>
-                <Text style={tw`text-slate-400 text-xs font-semibold`}>Warehouse</Text>
-                <Text style={tw`text-white text-xs font-bold`}>
-                  {selectedPo?.warehouse || selectedAsn?.warehouse || "Raw Material Warehouse"}
-                </Text>
-              </View>
-
-              <View style={tw`flex-row justify-between items-center my-1`}>
-                <Text style={tw`text-slate-400 text-xs font-semibold`}>Zone</Text>
-                <Text style={tw`text-white text-xs font-bold`}>
-                  {selectedPo?.zone || selectedAsn?.zone || "Inbound Receiving"}
-                </Text>
-              </View>
-
-              <View style={tw`flex-row justify-between items-center my-1`}>
-                <Text style={tw`text-slate-400 text-xs font-semibold`}>Reporting Time</Text>
-                <Text style={tw`text-emerald-400 text-xs font-black`}>
-                  {selectedPo?.expected_time || "10:45 AM"}
-                </Text>
-              </View>
-            </View>
-
-            <Text style={tw`text-slate-400 text-[10px] italic mb-2.5 text-center`}>
-              * Dock allocation is controlled by Warehouse Manager. Security cannot modify this assignment.
-            </Text>
-
-            {/* CTA: [Acknowledge Dock] */}
-            <TouchableOpacity
-              style={tw`py-3 rounded-xl items-center border ${
-                dockAcknowledged
-                  ? "bg-emerald-950/60 border-emerald-500/50"
-                  : "bg-sky-600 border-sky-500"
-              }`}
-              onPress={() => {
-                setDockAcknowledged(true);
-                Alert.alert("Dock Assignment Acknowledged ✓", "Pre-allocated dock assignment locked for gate pass.");
-              }}
-            >
-              <Text style={tw`text-white font-black text-xs tracking-wider`}>
-                {dockAcknowledged ? "✓ DOCK ACKNOWLEDGED" : "[ Acknowledge Dock ]"}
-              </Text>
-            </TouchableOpacity>
-          </View>
+            );
+          })()
         ) : null}
       </View>
       ) : (
