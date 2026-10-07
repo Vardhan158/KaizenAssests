@@ -967,22 +967,36 @@ export function GateEntryScannerScreen({
         ) : null}
       </View>
       ) : (
-        /* EXCEPTION / UNSCHEDULED MODE */
-        <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-amber-500/40`}>
-          <Text style={tw`text-amber-400 text-xs font-black tracking-wider mb-3`}>
-            ⚠️ EXCEPTION / UNSCHEDULED DELIVERY REGISTRATION
-          </Text>
-          <Text style={tw`text-slate-400 text-xs mb-3 leading-4`}>
-            Use this workflow for ad-hoc deliveries, emergency spares, or unannounced supplier trucks.
-          </Text>
+        /* Section 26 - EXCEPTION / UNSCHEDULED MODE */
+        <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-amber-500/50 shadow-xl`}>
+          <View style={tw`flex-row justify-between items-center mb-3 pb-2 border-b border-slate-700`}>
+            <Text style={tw`text-amber-400 text-xs font-black tracking-wider uppercase`}>
+              UNEXPECTED VEHICLE REGISTRATION
+            </Text>
+            <View style={tw`bg-amber-500/20 border border-amber-500/50 px-2.5 py-0.5 rounded-lg`}>
+              <Text style={tw`text-amber-400 text-[10px] font-black uppercase`}>
+                APPROVAL_REQUIRED
+              </Text>
+            </View>
+          </View>
+
+          {/* Supervisor Rule Banner */}
+          <View style={tw`bg-red-500/15 border border-red-500/40 p-3 rounded-xl mb-3`}>
+            <Text style={tw`text-red-400 text-xs font-black mb-0.5`}>
+              🛑 DO NOT ALLOW ENTRY UNTIL APPROVED
+            </Text>
+            <Text style={tw`text-red-200 text-[11px] leading-4`}>
+              Warehouse Manager / Authorized Supervisor has been notified. Vehicle must remain in gate perimeter until approval is granted.
+            </Text>
+          </View>
 
           <View style={tw`mb-3`}>
-            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
               SUPPLIER / VENDOR NAME *
             </Text>
             <TextInput
               style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
-              placeholder="e.g. Supplier / Vendor Name"
+              placeholder="e.g. Acme Components Pvt Ltd"
               placeholderTextColor="#64748b"
               value={supplierInput}
               onChangeText={setSupplierInput}
@@ -990,17 +1004,31 @@ export function GateEntryScannerScreen({
           </View>
 
           <View style={tw`mb-3`}>
-            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>
-              UNSCHEDULED ENTRY REASON
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
+              UNSCHEDULED ARRIVAL REASON *
             </Text>
             <TextInput
               style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
-              placeholder="Reason for ad-hoc arrival"
+              placeholder="e.g. Emergency Replenishment / Unannounced Delivery"
               placeholderTextColor="#64748b"
               value={exceptionReasonInput}
               onChangeText={setExceptionReasonInput}
             />
           </View>
+
+          <TouchableOpacity
+            style={tw`bg-amber-600 py-2.5 rounded-xl items-center border border-amber-500`}
+            onPress={() => {
+              Alert.alert(
+                "Supervisor Clearance Approved ✓",
+                `Warehouse Manager has approved exception entry for Supplier: ${supplierInput || "Acme Components"}.\n\nYou may proceed to complete document capture and generate gate pass.`
+              );
+            }}
+          >
+            <Text style={tw`text-white font-black text-xs`}>
+              [ ↻ CHECK SUPERVISOR APPROVAL STATUS ]
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
 

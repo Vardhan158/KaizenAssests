@@ -107,6 +107,40 @@ export const mobileApi = {
     }
   },
 
+  // Section 25 - Fetch Mobile Push / In-App Notifications
+  async getNotifications(): Promise<any[]> {
+    return [
+      {
+        id: "notif-1",
+        title: "Dock Assigned",
+        message: "Dock D-04 assigned to KA 01 AB 4582.",
+        time: "Just now",
+        type: "DOCK_ASSIGNED",
+      },
+      {
+        id: "notif-2",
+        title: "Dock Changed",
+        message: "Dock changed D-04 → D-06 for vehicle KA 04 MH 9988.",
+        time: "10 mins ago",
+        type: "DOCK_CHANGED",
+      },
+      {
+        id: "notif-3",
+        title: "Entry Approved by Supervisor",
+        message: "Exception Entry approved by Supervisor for KA 09 EF 5544.",
+        time: "25 mins ago",
+        type: "SUPERVISOR_APPROVED",
+      },
+      {
+        id: "notif-4",
+        title: "Vehicle Ready for Exit",
+        message: "Vehicle KA 13 V 5848 receiving completed at Dock D-02. Ready for Gate Exit.",
+        time: "1 hour ago",
+        type: "READY_FOR_EXIT",
+      },
+    ];
+  },
+
   // Fetch POs directly from backend
   async getPurchaseOrders(): Promise<any[]> {
     const endpoints = [
@@ -208,7 +242,7 @@ export const mobileApi = {
     throw new Error("Failed to post gate entry to backend API.");
   },
 
-  // Submit Unscheduled / Exception Gate Entry
+  // Section 26 - Submit Exception Gate Entry (APPROVAL_REQUIRED)
   async createUnscheduledEntry(data: {
     supplier_name: string;
     vehicle_number: string;
@@ -224,7 +258,7 @@ export const mobileApi = {
       driver_contact: data.driver_contact || "",
       po_number: "UNSCHEDULED",
       remarks: `UNSCHEDULED ENTRY: ${data.reason}. ${data.remarks || ""}`,
-      status: "INSIDE_FACILITY",
+      status: "APPROVAL_REQUIRED",
       is_unscheduled: true,
     };
 

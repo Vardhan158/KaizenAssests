@@ -6,6 +6,7 @@ import {
   ScrollView,
   ActivityIndicator,
   TextInput,
+  Modal,
 } from "react-native";
 import tw from "twrnc";
 import { mobileApi } from "../services/api";
@@ -25,6 +26,8 @@ export function HomeScreen({
 }: HomeScreenProps) {
   const [loading, setLoading] = useState(true);
   const [expectedVehicles, setExpectedVehicles] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [stats, setStats] = useState({
     expectedToday: 0,
     waitingAtGate: 0,
@@ -59,11 +62,14 @@ export function HomeScreen({
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [pos, asns, entries] = await Promise.all([
+      const [pos, asns, entries, notifs] = await Promise.all([
         mobileApi.getPurchaseOrders(),
         mobileApi.getAsns(),
         mobileApi.getGateEntries(),
+        mobileApi.getNotifications(),
       ]);
+
+      setNotifications(notifs || []);
 
       const todayStr = new Date().toISOString().split("T")[0];
 
@@ -152,9 +158,25 @@ export function HomeScreen({
         </View>
 
         <View style={tw`items-end`}>
-          <Text style={tw`text-slate-300 text-xs font-mono font-bold`}>{getFormattedDate()}</Text>
+          <View style={tw`flex-row items-center gap-2 mb-1`}>
+            <Text style={tw`text-slate-300 text-xs font-mono font-bold`}>{getFormattedDate()}</Text>
+
+            {/* Notification Bell Icon */}
+            <TouchableOpacity
+              style={tw`bg-slate-800 p-1.5 rounded-lg border border-slate-700 relative`}
+              onPress={() => setShowNotificationsModal(true)}
+            >
+              <Text style={tw`text-sky-400 text-xs`}>🔔</Text>
+              {notifications.length > 0 ? (
+                <View style={tw`absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full items-center justify-center`}>
+                  <Text style={tw`text-white text-[8px] font-black`}>{notifications.length}</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          </View>
+
           <TouchableOpacity
-            style={tw`mt-1 bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700`}
+            style={tw`bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700`}
             onPress={loadDashboardData}
           >
             <Text style={tw`text-sky-400 text-[10px] font-bold`}>↻ REFRESH</Text>
@@ -310,6 +332,43 @@ export function HomeScreen({
           </View>
         ))
       )}
+
+      {/* Section 25 - Push / In-App Notifications Modal */}
+      <Modal visible={showNotificationsModal} animationType="slide" transparent>
+        <View style={tw`flex-1 bg-black/80 justify-end`}>
+          <View style={tw`bg-slate-800 rounded-t-3xl p-5 max-h-[80%] border-t border-sky-500/50 shadow-2xl`}>
+            <View style={tw`flex-row justify-between items-center mb-3 pb-3 border-b border-slate-700`}>
+              <View style={tw`flex-row items-center gap-2`}>
+                <Text style={tw`text-sky-400 text-sm font-black`}>🔔 GATE PUSH NOTIFICATIONS (SECTION 25)</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowNotificationsModal(false)}>
+                <Text style={tw`text-red-400 text-xs font-bold`}>✕ CLOSE</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={tw`mb-3`}>
+              {notifications.map((notif, idx) => (
+                <View key={notif.id || idx} style={tw`bg-slate-900 rounded-2xl p-3.5 mb-2.5 border border-slate-700`}>
+                  <View style={tw`flex-row justify-between items-center mb-1`}>
+                    <Text style={tw`text-sky-400 text-xs font-black`}>
+                      {notif.type === "DOCK_ASSIGNED" ? "📍 DOCK ASSIGNED" : notif.type === "DOCK_CHANGED" ? "🔄 DOCK CHANGED" : notif.type === "SUPERVISOR_APPROVED" ? "✓ ENTRY APPROVED BY SUPERVISOR" : "🚛 VEHICLE READY FOR EXIT"}
+                    </Text>
+                    <Text style={tw`text-slate-500 text-[10px]`}>{notif.time}</Text>
+                  </View>
+                  <Text style={tw`text-white text-xs font-semibold mt-0.5`}>{notif.message}</Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={tw`bg-sky-600 py-3 rounded-xl items-center`}
+              onPress={() => setShowNotificationsModal(false)}
+            >
+              <Text style={tw`text-white text-xs font-black`}>ACKNOWLEDGE & DISMISS</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
