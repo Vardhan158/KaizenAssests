@@ -44,38 +44,70 @@ export function ProfileScreen({ user, onLogout }: ProfileScreenProps) {
 
   return (
     <ScrollView style={tw`flex-1 bg-slate-900`} contentContainerStyle={tw`p-4 pb-10`}>
-      <Text style={tw`text-white text-lg font-black tracking-wider mb-4`}>GATE OFFICER PROFILE</Text>
+      <Text style={tw`text-white text-lg font-black tracking-wider mb-4`}>SECURITY OFFICER PROFILE</Text>
 
-      {/* User Info Card */}
-      <View style={tw`bg-slate-800 rounded-2xl p-5 mb-5 border border-white/10`}>
-        <View style={tw`w-14 h-14 rounded-full bg-sky-600 justify-center items-center self-center mb-2.5`}>
+      {/* User Info & Assignment Card */}
+      <View style={tw`bg-slate-800 rounded-2xl p-5 mb-5 border border-white/10 shadow-xl`}>
+        <View style={tw`w-16 h-16 rounded-full bg-sky-600 justify-center items-center self-center mb-2.5`}>
           <Text style={tw`text-white text-2xl font-black`}>
-            {user?.full_name ? user.full_name.charAt(0).toUpperCase() : "G"}
+            {user?.full_name ? user.full_name.charAt(0).toUpperCase() : "R"}
           </Text>
         </View>
 
-        <Text style={tw`text-white text-base font-bold text-center`}>
-          {user?.full_name || user?.username || "Security Officer"}
+        <Text style={tw`text-white text-lg font-black text-center`}>
+          {user?.full_name || "Rajesh Kumar"}
         </Text>
         <Text style={tw`text-sky-400 text-xs font-bold text-center mt-0.5`}>
-          {user?.roles?.[0] || "GATE_SECURITY"}
+          {user?.role || "Security Officer"}
         </Text>
 
         <View style={tw`h-px bg-slate-700 my-4`} />
 
-        <View style={tw`flex-row justify-between mb-2.5`}>
-          <Text style={tw`text-slate-400 text-xs font-semibold`}>Username</Text>
-          <Text style={tw`text-white text-xs font-bold`}>{user?.username || "N/A"}</Text>
+        {/* Assigned Officer Parameters */}
+        <Text style={tw`text-slate-400 text-[10px] font-extrabold tracking-wider uppercase mb-3`}>
+          ASSIGNED SITE & DUTY METADATA
+        </Text>
+
+        <View style={tw`flex-row justify-between items-center mb-2.5`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Company</Text>
+          <Text style={tw`text-white text-xs font-bold`}>
+            {user?.company || "Kaizentrix Global Manufacturing Ltd"}
+          </Text>
         </View>
 
-        <View style={tw`flex-row justify-between mb-2.5`}>
-          <Text style={tw`text-slate-400 text-xs font-semibold`}>Gate Location</Text>
-          <Text style={tw`text-white text-xs font-bold`}>Main Gate 01</Text>
+        <View style={tw`flex-row justify-between items-center mb-2.5`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Site / Facility</Text>
+          <Text style={tw`text-white text-xs font-bold`}>
+            {user?.site || "Bengaluru Manufacturing Plant"}
+          </Text>
         </View>
 
-        <View style={tw`flex-row justify-between`}>
-          <Text style={tw`text-slate-400 text-xs font-semibold`}>Status</Text>
-          <Text style={tw`text-emerald-400 text-xs font-bold`}>● ACTIVE DUTY</Text>
+        <View style={tw`flex-row justify-between items-center mb-2.5`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Warehouse</Text>
+          <Text style={tw`text-white text-xs font-bold`}>
+            {user?.warehouse || "Central Inbound Warehouse"}
+          </Text>
+        </View>
+
+        <View style={tw`flex-row justify-between items-center mb-2.5`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Gate Assignment</Text>
+          <Text style={tw`text-sky-400 text-xs font-black`}>
+            {user?.gate_location || "Main Gate – 01"}
+          </Text>
+        </View>
+
+        <View style={tw`flex-row justify-between items-center mb-2.5`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Active Shift</Text>
+          <Text style={tw`text-emerald-400 text-xs font-bold`}>
+            {user?.shift || "Morning Shift (06:00 AM - 02:00 PM)"}
+          </Text>
+        </View>
+
+        <View style={tw`flex-row justify-between items-center mt-1`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Employee ID</Text>
+          <Text style={tw`text-slate-300 text-xs font-mono font-bold`}>
+            {user?.username || "EMP-8042"}
+          </Text>
         </View>
       </View>
 

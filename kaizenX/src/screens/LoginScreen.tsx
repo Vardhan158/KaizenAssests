@@ -26,7 +26,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
-      Alert.alert("Required", "Please enter Staff Username and Password.");
+      Alert.alert("Required", "Please enter Employee ID / Username and Password.");
       return;
     }
 
@@ -43,6 +43,27 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     }
   };
 
+  const handleForgotPassword = () => {
+    Alert.alert(
+      "Reset Security Password",
+      "Please contact your Facility IT Administrator or Security Chief to reset your AMS/WMS Gate Officer credentials.\n\nSupport Desk: +91 (80) 4567-8900\nEmail: security-it@kaizentrix.com"
+    );
+  };
+
+  const handleBiometricLogin = () => {
+    Alert.alert(
+      "Biometric Login",
+      "Scanning fingerprint / face ID sensor...\n\nBiometric authentication will load your assigned gate session automatically once hardware sensor is verified."
+    );
+  };
+
+  const handlePinLogin = () => {
+    Alert.alert(
+      "Security PIN Login",
+      "Please enter your 4-digit Security Officer Quick Access PIN configured in Profile Settings."
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -56,23 +77,25 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           </View>
           <Text style={tw`text-white text-3xl font-black tracking-wide`}>KaizenX Mobile</Text>
           <Text style={tw`text-cyan-400 text-xs font-bold tracking-widest mt-0.5 uppercase`}>
-            Gate Entry & Scanner OS
+            Security Gate Management OS
           </Text>
         </View>
 
-        {/* Card Form */}
+        {/* Login Card Form */}
         <View style={tw`bg-slate-800 rounded-3xl p-5 border border-white/10 shadow-2xl`}>
           <Text style={tw`text-white text-lg font-black`}>Security Officer Login</Text>
           <Text style={tw`text-slate-400 text-xs mb-5 mt-0.5`}>
-            Enter staff credentials to access gate entry scanning
+            Sign in to verify inbound vehicles & issue digital gate passes
           </Text>
 
-          {/* Username Input */}
+          {/* Employee ID / Username Field */}
           <View style={tw`mb-4`}>
-            <Text style={tw`text-sky-400 text-[10px] font-black tracking-wider mb-1.5`}>USERNAME</Text>
+            <Text style={tw`text-sky-400 text-[10px] font-black tracking-wider mb-1.5`}>
+              EMPLOYEE ID / USERNAME
+            </Text>
             <TextInput
               style={tw`bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-3 text-white text-sm font-semibold`}
-              placeholder="e.g. gate_security"
+              placeholder="e.g. EMP-8042 or gate_security"
               placeholderTextColor="#94a3b8"
               value={username}
               onChangeText={setUsername}
@@ -80,8 +103,8 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             />
           </View>
 
-          {/* Password Input */}
-          <View style={tw`mb-4`}>
+          {/* Password Field */}
+          <View style={tw`mb-2`}>
             <Text style={tw`text-sky-400 text-[10px] font-black tracking-wider mb-1.5`}>PASSWORD</Text>
             <TextInput
               style={tw`bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-3 text-white text-sm font-semibold`}
@@ -93,20 +116,22 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             />
           </View>
 
-          {/* Server Config Toggle */}
-          <TouchableOpacity
-            style={tw`my-2`}
-            onPress={() => setShowConfig(!showConfig)}
-          >
-            <Text style={tw`text-sky-400 text-xs font-bold`}>
-              {showConfig ? "▲ Hide Server Settings" : "⚙ Server Settings (IP Config)"}
+          {/* Forgot Password Action */}
+          <TouchableOpacity style={tw`align-self-end mb-4`} onPress={handleForgotPassword}>
+            <Text style={tw`text-sky-400 text-xs font-bold text-right`}>Forgot Password?</Text>
+          </TouchableOpacity>
+
+          {/* Server Settings Toggle */}
+          <TouchableOpacity style={tw`mb-3`} onPress={() => setShowConfig(!showConfig)}>
+            <Text style={tw`text-slate-400 text-xs font-bold`}>
+              {showConfig ? "▲ Hide Server Settings" : "⚙ Backend Server Config"}
             </Text>
           </TouchableOpacity>
 
           {showConfig && (
             <View style={tw`bg-slate-900 p-3 rounded-xl mb-4 border border-slate-700`}>
               <Text style={tw`text-sky-400 text-[10px] font-black tracking-wider mb-1`}>
-                BACKEND SERVER URL / IP
+                BACKEND SERVER URL
               </Text>
               <TextInput
                 style={tw`bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs font-mono`}
@@ -119,9 +144,9 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             </View>
           )}
 
-          {/* Login Button */}
+          {/* Main Login Button */}
           <TouchableOpacity
-            style={tw`bg-sky-600 py-3.5 rounded-xl items-center mt-2 shadow-lg ${
+            style={tw`bg-sky-600 py-3.5 rounded-xl items-center shadow-lg ${
               loading ? "opacity-60" : ""
             }`}
             onPress={handleLogin}
@@ -130,9 +155,31 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {loading ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
-              <Text style={tw`text-white font-black text-xs tracking-wider`}>LAUNCH GATE SCANNER →</Text>
+              <Text style={tw`text-white font-black text-xs tracking-wider`}>AUTHENTICATE & LOG IN →</Text>
             )}
           </TouchableOpacity>
+
+          {/* Optional Future Capabilities Section */}
+          <View style={tw`mt-5 pt-4 border-t border-slate-700`}>
+            <Text style={tw`text-slate-500 text-[10px] font-extrabold tracking-wider uppercase mb-2.5 text-center`}>
+              QUICK SECURITY ACCESS OPTIONS
+            </Text>
+            <View style={tw`flex-row gap-2.5`}>
+              <TouchableOpacity
+                style={tw`flex-1 bg-slate-900 py-2.5 rounded-xl items-center border border-slate-700`}
+                onPress={handlePinLogin}
+              >
+                <Text style={tw`text-sky-400 text-[11px] font-bold`}>🔢 PIN Login</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={tw`flex-1 bg-slate-900 py-2.5 rounded-xl items-center border border-slate-700`}
+                onPress={handleBiometricLogin}
+              >
+                <Text style={tw`text-sky-400 text-[11px] font-bold`}>👆 Biometric</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
 
         <Text style={tw`text-slate-600 text-[11px] text-center mt-7`}>
