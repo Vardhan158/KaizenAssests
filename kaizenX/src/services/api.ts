@@ -31,7 +31,7 @@ export async function mobileRequest<T>(endpoint: string, options: RequestInit = 
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2500);
+  const timeoutId = setTimeout(() => controller.abort(), 3500);
 
   try {
     const response = await fetch(url, {
@@ -61,67 +61,6 @@ export async function mobileRequest<T>(endpoint: string, options: RequestInit = 
   }
 }
 
-const DEFAULT_POS = [
-  {
-    id: "po-1",
-    po_number: "PO-2026-0001",
-    supplier_name: "ABC Industrial Supplies",
-    vehicle_number: "KA-13-V-5848",
-    driver_name: "Srujan",
-    driver_contact: "9876543210",
-    dock_number: "DOCK-01",
-    items: [
-      { material_code: "MAT-001-V001", material_name: "RAM", quantity: 100, uom: "PCS" },
-      { material_code: "MAT-002-V001", material_name: "SSD", quantity: 100, uom: "PCS" },
-    ],
-  },
-  {
-    id: "po-2",
-    po_number: "PO-2026-0002",
-    supplier_name: "Karnataka Precision Components",
-    vehicle_number: "KA-04-MH-9988",
-    driver_name: "Suresh Gowda",
-    driver_contact: "9845012345",
-    dock_number: "DOCK-02",
-    items: [
-      { material_code: "MAT-BEARING-09", material_name: "Precision Ball Bearing 6205", quantity: 500, uom: "PCS" },
-      { material_code: "MAT-SHAFT-02", material_name: "Hardened Steel Drive Shaft", quantity: 200, uom: "PCS" },
-    ],
-  },
-  {
-    id: "po-3",
-    po_number: "PO-2026-0003",
-    supplier_name: "Mysore Electricals Ltd",
-    vehicle_number: "KA-09-EF-5544",
-    driver_name: "Anand Murthy",
-    driver_contact: "9731234567",
-    dock_number: "DOCK-03",
-    items: [
-      { material_code: "MAT-CABLE-05", material_name: "Copper Armored Power Cable 4-Core", quantity: 1000, uom: "Meters" },
-    ],
-  },
-];
-
-const DEFAULT_ASNS = [
-  {
-    id: "asn-1",
-    asn_number: "ASN-2026-0001",
-    po_number: "PO-2026-0001",
-    supplier_name: "ABC Industrial Supplies",
-    vehicle_number: "KA-13-V-5848",
-    driver_name: "Srujan",
-    driver_contact: "9876543210",
-    dock_number: "DOCK-01",
-    logistics: [
-      { vehicle_number: "KA-13-V-5848", driver_name: "Srujan", driver_contact: "9876543210", transporter: "VRL Logistics" },
-    ],
-    lines: [
-      { item_code: "MAT-001-V001", material_name: "RAM", quantity: 100, uom: "PCS" },
-      { item_code: "MAT-002-V001", material_name: "SSD", quantity: 100, uom: "PCS" },
-    ],
-  },
-];
-
 export const mobileApi = {
   // Check backend health
   async checkHealth(): Promise<boolean> {
@@ -135,19 +74,10 @@ export const mobileApi = {
 
   // Login Gate Security Staff
   async loginStaff(username: string, password: string): Promise<any> {
-    try {
-      return await mobileRequest<any>("/api/v1/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ username, password }),
-      });
-    } catch {
-      return {
-        token: "mobile-gate-token-local",
-        username: username || "gate_security",
-        roles: ["GATE_SECURITY"],
-        full_name: "Security Officer",
-      };
-    }
+    return await mobileRequest<any>("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
   },
 
   // Fetch POs directly from backend
@@ -161,12 +91,12 @@ export const mobileApi = {
     for (const ep of endpoints) {
       try {
         const res = await mobileRequest<any[]>(ep);
-        if (Array.isArray(res) && res.length > 0) return res;
+        if (Array.isArray(res)) return res;
       } catch {
         // try next endpoint
       }
     }
-    return DEFAULT_POS;
+    return [];
   },
 
   // Fetch ASNs directly from backend
@@ -180,12 +110,12 @@ export const mobileApi = {
     for (const ep of endpoints) {
       try {
         const res = await mobileRequest<any[]>(ep);
-        if (Array.isArray(res) && res.length > 0) return res;
+        if (Array.isArray(res)) return res;
       } catch {
         // try next endpoint
       }
     }
-    return DEFAULT_ASNS;
+    return [];
   },
 
   // Fetch Recent Gate Entries directly from backend
@@ -227,7 +157,7 @@ export const mobileApi = {
       supplier_name: data.supplier_name,
       asn_reference: data.asn_reference || "",
       line_items: data.line_items || [],
-      dock_number: data.dock_number || "DOCK-01",
+      dock_number: data.dock_number || "",
       remarks: data.remarks || "Gate Entry recorded via KaizenX Mobile Scanner",
       status: "INSIDE_FACILITY",
     };
@@ -248,19 +178,7 @@ export const mobileApi = {
       }
     }
 
-    return {
-      id: `GE-${Date.now()}`,
-      gate_entry_number: `GE-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      po_number: data.po_number,
-      vehicle_number: data.vehicle_number,
-      driver_name: data.driver_name,
-      driver_contact: data.driver_contact,
-      supplier_name: data.supplier_name,
-      asn_reference: data.asn_reference,
-      dock_number: data.dock_number || "DOCK-01",
-      status: "INSIDE_FACILITY",
-      created_at: new Date().toISOString(),
-    };
+    throw new Error("Failed to post gate entry to backend API.");
   },
 
   // Submit Unscheduled / Exception Gate Entry
@@ -301,18 +219,6 @@ export const mobileApi = {
       }
     }
 
-    return {
-      id: `GE-UNSCH-${Date.now()}`,
-      gate_entry_number: `GE-EXC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      po_number: "UNSCHEDULED",
-      vehicle_number: data.vehicle_number,
-      driver_name: data.driver_name,
-      driver_contact: data.driver_contact,
-      supplier_name: data.supplier_name,
-      dock_number: "UNASSIGNED",
-      status: "INSIDE_FACILITY",
-      is_unscheduled: true,
-      created_at: new Date().toISOString(),
-    };
+    throw new Error("Failed to post unscheduled gate entry to backend API.");
   },
 };

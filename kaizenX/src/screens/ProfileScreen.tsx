@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import {
-  StyleSheet,
   Text,
   View,
   TouchableOpacity,
@@ -9,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
 } from "react-native";
+import tw from "twrnc";
 import { getServerBaseUrl, setServerBaseUrl, mobileApi } from "../services/api";
 
 interface ProfileScreenProps {
@@ -43,49 +43,50 @@ export function ProfileScreen({ user, onLogout }: ProfileScreenProps) {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      <Text style={styles.headerTitle}>GATE OFFICER PROFILE</Text>
+    <ScrollView style={tw`flex-1 bg-slate-900`} contentContainerStyle={tw`p-4 pb-10`}>
+      <Text style={tw`text-white text-lg font-black tracking-wider mb-4`}>GATE OFFICER PROFILE</Text>
 
       {/* User Info Card */}
-      <View style={styles.card}>
-        <View style={styles.avatarCircle}>
-          <Text style={styles.avatarText}>
+      <View style={tw`bg-slate-800 rounded-2xl p-5 mb-5 border border-white/10`}>
+        <View style={tw`w-14 h-14 rounded-full bg-sky-600 justify-center items-center self-center mb-2.5`}>
+          <Text style={tw`text-white text-2xl font-black`}>
             {user?.full_name ? user.full_name.charAt(0).toUpperCase() : "G"}
           </Text>
         </View>
 
-        <Text style={styles.userName}>{user?.full_name || "Security Officer"}</Text>
-        <Text style={styles.userRole}>{user?.roles?.[0] || "GATE_SECURITY"}</Text>
+        <Text style={tw`text-white text-base font-bold text-center`}>
+          {user?.full_name || user?.username || "Security Officer"}
+        </Text>
+        <Text style={tw`text-sky-400 text-xs font-bold text-center mt-0.5`}>
+          {user?.roles?.[0] || "GATE_SECURITY"}
+        </Text>
 
-        <View style={styles.divider} />
+        <View style={tw`h-px bg-slate-700 my-4`} />
 
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Username</Text>
-          <Text style={styles.infoVal}>{user?.username || "gate_security"}</Text>
+        <View style={tw`flex-row justify-between mb-2.5`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Username</Text>
+          <Text style={tw`text-white text-xs font-bold`}>{user?.username || "N/A"}</Text>
         </View>
 
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Gate Location</Text>
-          <Text style={styles.infoVal}>Gate 01 (Main Gate)</Text>
+        <View style={tw`flex-row justify-between mb-2.5`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Gate Location</Text>
+          <Text style={tw`text-white text-xs font-bold`}>Main Gate 01</Text>
         </View>
 
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Facility Code</Text>
-          <Text style={styles.infoVal}>FAC-BLR-01</Text>
-        </View>
-
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Shift Time</Text>
-          <Text style={styles.infoVal}>06:00 AM - 02:00 PM</Text>
+        <View style={tw`flex-row justify-between`}>
+          <Text style={tw`text-slate-400 text-xs font-semibold`}>Status</Text>
+          <Text style={tw`text-emerald-400 text-xs font-bold`}>● ACTIVE DUTY</Text>
         </View>
       </View>
 
       {/* Server & Connectivity Settings */}
-      <Text style={styles.sectionHeading}>BACKEND API CONFIGURATION</Text>
-      <View style={styles.card}>
-        <Text style={styles.inputLabel}>FastAPI Server Address</Text>
+      <Text style={tw`text-slate-400 text-xs font-black tracking-wider mb-2.5 uppercase`}>
+        BACKEND API CONFIGURATION
+      </Text>
+      <View style={tw`bg-slate-800 rounded-2xl p-5 mb-5 border border-white/10`}>
+        <Text style={tw`text-slate-300 text-xs font-bold mb-1.5`}>FastAPI Server Address</Text>
         <TextInput
-          style={styles.urlInput}
+          style={tw`bg-slate-900 rounded-xl text-sky-400 px-3 py-2.5 border border-slate-700 text-xs font-mono`}
           value={serverUrl}
           onChangeText={setServerUrlText}
           placeholder="http://192.168.1.175:8000"
@@ -94,211 +95,45 @@ export function ProfileScreen({ user, onLogout }: ProfileScreenProps) {
           autoCorrect={false}
         />
 
-        <View style={styles.healthRow}>
-          <Text style={styles.healthLabel}>Backend Server Health:</Text>
+        <View style={tw`flex-row items-center justify-between my-3`}>
+          <Text style={tw`text-slate-400 text-xs`}>Backend Connection:</Text>
           {checkingHealth ? (
             <ActivityIndicator size="small" color="#0284c7" />
           ) : isOnline ? (
-            <View style={styles.onlineTag}>
-              <Text style={styles.onlineTagText}>● ONLINE (PORT 8000)</Text>
+            <View style={tw`bg-emerald-500/15 px-2 py-1 rounded`}>
+              <Text style={tw`text-emerald-400 text-[10px] font-black`}>● ONLINE (PORT 8000)</Text>
             </View>
           ) : (
-            <View style={styles.offlineTag}>
-              <Text style={styles.offlineTagText}>● UNREACHABLE / OFFLINE</Text>
+            <View style={tw`bg-red-500/15 px-2 py-1 rounded`}>
+              <Text style={tw`text-red-400 text-[10px] font-black`}>● UNREACHABLE / OFFLINE</Text>
             </View>
           )}
         </View>
 
-        <View style={styles.btnRow}>
-          <TouchableOpacity style={styles.testBtn} onPress={checkConnection}>
-            <Text style={styles.testBtnText}>TEST CONNECTION</Text>
+        <View style={tw`flex-row gap-2.5`}>
+          <TouchableOpacity
+            style={tw`flex-1 bg-slate-900 py-3 rounded-xl items-center border border-slate-700`}
+            onPress={checkConnection}
+          >
+            <Text style={tw`text-sky-400 text-xs font-bold`}>TEST CONNECTION</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.saveBtn} onPress={handleSaveServerUrl}>
-            <Text style={styles.saveBtnText}>SAVE URL</Text>
+          <TouchableOpacity
+            style={tw`flex-1 bg-sky-600 py-3 rounded-xl items-center`}
+            onPress={handleSaveServerUrl}
+          >
+            <Text style={tw`text-white text-xs font-black`}>SAVE URL</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {/* Logout Action */}
-      <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
-        <Text style={styles.logoutBtnText}>LOGOUT SECURITY SESSION</Text>
+      <TouchableOpacity
+        style={tw`bg-red-950/60 border border-red-500/50 py-3.5 rounded-2xl items-center`}
+        onPress={onLogout}
+      >
+        <Text style={tw`text-red-300 text-xs font-black tracking-wider`}>LOGOUT SECURITY SESSION</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0f172a",
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  headerTitle: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "900",
-    letterSpacing: 1,
-    marginBottom: 16,
-  },
-  card: {
-    backgroundColor: "#1e293b",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  avatarCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#0284c7",
-    justifyContent: "center",
-    alignItems: "center",
-    alignSelf: "center",
-    marginBottom: 10,
-  },
-  avatarText: {
-    color: "#ffffff",
-    fontSize: 24,
-    fontWeight: "900",
-  },
-  userName: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  userRole: {
-    color: "#38bdf8",
-    fontSize: 12,
-    fontWeight: "700",
-    textAlign: "center",
-    marginTop: 2,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#334155",
-    marginVertical: 16,
-  },
-  infoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  infoLabel: {
-    color: "#94a3b8",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  infoVal: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  sectionHeading: {
-    color: "#94a3b8",
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
-  inputLabel: {
-    color: "#cbd5e1",
-    fontSize: 12,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  urlInput: {
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    color: "#38bdf8",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "#334155",
-    fontFamily: "monospace",
-    fontSize: 13,
-  },
-  healthRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 12,
-    marginBottom: 16,
-  },
-  healthLabel: {
-    color: "#94a3b8",
-    fontSize: 12,
-  },
-  onlineTag: {
-    backgroundColor: "rgba(16, 185, 129, 0.15)",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  onlineTagText: {
-    color: "#34d399",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  offlineTag: {
-    backgroundColor: "rgba(239, 68, 68, 0.15)",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  offlineTagText: {
-    color: "#f87171",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  btnRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  testBtn: {
-    flex: 1,
-    backgroundColor: "#0f172a",
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  testBtnText: {
-    color: "#38bdf8",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  saveBtn: {
-    flex: 1,
-    backgroundColor: "#0284c7",
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  saveBtnText: {
-    color: "#ffffff",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  logoutBtn: {
-    backgroundColor: "#7f1d1d",
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#ef4444",
-  },
-  logoutBtnText: {
-    color: "#fca5a5",
-    fontSize: 12,
-    fontWeight: "900",
-    letterSpacing: 1,
-  },
-});

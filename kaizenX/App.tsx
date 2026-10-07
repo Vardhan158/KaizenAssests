@@ -4,8 +4,9 @@
  */
 
 import React, { useState } from "react";
-import { StatusBar, StyleSheet, View, Text, TouchableOpacity } from "react-native";
+import { StatusBar, View, Text, TouchableOpacity } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import tw from "twrnc";
 
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
@@ -58,13 +59,13 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={tw`flex-1 bg-slate-900`}>
         {!user ? (
           <LoginScreen onLoginSuccess={handleLoginSuccess} />
         ) : (
-          <View style={styles.mainContainer}>
+          <View style={tw`flex-1`}>
             {/* Screen Content Container */}
-            <View style={styles.contentContainer}>
+            <View style={tw`flex-1`}>
               {currentScreenOverride === "success" ? (
                 <GateEntrySuccessScreen
                   entryResult={lastEntryResult}
@@ -95,51 +96,59 @@ export default function App() {
             </View>
 
             {/* Bottom Tab Navigation Bar */}
-            <View style={styles.bottomTabBar}>
+            <View style={tw`flex-row bg-slate-800 border-t border-slate-700 py-2 px-2.5 justify-around items-center`}>
               <TouchableOpacity
-                style={[styles.tabItem, activeTab === "HOME" && !currentScreenOverride && styles.tabItemActive]}
+                style={tw`items-center justify-center py-1 px-3 rounded-lg ${
+                  activeTab === "HOME" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                }`}
                 onPress={() => handleTabPress("HOME")}
               >
-                <Text style={[styles.tabIcon, activeTab === "HOME" && !currentScreenOverride && styles.tabIconActive]}>
+                <Text style={tw`text-lg mb-0.5 ${activeTab === "HOME" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
                   🏠
                 </Text>
-                <Text style={[styles.tabLabel, activeTab === "HOME" && !currentScreenOverride && styles.tabLabelActive]}>
+                <Text style={tw`text-[10px] tracking-wider ${activeTab === "HOME" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
                   HOME
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.tabItem, activeTab === "SCAN" && !currentScreenOverride && styles.tabItemActive]}
+                style={tw`items-center justify-center py-1 px-3 rounded-lg ${
+                  activeTab === "SCAN" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                }`}
                 onPress={() => handleTabPress("SCAN")}
               >
-                <Text style={[styles.tabIcon, activeTab === "SCAN" && !currentScreenOverride && styles.tabIconActive]}>
+                <Text style={tw`text-lg mb-0.5 ${activeTab === "SCAN" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
                   📷
                 </Text>
-                <Text style={[styles.tabLabel, activeTab === "SCAN" && !currentScreenOverride && styles.tabLabelActive]}>
+                <Text style={tw`text-[10px] tracking-wider ${activeTab === "SCAN" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
                   SCAN
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.tabItem, activeTab === "VEHICLES" && !currentScreenOverride && styles.tabItemActive]}
+                style={tw`items-center justify-center py-1 px-3 rounded-lg ${
+                  activeTab === "VEHICLES" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                }`}
                 onPress={() => handleTabPress("VEHICLES")}
               >
-                <Text style={[styles.tabIcon, activeTab === "VEHICLES" && !currentScreenOverride && styles.tabIconActive]}>
+                <Text style={tw`text-lg mb-0.5 ${activeTab === "VEHICLES" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
                   🚛
                 </Text>
-                <Text style={[styles.tabLabel, activeTab === "VEHICLES" && !currentScreenOverride && styles.tabLabelActive]}>
+                <Text style={tw`text-[10px] tracking-wider ${activeTab === "VEHICLES" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
                   VEHICLES
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.tabItem, activeTab === "PROFILE" && !currentScreenOverride && styles.tabItemActive]}
+                style={tw`items-center justify-center py-1 px-3 rounded-lg ${
+                  activeTab === "PROFILE" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                }`}
                 onPress={() => handleTabPress("PROFILE")}
               >
-                <Text style={[styles.tabIcon, activeTab === "PROFILE" && !currentScreenOverride && styles.tabIconActive]}>
+                <Text style={tw`text-lg mb-0.5 ${activeTab === "PROFILE" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
                   👤
                 </Text>
-                <Text style={[styles.tabLabel, activeTab === "PROFILE" && !currentScreenOverride && styles.tabLabelActive]}>
+                <Text style={tw`text-[10px] tracking-wider ${activeTab === "PROFILE" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
                   PROFILE
                 </Text>
               </TouchableOpacity>
@@ -150,54 +159,3 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#0f172a",
-  },
-  mainContainer: {
-    flex: 1,
-  },
-  contentContainer: {
-    flex: 1,
-  },
-  bottomTabBar: {
-    flexDirection: "row",
-    backgroundColor: "#1e293b",
-    borderTopWidth: 1,
-    borderTopColor: "#334155",
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    justifyContent: "space-around",
-    alignItems: "center",
-  },
-  tabItem: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  tabItemActive: {
-    backgroundColor: "rgba(56, 189, 248, 0.12)",
-  },
-  tabIcon: {
-    fontSize: 18,
-    marginBottom: 2,
-    opacity: 0.6,
-  },
-  tabIconActive: {
-    opacity: 1,
-  },
-  tabLabel: {
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  tabLabelActive: {
-    color: "#38bdf8",
-    fontWeight: "900",
-  },
-});

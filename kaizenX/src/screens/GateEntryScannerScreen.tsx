@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import {
-  StyleSheet,
   Text,
   View,
   TextInput,
@@ -13,6 +12,7 @@ import {
   Platform,
   Image,
 } from "react-native";
+import tw from "twrnc";
 import { launchCamera, ImagePickerResponse } from "react-native-image-picker";
 import { mobileApi } from "../services/api";
 import { formatVehiclePlate, parseScannedQrCode } from "../utils/vehicleFormatter";
@@ -25,12 +25,12 @@ interface GateEntryScannerScreenProps {
 export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScannerScreenProps) {
   const [entryMode, setEntryMode] = useState<"SCHEDULED" | "EXCEPTION">("SCHEDULED");
 
-  const [searchInput, setSearchInput] = useState("PO-2026-0001");
+  const [searchInput, setSearchInput] = useState("");
   const [vehicleInput, setVehicleInput] = useState("");
   const [driverNameInput, setDriverNameInput] = useState("");
   const [driverContactInput, setDriverContactInput] = useState("");
   const [supplierInput, setSupplierInput] = useState("");
-  const [exceptionReasonInput, setExceptionReasonInput] = useState("Unscheduled Delivery / Emergency Replenishment");
+  const [exceptionReasonInput, setExceptionReasonInput] = useState("");
   const [remarksInput, setRemarksInput] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -129,11 +129,6 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       ]);
       setPoList(pos);
       setAsnList(asns);
-      if (pos.length > 0) {
-        selectAndAutofillPo("PO-2026-0001", pos, asns);
-      } else {
-        setNotFoundError("No Purchase Orders found in backend database.");
-      }
     } catch {
       setNotFoundError("Failed to load backend records.");
     } finally {
@@ -203,7 +198,7 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       resolvedPo.supplierName ||
       matchedAsn?.supplier_name ||
       matchedAsn?.supplierName ||
-      "Supplier";
+      "";
 
     let itemsList: any[] = [];
     if (resolvedPo.items && Array.isArray(resolvedPo.items) && resolvedPo.items.length > 0) {
@@ -325,8 +320,8 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
         const result = await mobileApi.createUnscheduledEntry({
           supplier_name: supplierInput.trim(),
           vehicle_number: formatVehiclePlate(vehicleInput),
-          driver_name: driverNameInput.trim() || "Unregistered Driver",
-          driver_contact: driverContactInput.trim() || "",
+          driver_name: driverNameInput.trim(),
+          driver_contact: driverContactInput.trim(),
           reason: exceptionReasonInput.trim(),
           remarks: remarksInput.trim(),
         });
@@ -335,7 +330,7 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
         onSuccess(result);
       } else {
         const poNum = selectedPo?.po_number || selectedPo?.poNumber || searchInput.trim();
-        const suppName = selectedPo?.supplier_name || selectedPo?.supplierName || supplierInput.trim() || "Supplier";
+        const suppName = selectedPo?.supplier_name || selectedPo?.supplierName || supplierInput.trim();
 
         if (!poNum) {
           Alert.alert("Required", "Please enter or select a valid PO or ASN number.");
@@ -343,7 +338,7 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
           return;
         }
 
-        const dockNo = selectedPo?.dock_number || selectedAsn?.dock_number || "DOCK-01";
+        const dockNo = selectedPo?.dock_number || selectedAsn?.dock_number || "";
 
         const result = await mobileApi.createGateEntry({
           po_number: poNum,
@@ -367,40 +362,55 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <ScrollView style={tw`flex-1 bg-slate-900`} contentContainerStyle={tw`p-4 pb-10`}>
       {/* Top Header */}
-      <View style={styles.navHeader}>
+      <View style={tw`flex-row justify-between items-center mb-3.5`}>
         <View>
-          <Text style={styles.navTitle}>GATE ENTRY SCANNER</Text>
-          <Text style={styles.navSub}>Security Verification Desk</Text>
+          <Text style={tw`text-white text-base font-black tracking-wider`}>GATE ENTRY SCANNER</Text>
+          <Text style={tw`text-cyan-500 text-xs font-bold`}>Security Verification Desk</Text>
         </View>
-        <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
-          <Text style={styles.logoutBtnText}>Exit Session</Text>
+        <TouchableOpacity
+          style={tw`bg-red-500/15 border border-red-500/40 px-3 py-1.5 rounded-lg`}
+          onPress={onLogout}
+        >
+          <Text style={tw`text-red-400 text-xs font-bold`}>Exit Session</Text>
         </TouchableOpacity>
       </View>
 
       {/* Entry Mode Switcher (Scheduled PO vs. Exception Entry) */}
-      <View style={styles.modeToggleRow}>
+      <View style={tw`flex-row bg-slate-800 rounded-xl p-1 mb-3.5 border border-slate-700`}>
         <TouchableOpacity
-          style={[styles.modeTab, entryMode === "SCHEDULED" && styles.modeTabActive]}
+          style={tw`flex-1 py-2.5 items-center rounded-lg ${
+            entryMode === "SCHEDULED" ? "bg-sky-600" : ""
+          }`}
           onPress={() => {
             setEntryMode("SCHEDULED");
             setNotFoundError(null);
           }}
         >
-          <Text style={[styles.modeTabText, entryMode === "SCHEDULED" && styles.modeTabTextActive]}>
+          <Text
+            style={tw`text-xs font-extrabold ${
+              entryMode === "SCHEDULED" ? "text-white" : "text-slate-400"
+            }`}
+          >
             ✓ SCHEDULED PO / ASN
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.modeTab, entryMode === "EXCEPTION" && styles.modeTabActiveAlert]}
+          style={tw`flex-1 py-2.5 items-center rounded-lg ${
+            entryMode === "EXCEPTION" ? "bg-amber-600" : ""
+          }`}
           onPress={() => {
             setEntryMode("EXCEPTION");
             setNotFoundError(null);
           }}
         >
-          <Text style={[styles.modeTabText, entryMode === "EXCEPTION" && styles.modeTabTextActiveAlert]}>
+          <Text
+            style={tw`text-xs font-extrabold ${
+              entryMode === "EXCEPTION" ? "text-white" : "text-slate-400"
+            }`}
+          >
             ⚠️ EXCEPTION / UNSCHEDULED
           </Text>
         </TouchableOpacity>
@@ -408,28 +418,36 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
 
       {/* OPEN REAL DEVICE CAMERA BUTTON */}
       <TouchableOpacity
-        style={styles.openCameraBtn}
+        style={tw`bg-sky-600 rounded-2xl py-3.5 px-4 items-center mb-3.5 shadow-lg`}
         onPress={handleLaunchNativeCamera}
       >
-        <Text style={styles.openCameraBtnText}>📷 OPEN CAMERA BARCODE SCANNER</Text>
-        <Text style={styles.openCameraSub}>Scan PO QR Code, ASN Barcode, or Vehicle Plate</Text>
+        <Text style={tw`text-white text-xs font-black tracking-wider`}>
+          📷 OPEN CAMERA BARCODE SCANNER
+        </Text>
+        <Text style={tw`text-sky-100 text-[10px] mt-0.5`}>
+          Scan PO QR Code, ASN Barcode, or Vehicle Plate
+        </Text>
       </TouchableOpacity>
 
       {/* Display Captured Photo Preview */}
       {capturedImageUri && (
-        <View style={styles.capturedPhotoBox}>
-          <Text style={styles.photoBoxTitle}>📷 CAPTURED VEHICLE / PASS PHOTO</Text>
-          <Image source={{ uri: capturedImageUri }} style={styles.photoPreview} />
+        <View style={tw`bg-slate-800 rounded-2xl p-3 mb-3.5 border border-sky-600 items-center`}>
+          <Text style={tw`text-sky-400 text-[10px] font-black tracking-wider mb-2`}>
+            📷 CAPTURED VEHICLE / PASS PHOTO
+          </Text>
+          <Image source={{ uri: capturedImageUri }} style={tw`w-full h-40 rounded-xl`} />
         </View>
       )}
 
       {entryMode === "SCHEDULED" ? (
-        /* --- SCHEDULED PO / ASN MODE --- */
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>1. SEARCH / SCAN PO OR ASN</Text>
-          <View style={styles.searchRow}>
+        /* SCHEDULED PO / ASN MODE */
+        <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
+          <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-3`}>
+            1. SEARCH / SCAN PO OR ASN
+          </Text>
+          <View style={tw`flex-row gap-2 mb-2.5`}>
             <TextInput
-              style={styles.searchInput}
+              style={tw`flex-1 bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
               placeholder="Type PO / ASN (e.g. PO-2026-0001)"
               placeholderTextColor="#64748b"
               value={searchInput}
@@ -444,81 +462,87 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
             />
 
             <TouchableOpacity
-              style={styles.dbListBtn}
+              style={tw`bg-slate-700 rounded-xl px-2.5 justify-center`}
               onPress={() => setShowPoPickerModal(true)}
             >
-              <Text style={styles.dbListBtnText}>BROWSE DB ▼</Text>
+              <Text style={tw`text-slate-300 text-[10px] font-bold`}>BROWSE DB ▼</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.matchBtn}
+              style={tw`bg-sky-600 rounded-xl px-3 justify-center`}
               onPress={() => selectAndAutofillPo(searchInput)}
             >
-              <Text style={styles.matchBtnText}>FETCH</Text>
+              <Text style={tw`text-white text-xs font-black`}>FETCH</Text>
             </TouchableOpacity>
           </View>
 
           {loading ? (
-            <ActivityIndicator color="#0284c7" style={{ marginTop: 12 }} />
+            <ActivityIndicator color="#0284c7" style={tw`mt-3`} />
           ) : notFoundMessage ? (
-            <View style={styles.notFoundBox}>
-              <Text style={styles.notFoundTitle}>⚠️ EXPECTED DELIVERY NOT FOUND</Text>
-              <Text style={styles.notFoundDesc}>{notFoundMessage}</Text>
+            <View style={tw`bg-red-500/10 rounded-xl p-3.5 border border-red-500/40 mt-1.5`}>
+              <Text style={tw`text-red-400 text-xs font-black`}>⚠️ EXPECTED DELIVERY NOT FOUND</Text>
+              <Text style={tw`text-red-300 text-xs mt-0.5`}>{notFoundMessage}</Text>
               <TouchableOpacity
-                style={styles.exceptionSwitchBtn}
+                style={tw`mt-2.5 bg-amber-600 py-2 px-2.5 rounded-lg items-center`}
                 onPress={() => {
                   setEntryMode("EXCEPTION");
                   setNotFoundError(null);
                 }}
               >
-                <Text style={styles.exceptionSwitchBtnText}>
+                <Text style={tw`text-white text-[10px] font-black`}>
                   → REGISTER AS EXCEPTION / UNSCHEDULED ENTRY
                 </Text>
               </TouchableOpacity>
             </View>
           ) : selectedPo || selectedAsn ? (
-            <View style={styles.matchedBox}>
-              <View style={styles.matchedTop}>
-                <Text style={styles.matchedTitle}>
+            <View style={tw`bg-emerald-500/10 rounded-xl p-3 border border-emerald-500/40 mt-1.5`}>
+              <View style={tw`flex-row justify-between items-center`}>
+                <Text style={tw`text-emerald-400 text-xs font-black`}>
                   ✓ {selectedPo?.po_number || selectedAsn?.asn_number} VERIFIED
                 </Text>
-                <View style={styles.dockBadge}>
-                  <Text style={styles.dockBadgeText}>
-                    📍 DOCK: {selectedPo?.dock_number || selectedAsn?.dock_number || "DOCK-01"}
-                  </Text>
-                </View>
+                {selectedPo?.dock_number || selectedAsn?.dock_number ? (
+                  <View style={tw`bg-sky-600 px-2 py-0.5 rounded`}>
+                    <Text style={tw`text-white text-[9px] font-black`}>
+                      📍 DOCK: {selectedPo?.dock_number || selectedAsn?.dock_number}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
-              <Text style={styles.matchedDesc}>
+              <Text style={tw`text-emerald-200 text-xs mt-1`}>
                 Supplier: {selectedPo?.supplier_name || selectedAsn?.supplier_name || "N/A"}
               </Text>
             </View>
           ) : null}
         </View>
       ) : (
-        /* --- EXCEPTION / UNSCHEDULED MODE --- */
-        <View style={[styles.card, styles.cardAlertBorder]}>
-          <Text style={[styles.sectionTitle, { color: "#fbbf24" }]}>
+        /* EXCEPTION / UNSCHEDULED MODE */
+        <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-amber-500/40`}>
+          <Text style={tw`text-amber-400 text-xs font-black tracking-wider mb-3`}>
             ⚠️ EXCEPTION / UNSCHEDULED DELIVERY REGISTRATION
           </Text>
-          <Text style={styles.exceptionHelpText}>
+          <Text style={tw`text-slate-400 text-xs mb-3 leading-4`}>
             Use this workflow for ad-hoc deliveries, emergency spares, or unannounced supplier trucks.
           </Text>
 
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>SUPPLIER / VENDOR NAME *</Text>
+          <View style={tw`mb-3`}>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>
+              SUPPLIER / VENDOR NAME *
+            </Text>
             <TextInput
-              style={styles.input}
-              placeholder="e.g. Acme Components Pvt Ltd"
+              style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
+              placeholder="e.g. Supplier / Vendor Name"
               placeholderTextColor="#64748b"
               value={supplierInput}
               onChangeText={setSupplierInput}
             />
           </View>
 
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>UNSCHEDULED ENTRY REASON</Text>
+          <View style={tw`mb-3`}>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>
+              UNSCHEDULED ENTRY REASON
+            </Text>
             <TextInput
-              style={styles.input}
+              style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
               placeholder="Reason for ad-hoc arrival"
               placeholderTextColor="#64748b"
               value={exceptionReasonInput}
@@ -530,22 +554,28 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
 
       {/* Multi-Vehicle Picker */}
       {entryMode === "SCHEDULED" && vehiclesExtracted.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>2. SELECT EXPECTED VEHICLE</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.vehicleScroll}>
+        <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
+          <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-3`}>
+            2. SELECT EXPECTED VEHICLE
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={tw`flex-row`}>
             {vehiclesExtracted.map((v) => {
               const isSelected = selectedVehicleIdx === v.index;
               return (
                 <TouchableOpacity
                   key={v.index}
-                  style={[styles.vehicleChip, isSelected && styles.vehicleChipSelected]}
+                  style={tw`bg-slate-900 rounded-xl p-3 mr-2.5 border min-w-[120px] ${
+                    isSelected ? "border-sky-500 bg-sky-500/20" : "border-slate-700"
+                  }`}
                   onPress={() => selectVehicleOption(v)}
                 >
-                  <Text style={[styles.vehiclePlateText, isSelected && styles.vehiclePlateSelectedText]}>
+                  <Text
+                    style={tw`text-xs font-black ${isSelected ? "text-sky-400" : "text-slate-400"}`}
+                  >
                     {v.vehicleNumber || "UNASSIGNED"}
                   </Text>
-                  <Text style={styles.vehicleDriverText}>{v.driverName || "Driver N/A"}</Text>
-                  <Text style={styles.vehicleTransporterText}>{v.transporter || "Logistics"}</Text>
+                  <Text style={tw`text-slate-300 text-[11px] mt-0.5`}>{v.driverName || "Driver N/A"}</Text>
+                  <Text style={tw`text-slate-500 text-[9px] mt-0.5`}>{v.transporter || "Logistics"}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -554,15 +584,17 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
       )}
 
       {/* Vehicle & Driver Details Form */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>
+      <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
+        <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-3`}>
           {entryMode === "SCHEDULED" ? "3. VEHICLE & DRIVER DETAILS" : "2. VEHICLE & DRIVER DETAILS"}
         </Text>
 
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>VEHICLE PLATE NUMBER *</Text>
+        <View style={tw`mb-3`}>
+          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>
+            VEHICLE PLATE NUMBER *
+          </Text>
           <TextInput
-            style={styles.input}
+            style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
             placeholder="e.g. KA-01-AB-1234"
             placeholderTextColor="#64748b"
             value={vehicleInput}
@@ -570,11 +602,11 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
           />
         </View>
 
-        <View style={styles.row}>
-          <View style={[styles.fieldGroup, { flex: 1, marginRight: 8 }]}>
-            <Text style={styles.label}>DRIVER NAME</Text>
+        <View style={tw`flex-row gap-2 mb-3`}>
+          <View style={tw`flex-1`}>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>DRIVER NAME</Text>
             <TextInput
-              style={styles.input}
+              style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
               placeholder="e.g. Driver Name"
               placeholderTextColor="#64748b"
               value={driverNameInput}
@@ -582,10 +614,10 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
             />
           </View>
 
-          <View style={[styles.fieldGroup, { flex: 1, marginLeft: 8 }]}>
-            <Text style={styles.label}>DRIVER PHONE</Text>
+          <View style={tw`flex-1`}>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>DRIVER PHONE</Text>
             <TextInput
-              style={styles.input}
+              style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
               placeholder="Driver Phone"
               placeholderTextColor="#64748b"
               value={driverContactInput}
@@ -595,10 +627,12 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
           </View>
         </View>
 
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>SECURITY REMARKS / SEAL NO.</Text>
+        <View style={tw`mb-1`}>
+          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>
+            SECURITY REMARKS / SEAL NO.
+          </Text>
           <TextInput
-            style={styles.input}
+            style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
             placeholder="e.g. Physical seal intact, container locked"
             placeholderTextColor="#64748b"
             value={remarksInput}
@@ -609,24 +643,24 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
 
       {/* Material Line Items Verification Checklist */}
       {entryMode === "SCHEDULED" && (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>
+        <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
+          <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-3`}>
             4. VERIFIED MATERIAL ITEMS ({lineItems.length})
           </Text>
           {lineItems.length === 0 ? (
-            <Text style={styles.emptyItemsText}>No line items recorded for this PO / ASN in database.</Text>
+            <Text style={tw`text-slate-500 text-xs italic`}>No line items recorded for this PO / ASN in database.</Text>
           ) : (
             lineItems.map((item, idx) => (
-              <View key={idx} style={styles.itemRow}>
-                <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={styles.itemCode}>
+              <View key={idx} style={tw`flex-row justify-between items-center bg-slate-900 p-2.5 rounded-lg mb-1.5`}>
+                <View style={tw`flex-1 mr-2`}>
+                  <Text style={tw`text-sky-400 text-xs font-bold`}>
                     {item.material_code || item.item_code || `ITEM-${idx + 1}`}
                   </Text>
-                  <Text style={styles.itemName}>
+                  <Text style={tw`text-slate-300 text-xs`}>
                     {item.material_name || item.material_description || item.description || "Material Component"}
                   </Text>
                 </View>
-                <Text style={styles.itemQty}>
+                <Text style={tw`text-emerald-400 text-xs font-black`}>
                   {item.quantity || item.shipped_quantity || "0"} {item.uom || "Units"}
                 </Text>
               </View>
@@ -637,18 +671,16 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
 
       {/* Submit Button */}
       <TouchableOpacity
-        style={[
-          styles.submitBtn,
-          entryMode === "EXCEPTION" && styles.submitBtnAlert,
-          submitting && styles.btnDisabled,
-        ]}
+        style={tw`rounded-2xl py-4 items-center mt-2 shadow-lg ${
+          entryMode === "EXCEPTION" ? "bg-amber-600" : "bg-sky-600"
+        } ${submitting ? "opacity-60" : ""}`}
         onPress={handleCreateGateEntry}
         disabled={submitting}
       >
         {submitting ? (
           <ActivityIndicator color="#ffffff" />
         ) : (
-          <Text style={styles.submitBtnText}>
+          <Text style={tw`text-white text-xs font-black tracking-wide`}>
             {entryMode === "SCHEDULED"
               ? "CONFIRM ENTRY & GENERATE GATE PASS ✓"
               : "CONFIRM EXCEPTION ENTRY & GENERATE PASS ⚠️"}
@@ -658,33 +690,37 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
 
       {/* PO / ASN DB PICKER MODAL */}
       <Modal visible={showPoPickerModal} animationType="fade" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>SELECT PURCHASE ORDER / ASN</Text>
+        <View style={tw`flex-1 bg-black/75 justify-center items-center p-5`}>
+          <View style={tw`w-full bg-slate-800 rounded-2xl p-5 border border-slate-700`}>
+            <View style={tw`flex-row justify-between items-center mb-3 pb-2.5 border-b border-slate-700`}>
+              <Text style={tw`text-white text-xs font-black`}>SELECT PURCHASE ORDER / ASN</Text>
               <TouchableOpacity onPress={() => setShowPoPickerModal(false)}>
-                <Text style={styles.modalCloseText}>✕ CLOSE</Text>
+                <Text style={tw`text-red-400 text-xs font-bold`}>✕ CLOSE</Text>
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 320 }}>
+            <ScrollView style={tw`max-h-80`}>
               {poList.length === 0 ? (
-                <Text style={styles.emptyText}>No Purchase Orders available in database.</Text>
+                <Text style={tw`text-slate-500 text-xs text-center my-5`}>
+                  No Purchase Orders available in database.
+                </Text>
               ) : (
                 poList.map((po, idx) => (
                   <TouchableOpacity
                     key={po.id || idx}
-                    style={styles.poListItem}
+                    style={tw`flex-row justify-between items-center bg-slate-900 p-3 rounded-xl mb-2`}
                     onPress={() => {
                       setShowPoPickerModal(false);
                       selectAndAutofillPo(po.po_number || po.poNumber);
                     }}
                   >
                     <View>
-                      <Text style={styles.poListNumber}>{po.po_number || po.poNumber}</Text>
-                      <Text style={styles.poListSupplier}>{po.supplier_name || po.supplierName || "Supplier"}</Text>
+                      <Text style={tw`text-sky-400 text-xs font-bold`}>{po.po_number || po.poNumber}</Text>
+                      <Text style={tw`text-slate-400 text-[11px] mt-0.5`}>
+                        {po.supplier_name || po.supplierName || "Supplier"}
+                      </Text>
                     </View>
-                    <Text style={styles.poListSelect}>Select →</Text>
+                    <Text style={tw`text-emerald-400 text-xs font-bold`}>Select →</Text>
                   </TouchableOpacity>
                 ))
               )}
@@ -695,423 +731,3 @@ export function GateEntryScannerScreen({ onSuccess, onLogout }: GateEntryScanner
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0f172a",
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  navHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 14,
-  },
-  navTitle: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "900",
-    letterSpacing: 1,
-  },
-  navSub: {
-    color: "#06b6d4",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  logoutBtn: {
-    backgroundColor: "rgba(239, 68, 68, 0.15)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.4)",
-  },
-  logoutBtnText: {
-    color: "#f87171",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  modeToggleRow: {
-    flexDirection: "row",
-    backgroundColor: "#1e293b",
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  modeTab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: "center",
-    borderRadius: 8,
-  },
-  modeTabActive: {
-    backgroundColor: "#0284c7",
-  },
-  modeTabActiveAlert: {
-    backgroundColor: "#d97706",
-  },
-  modeTabText: {
-    color: "#64748b",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  modeTabTextActive: {
-    color: "#ffffff",
-    fontWeight: "900",
-  },
-  modeTabTextActiveAlert: {
-    color: "#ffffff",
-    fontWeight: "900",
-  },
-  openCameraBtn: {
-    backgroundColor: "#0284c7",
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    marginBottom: 14,
-    shadowColor: "#0284c7",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  openCameraBtnText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900",
-    letterSpacing: 0.5,
-  },
-  openCameraSub: {
-    color: "#e0f2fe",
-    fontSize: 10,
-    marginTop: 2,
-  },
-  capturedPhotoBox: {
-    backgroundColor: "#1e293b",
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "#0284c7",
-    alignItems: "center",
-  },
-  photoBoxTitle: {
-    color: "#38bdf8",
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  photoPreview: {
-    width: "100%",
-    height: 160,
-    borderRadius: 10,
-  },
-  card: {
-    backgroundColor: "#1e293b",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  cardAlertBorder: {
-    borderColor: "rgba(251, 191, 36, 0.4)",
-  },
-  sectionTitle: {
-    color: "#38bdf8",
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
-  exceptionHelpText: {
-    color: "#94a3b8",
-    fontSize: 11,
-    marginBottom: 12,
-    lineHeight: 16,
-  },
-  searchRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 10,
-  },
-  searchInput: {
-    flex: 1,
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    color: "#ffffff",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 12,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  dbListBtn: {
-    backgroundColor: "#334155",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    justifyContent: "center",
-  },
-  dbListBtnText: {
-    color: "#cbd5e1",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  matchBtn: {
-    backgroundColor: "#0284c7",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    justifyContent: "center",
-  },
-  matchBtnText: {
-    color: "#ffffff",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  notFoundBox: {
-    backgroundColor: "rgba(239, 68, 68, 0.12)",
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.4)",
-    marginTop: 6,
-  },
-  notFoundTitle: {
-    color: "#f87171",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  notFoundDesc: {
-    color: "#fca5a5",
-    fontSize: 11,
-    marginTop: 2,
-  },
-  exceptionSwitchBtn: {
-    marginTop: 10,
-    backgroundColor: "#d97706",
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  exceptionSwitchBtnText: {
-    color: "#ffffff",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  matchedBox: {
-    backgroundColor: "rgba(16, 185, 129, 0.12)",
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "rgba(16, 185, 129, 0.4)",
-    marginTop: 6,
-  },
-  matchedTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  matchedTitle: {
-    color: "#34d399",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  dockBadge: {
-    backgroundColor: "#0284c7",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  dockBadgeText: {
-    color: "#ffffff",
-    fontSize: 9,
-    fontWeight: "900",
-  },
-  matchedDesc: {
-    color: "#a7f3d0",
-    fontSize: 11,
-    marginTop: 4,
-  },
-  vehicleScroll: {
-    flexDirection: "row",
-  },
-  vehicleChip: {
-    backgroundColor: "#0f172a",
-    borderRadius: 12,
-    padding: 12,
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: "#334155",
-    minWidth: 120,
-  },
-  vehicleChipSelected: {
-    borderColor: "#0284c7",
-    backgroundColor: "rgba(2, 132, 199, 0.2)",
-  },
-  vehiclePlateText: {
-    color: "#94a3b8",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  vehiclePlateSelectedText: {
-    color: "#38bdf8",
-  },
-  vehicleDriverText: {
-    color: "#cbd5e1",
-    fontSize: 11,
-    marginTop: 2,
-  },
-  vehicleTransporterText: {
-    color: "#64748b",
-    fontSize: 9,
-    marginTop: 2,
-  },
-  fieldGroup: {
-    marginBottom: 12,
-  },
-  label: {
-    color: "#94a3b8",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  input: {
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    color: "#ffffff",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  row: {
-    flexDirection: "row",
-  },
-  emptyItemsText: {
-    color: "#64748b",
-    fontSize: 11,
-    fontStyle: "italic",
-  },
-  itemRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#0f172a",
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 6,
-  },
-  itemCode: {
-    color: "#38bdf8",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  itemName: {
-    color: "#cbd5e1",
-    fontSize: 11,
-  },
-  itemQty: {
-    color: "#34d399",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  submitBtn: {
-    backgroundColor: "#0284c7",
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: "center",
-    marginTop: 8,
-    shadowColor: "#0284c7",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  submitBtnAlert: {
-    backgroundColor: "#d97706",
-  },
-  btnDisabled: {
-    opacity: 0.6,
-  },
-  submitBtnText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900",
-    letterSpacing: 0.5,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.75)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  modalCard: {
-    width: "100%",
-    backgroundColor: "#1e293b",
-    borderRadius: 18,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 14,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#334155",
-  },
-  modalTitle: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  modalCloseText: {
-    color: "#f87171",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  poListItem: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#0f172a",
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 8,
-  },
-  poListNumber: {
-    color: "#38bdf8",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  poListSupplier: {
-    color: "#94a3b8",
-    fontSize: 11,
-    marginTop: 2,
-  },
-  poListSelect: {
-    color: "#34d399",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  emptyText: {
-    color: "#64748b",
-    fontSize: 12,
-    textAlign: "center",
-    marginVertical: 20,
-  },
-});
