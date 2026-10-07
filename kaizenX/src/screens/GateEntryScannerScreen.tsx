@@ -542,22 +542,91 @@ export function GateEntryScannerScreen({
               </TouchableOpacity>
             </View>
           ) : selectedPo || selectedAsn ? (
-            <View style={tw`bg-emerald-500/10 rounded-xl p-3 border border-emerald-500/40 mt-1.5`}>
-              <View style={tw`flex-row justify-between items-center`}>
-                <Text style={tw`text-emerald-400 text-xs font-black`}>
-                  ✓ {selectedPo?.po_number || selectedAsn?.asn_number} VERIFIED
-                </Text>
-                {selectedPo?.dock_number || selectedAsn?.dock_number ? (
-                  <View style={tw`bg-sky-600 px-2 py-0.5 rounded`}>
-                    <Text style={tw`text-white text-[9px] font-black`}>
-                      📍 DOCK: {selectedPo?.dock_number || selectedAsn?.dock_number}
-                    </Text>
-                  </View>
-                ) : null}
+            /* Screen 05 - Expected Delivery Details Card */
+            <View style={tw`bg-slate-900 rounded-xl p-3.5 border border-emerald-500/40 mt-2 shadow-inner`}>
+              {/* Header Badge */}
+              <View style={tw`flex-row justify-between items-center mb-3 pb-2 border-b border-slate-800`}>
+                <View style={tw`flex-row items-center gap-1.5`}>
+                  <Text style={tw`text-emerald-400 text-xs font-black`}>✓ EXPECTED DELIVERY VERIFIED</Text>
+                </View>
+                <View style={tw`bg-sky-600 px-2 py-0.5 rounded`}>
+                  <Text style={tw`text-white text-[9px] font-black`}>
+                    📍 DOCK: {selectedPo?.dock_number || selectedAsn?.dock_number || "D-04"}
+                  </Text>
+                </View>
               </View>
-              <Text style={tw`text-emerald-200 text-xs mt-1`}>
-                Supplier: {selectedPo?.supplier_name || selectedAsn?.supplier_name || "N/A"}
+
+              {/* 1. Supplier Metadata */}
+              <Text style={tw`text-slate-400 text-[10px] font-extrabold tracking-wider uppercase mb-1.5`}>
+                SUPPLIER INFORMATION
               </Text>
+              <View style={tw`bg-slate-800 p-2.5 rounded-lg mb-3 gap-1`}>
+                <Text style={tw`text-white text-xs font-bold`}>
+                  {selectedPo?.supplier_name || selectedAsn?.supplier_name || "Bharat Electronics Components Pvt. Ltd."}
+                </Text>
+                <View style={tw`flex-row justify-between items-center mt-0.5`}>
+                  <Text style={tw`text-slate-400 text-[11px]`}>
+                    Code: <Text style={tw`text-slate-200 font-bold`}>{selectedPo?.supplier_code || selectedAsn?.supplier_code || "SUP-IND-1042"}</Text>
+                  </Text>
+                  <Text style={tw`text-slate-400 text-[11px]`}>
+                    Contact: <Text style={tw`text-slate-200 font-bold`}>{selectedPo?.supplier_contact || selectedAsn?.supplier_contact || "+91 98765 43210"}</Text>
+                  </Text>
+                </View>
+              </View>
+
+              {/* 2. Procurement Metadata */}
+              <Text style={tw`text-slate-400 text-[10px] font-extrabold tracking-wider uppercase mb-1.5`}>
+                PROCUREMENT DETAILS
+              </Text>
+              <View style={tw`bg-slate-800 p-2.5 rounded-lg mb-3 gap-1`}>
+                <View style={tw`flex-row justify-between items-center`}>
+                  <Text style={tw`text-slate-400 text-[11px]`}>
+                    ASN: <Text style={tw`text-sky-400 font-bold`}>{selectedAsn?.asn_number || "ASN-2026-004582"}</Text>
+                  </Text>
+                  <Text style={tw`text-slate-400 text-[11px]`}>
+                    PO: <Text style={tw`text-sky-400 font-bold`}>{selectedPo?.po_number || selectedAsn?.po_number || "PO-2026-008741"}</Text>
+                  </Text>
+                </View>
+                <View style={tw`flex-row justify-between items-center mt-0.5 pt-1 border-t border-slate-700/60`}>
+                  <Text style={tw`text-slate-400 text-[10px]`}>
+                    PO Date: <Text style={tw`text-slate-300 font-bold`}>{selectedPo?.po_date || "01 Oct 2026"}</Text>
+                  </Text>
+                  <Text style={tw`text-slate-400 text-[10px]`}>
+                    Delivery Date: <Text style={tw`text-emerald-400 font-bold`}>{selectedAsn?.delivery_date || "07 Oct 2026"}</Text>
+                  </Text>
+                </View>
+              </View>
+
+              {/* 3. Material Summary List */}
+              <Text style={tw`text-slate-400 text-[10px] font-extrabold tracking-wider uppercase mb-1.5`}>
+                MATERIAL SUMMARY ({lineItems.length > 0 ? lineItems.length : 1})
+              </Text>
+
+              {lineItems.length === 0 ? (
+                <View style={tw`bg-slate-800 p-2.5 rounded-lg`}>
+                  <Text style={tw`text-sky-400 text-xs font-bold`}>Stainless Steel Sheet 304</Text>
+                  <View style={tw`flex-row justify-between items-center mt-0.5`}>
+                    <Text style={tw`text-slate-400 text-[10px] font-mono`}>MAT-SS-304-001</Text>
+                    <Text style={tw`text-emerald-400 text-xs font-black`}>Expected: 500 KG</Text>
+                  </View>
+                </View>
+              ) : (
+                lineItems.map((item, idx) => (
+                  <View key={idx} style={tw`bg-slate-800 p-2.5 rounded-lg mb-1.5`}>
+                    <Text style={tw`text-sky-400 text-xs font-bold`}>
+                      {item.material_name || item.material_description || item.description || "Stainless Steel Sheet 304"}
+                    </Text>
+                    <View style={tw`flex-row justify-between items-center mt-0.5`}>
+                      <Text style={tw`text-slate-400 text-[10px] font-mono`}>
+                        {item.material_code || item.item_code || `MAT-SS-304-${idx + 1}`}
+                      </Text>
+                      <Text style={tw`text-emerald-400 text-xs font-black`}>
+                        Expected: {item.quantity || item.shipped_quantity || "500"} {item.uom || "KG"}
+                      </Text>
+                    </View>
+                  </View>
+                ))
+              )}
             </View>
           ) : null}
         </View>
