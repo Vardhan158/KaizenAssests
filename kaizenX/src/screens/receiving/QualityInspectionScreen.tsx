@@ -20,21 +20,56 @@ interface QualityInspectionScreenProps {
   user?: any;
 }
 
+export type QcResultType = "ACCEPTED" | "PARTIALLY_ACCEPTED" | "REJECTED" | "ON_HOLD";
+
 export function QualityInspectionScreen({
   unloadedRecord,
   onQcDecisionSubmit,
   onCancel,
   user,
 }: QualityInspectionScreenProps) {
+  // Section 22 Quantities
   const [inspectedQty, setInspectedQty] = useState(
-    String(unloadedRecord?.received_quantity || "500")
+    String(unloadedRecord?.received_quantity || "495")
   );
-  const [acceptedQty, setAcceptedQty] = useState("480");
-  const [rejectedQty, setRejectedQty] = useState("20");
+  const [acceptedQty, setAcceptedQty] = useState("490");
+  const [rejectedQty, setRejectedQty] = useState("5");
   const [holdQty, setHoldQty] = useState("0");
-  const [defectReason, setDefectReason] = useState<
-    "Dimension Tolerance Exceeded" | "Surface Scratch / Dent" | "Moisture Damage" | "Wrong Material / Grade" | "Packaging Damage" | "Other"
-  >("Surface Scratch / Dent");
+
+  // Section 23 Disposition Result
+  const [qcResult, setQcResult] = useState<QcResultType>("PARTIALLY_ACCEPTED");
+
+  // Section 21 Inspection Parameters
+  const [thicknessMeasured, setThicknessMeasured] = useState("2.02");
+  const [surfaceCondition, setSurfaceCondition] = useState<"PASS" | "FAIL">("PASS");
+  const [dimensions, setDimensions] = useState<"PASS" | "FAIL">("PASS");
+  const [materialGrade, setMaterialGrade] = useState<"PASS" | "FAIL">("PASS");
+  const [certVerification, setCertVerification] = useState<"PASS" | "FAIL">("PASS");
+  const [packagingStatus, setPackagingStatus] = useState<"PASS" | "FAIL">("PASS");
+
+  // Section 24 Rejection Reason Categories
+  const [rejectionReason, setRejectionReason] = useState<
+    | "Damaged"
+    | "Wrong Material"
+    | "Wrong Specification"
+    | "Dimensional Failure"
+    | "Quality Failure"
+    | "Expired Material"
+    | "Packaging Failure"
+    | "Quantity Mismatch"
+    | "Contamination"
+    | "Other"
+  >("Dimensional Failure");
+
+  // Section 25 Hold Reasons
+  const [holdReason, setHoldReason] = useState<
+    | "Lab Test Required"
+    | "Certificate Pending"
+    | "Specification Verification"
+    | "Manager Review"
+    | "Supplier Clarification"
+  >("Specification Verification");
+
   const [qcNotes, setQcNotes] = useState("");
   const [qcPhotoUri, setQcPhotoUri] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -63,29 +98,37 @@ export function QualityInspectionScreen({
     const rej = Number(rejectedQty) || 0;
     const hld = Number(holdQty) || 0;
 
+    // Section 22 Rule Check: Accepted + Rejected + Hold == Inspected
     if (acc + rej + hld !== insp) {
       Alert.alert(
-        "Quantity Mismatch",
-        `Accepted (${acc}) + Rejected (${rej}) + Hold (${hld}) = ${acc + rej + hld} KG, which does not equal Inspected Qty (${insp} KG).`
+        "Section 22 Rule Error",
+        `Accepted (${acc}) + Rejected (${rej}) + Hold (${hld}) = ${acc + rej + hld} KG, which does not equal Total Inspected Qty (${insp} KG).`
       );
       return;
     }
 
     setSubmitting(true);
 
-    const isPassed = rej === 0 && hld === 0;
-    const isRejected = acc === 0;
-    const qcStatus = isPassed ? "QUALITY_PASSED" : isRejected ? "QUALITY_REJECTED" : "QUALITY_PARTIAL_HOLD";
-
     const qcRecord = {
       ...unloadedRecord,
-      status: qcStatus,
-      inspected_by: user?.full_name || "Quality Inspector",
+      qc_result: qcResult,
+      status: `QC_${qcResult}`,
+      inspected_by: user?.full_name || "Priya Sharma (QC Inspector)",
       inspected_quantity: insp,
       accepted_quantity: acc,
       rejected_quantity: rej,
       hold_quantity: hld,
-      defect_reason: defectReason,
+      rejection_reason: rej > 0 ? rejectionReason : null,
+      hold_reason: hld > 0 ? holdReason : null,
+      inspection_plan: {
+        thickness_measured: thicknessMeasured,
+        thickness_pass: Number(thicknessMeasured) >= 1.95 && Number(thicknessMeasured) <= 2.05,
+        surface_condition: surfaceCondition,
+        dimensions,
+        material_grade: materialGrade,
+        certificate_verification: certVerification,
+        packaging_status: packagingStatus,
+      },
       qc_notes: qcNotes.trim(),
       qc_photo_uri: qcPhotoUri,
       inspected_at: new Date().toISOString(),
@@ -94,8 +137,8 @@ export function QualityInspectionScreen({
     setTimeout(() => {
       setSubmitting(false);
       Alert.alert(
-        `QC Decision Submitted: ${qcStatus} ✓`,
-        `Inspection for ${qcRecord.vehicle_number || "KA 01 AB 4582"} completed.\n\nAccepted: ${acc} KG\nRejected: ${rej} KG\nHold: ${hld} KG\n\nSubmitted to Storekeeper for GRN posting.`
+        `QC Decision Submitted: ${qcResult} ✓`,
+        `Inspection for ${qcRecord.vehicle_number || "KA 01 AB 4582"} finalized.\n\nAccepted: ${acc} KG\nRejected (Quarantined): ${rej} KG\nHold: ${hld} KG\n\nRecord released to Storekeeper for GRN posting.`
       );
       onQcDecisionSubmit(qcRecord);
     }, 600);
@@ -107,19 +150,11 @@ export function QualityInspectionScreen({
       <View style={tw`flex-row justify-between items-center mb-4`}>
         <View>
           <Text style={tw`text-white text-base font-black tracking-wider`}>QUALITY INSPECTION (QC)</Text>
-          <Text style={tw`text-sky-400 text-xs font-bold mt-0.5`}>Quality Control Desk • Inspector App</Text>
+          <Text style={tw`text-cyan-400 text-xs font-bold mt-0.5`}>Quality Control Desk • Inspector App</Text>
         </View>
         <TouchableOpacity style={tw`bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700`} onPress={onCancel}>
           <Text style={tw`text-slate-300 text-xs font-bold`}>✕ CANCEL</Text>
         </TouchableOpacity>
-      </View>
-
-      {/* Role Scope Notice */}
-      <View style={tw`bg-cyan-950/40 border border-cyan-500/30 p-3 rounded-2xl mb-4`}>
-        <Text style={tw`text-cyan-400 text-xs font-black mb-0.5`}>🔬 QUALITY INSPECTOR SCOPE</Text>
-        <Text style={tw`text-slate-300 text-[11px]`}>
-          Inspect received material, record Accepted, Rejected, and Hold quantities, log defect reasons, and attach defect photographs.
-        </Text>
       </View>
 
       {/* Section 20 - Material Summary Banner */}
@@ -162,15 +197,108 @@ export function QualityInspectionScreen({
         </View>
       </View>
 
-      {/* Inspection Quantities Form */}
+      {/* Section 21 - Inspection Parameters (Quality Plan) */}
       <View style={tw`bg-slate-800 rounded-2xl p-4 mb-4 border border-white/10 shadow-xl`}>
         <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase mb-3`}>
-          INSPECTION QUANTITY DISPOSITION (KG)
+          1. QUALITY PLAN INSPECTION PARAMETERS (SECTION 21)
         </Text>
 
-        <View style={tw`mb-3`}>
+        {/* Thickness Param */}
+        <View style={tw`bg-slate-900 p-3 rounded-xl mb-2.5 border border-slate-700`}>
+          <View style={tw`flex-row justify-between items-center mb-1`}>
+            <Text style={tw`text-slate-300 text-xs font-bold`}>Thickness (Required: 2.00 ± 0.05 mm)</Text>
+            <Text style={tw`text-emerald-400 text-xs font-black`}>✓ PASS</Text>
+          </View>
+          <View style={tw`flex-row items-center gap-2 mt-1`}>
+            <Text style={tw`text-slate-400 text-[10px]`}>Measured Value:</Text>
+            <TextInput
+              style={tw`flex-1 bg-slate-800 text-white font-mono px-3 py-1.5 rounded text-xs border border-slate-700`}
+              value={thicknessMeasured}
+              onChangeText={setThicknessMeasured}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
+
+        {/* Parameter Checklist */}
+        <View style={tw`gap-1.5`}>
+          {[
+            { label: "Surface Condition", state: surfaceCondition, setFn: setSurfaceCondition },
+            { label: "Dimensions", state: dimensions, setFn: setDimensions },
+            { label: "Material Grade", state: materialGrade, setFn: setMaterialGrade },
+            { label: "Certificate Verification", state: certVerification, setFn: setCertVerification },
+            { label: "Packaging Condition", state: packagingStatus, setFn: setPackagingStatus },
+          ].map((param, idx) => (
+            <View key={idx} style={tw`flex-row justify-between items-center bg-slate-900 px-3 py-2 rounded-xl`}>
+              <Text style={tw`text-slate-300 text-xs font-semibold`}>{param.label}</Text>
+              <View style={tw`flex-row gap-1`}>
+                <TouchableOpacity
+                  style={tw`px-2.5 py-1 rounded ${
+                    param.state === "PASS" ? "bg-emerald-600" : "bg-slate-800"
+                  }`}
+                  onPress={() => param.setFn("PASS")}
+                >
+                  <Text style={tw`text-white text-[10px] font-black`}>PASS</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={tw`px-2.5 py-1 rounded ${
+                    param.state === "FAIL" ? "bg-red-600" : "bg-slate-800"
+                  }`}
+                  onPress={() => param.setFn("FAIL")}
+                >
+                  <Text style={tw`text-white text-[10px] font-black`}>FAIL</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* Section 22 & 23 - QC Disposition & Quantity Rule */}
+      <View style={tw`bg-slate-800 rounded-2xl p-4 mb-4 border border-white/10 shadow-xl`}>
+        <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase mb-2`}>
+          2. QC DISPOSITION RESULT (SECTION 23)
+        </Text>
+
+        <View style={tw`flex-row flex-wrap gap-1.5 mb-3`}>
+          {[
+            { id: "ACCEPTED", label: "ACCEPTED" },
+            { id: "PARTIALLY_ACCEPTED", label: "PARTIALLY ACCEPTED" },
+            { id: "REJECTED", label: "REJECTED" },
+            { id: "ON_HOLD", label: "ON HOLD" },
+          ].map((r) => {
+            const active = qcResult === r.id;
+            return (
+              <TouchableOpacity
+                key={r.id}
+                style={tw`px-3 py-1.5 rounded-lg border ${
+                  active
+                    ? r.id === "ACCEPTED"
+                      ? "bg-emerald-600 border-emerald-500"
+                      : r.id === "REJECTED"
+                      ? "bg-red-600 border-red-500"
+                      : "bg-amber-600 border-amber-500"
+                    : "bg-slate-900 border-slate-700"
+                }`}
+                onPress={() => setQcResult(r.id as any)}
+              >
+                <Text style={tw`text-xs font-bold ${active ? "text-white" : "text-slate-400"}`}>
+                  {r.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Section 22 Quantity Rule */}
+        <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase mb-2`}>
+          3. DISPOSITION QUANTITIES (SECTION 22)
+        </Text>
+
+        <View style={tw`mb-2.5`}>
           <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
-            TOTAL INSPECTED QUANTITY *
+            TOTAL INSPECTED QTY (KG) *
           </Text>
           <TextInput
             style={tw`bg-slate-900 rounded-xl text-white text-sm font-black px-3.5 py-2.5 border border-slate-700`}
@@ -183,7 +311,7 @@ export function QualityInspectionScreen({
         <View style={tw`flex-row gap-2 mb-3`}>
           <View style={tw`flex-1`}>
             <Text style={tw`text-emerald-400 text-[10px] font-black tracking-wider mb-1 uppercase`}>
-              ACCEPTED QTY *
+              ACCEPTED *
             </Text>
             <TextInput
               style={tw`bg-slate-900 rounded-xl text-emerald-400 text-sm font-black px-3 py-2.5 border border-slate-700`}
@@ -195,7 +323,7 @@ export function QualityInspectionScreen({
 
           <View style={tw`flex-1`}>
             <Text style={tw`text-red-400 text-[10px] font-black tracking-wider mb-1 uppercase`}>
-              REJECTED QTY *
+              REJECTED *
             </Text>
             <TextInput
               style={tw`bg-slate-900 rounded-xl text-red-400 text-sm font-black px-3 py-2.5 border border-slate-700`}
@@ -218,41 +346,88 @@ export function QualityInspectionScreen({
           </View>
         </View>
 
-        {/* Defect Reason Selector */}
-        {Number(rejectedQty) > 0 || Number(holdQty) > 0 ? (
-          <View style={tw`mb-3`}>
-            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1.5 uppercase`}>
-              DEFECT REASON *
+        <Text style={tw`text-slate-500 text-[10px] italic text-center mb-2`}>
+          * Enforced Rule: Accepted ({acceptedQty}) + Rejected ({rejectedQty}) + Hold ({holdQty}) = Total Inspected ({inspectedQty})
+        </Text>
+
+        {/* Section 24 - Rejected Material Reason & Quarantine Rule */}
+        {Number(rejectedQty) > 0 && (
+          <View style={tw`bg-red-950/40 border border-red-500/50 p-3 rounded-xl mb-3`}>
+            <Text style={tw`text-red-400 text-xs font-black uppercase mb-1`}>
+              ⚠️ REJECTED MATERIAL CATEGORY (SECTION 24)
             </Text>
+            <Text style={tw`text-red-200 text-[10px] mb-2`}>
+              * Rejected material will be quarantined and NOT become unrestricted available inventory.
+            </Text>
+
             <View style={tw`flex-row flex-wrap gap-1.5`}>
               {[
-                "Surface Scratch / Dent",
-                "Dimension Tolerance Exceeded",
-                "Moisture Damage",
-                "Wrong Material / Grade",
-                "Packaging Damage",
+                "Damaged",
+                "Wrong Material",
+                "Wrong Specification",
+                "Dimensional Failure",
+                "Quality Failure",
+                "Expired Material",
+                "Packaging Failure",
+                "Quantity Mismatch",
+                "Contamination",
                 "Other",
-              ].map((dr) => {
-                const active = defectReason === dr;
+              ].map((rr) => {
+                const active = rejectionReason === rr;
                 return (
                   <TouchableOpacity
-                    key={dr}
-                    style={tw`px-2.5 py-1.5 rounded-lg border ${
-                      active
-                        ? "bg-red-600 border-red-500"
-                        : "bg-slate-900 border-slate-700"
+                    key={rr}
+                    style={tw`px-2 py-1 rounded border ${
+                      active ? "bg-red-600 border-red-500" : "bg-slate-900 border-slate-700"
                     }`}
-                    onPress={() => setDefectReason(dr as any)}
+                    onPress={() => setRejectionReason(rr as any)}
                   >
-                    <Text style={tw`text-[11px] font-bold ${active ? "text-white" : "text-slate-400"}`}>
-                      {dr}
+                    <Text style={tw`text-[10px] font-bold ${active ? "text-white" : "text-slate-400"}`}>
+                      {rr}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
           </View>
-        ) : null}
+        )}
+
+        {/* Section 25 - Hold / Quarantine Reason */}
+        {Number(holdQty) > 0 && (
+          <View style={tw`bg-amber-950/40 border border-amber-500/50 p-3 rounded-xl mb-3`}>
+            <Text style={tw`text-amber-400 text-xs font-black uppercase mb-1`}>
+              ⚠️ QC HOLD / QUARANTINE REASON (SECTION 25)
+            </Text>
+            <Text style={tw`text-slate-300 text-[10px] mb-2`}>
+              * Held material remains blocked in quarantine until final disposition.
+            </Text>
+
+            <View style={tw`flex-row flex-wrap gap-1.5`}>
+              {[
+                "Lab Test Required",
+                "Certificate Pending",
+                "Specification Verification",
+                "Manager Review",
+                "Supplier Clarification",
+              ].map((hr) => {
+                const active = holdReason === hr;
+                return (
+                  <TouchableOpacity
+                    key={hr}
+                    style={tw`px-2 py-1 rounded border ${
+                      active ? "bg-amber-600 border-amber-500" : "bg-slate-900 border-slate-700"
+                    }`}
+                    onPress={() => setHoldReason(hr as any)}
+                  >
+                    <Text style={tw`text-[10px] font-bold ${active ? "text-white" : "text-slate-400"}`}>
+                      {hr}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {/* QC Notes & Defect Photograph */}
         <View style={tw`mb-3`}>
@@ -261,7 +436,7 @@ export function QualityInspectionScreen({
           </Text>
           <TextInput
             style={tw`bg-slate-900 rounded-xl text-white px-3.5 py-2.5 text-xs border border-slate-700`}
-            placeholder="e.g. Minor corner burr on 20 sheets, grade certificate verified"
+            placeholder="e.g. Thickness measured 2.02mm, minor scratch on 5 KG"
             placeholderTextColor="#64748b"
             value={qcNotes}
             onChangeText={setQcNotes}
