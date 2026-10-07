@@ -173,13 +173,27 @@ export function GateEntryScannerScreen({
     const matchedPo = availablePos.find((candidate: any) => {
       const p1 = String(candidate.po_number || candidate.poNumber || "").toUpperCase();
       const p2 = normalizePo(p1);
-      return p1 === lookupRaw || (p2 && p2 === targetPoNorm);
+      const veh = String(candidate.vehicle_number || candidate.vehicleNumber || "").toUpperCase();
+      const sup = String(candidate.supplier_name || candidate.supplierName || "").toUpperCase();
+      return (
+        p1 === lookupRaw ||
+        (p2 && p2 === targetPoNorm) ||
+        (lookupRaw.length >= 3 && veh.includes(lookupRaw)) ||
+        (lookupRaw.length >= 3 && sup.includes(lookupRaw))
+      );
     });
 
     const matchingAsns = availableAsns.filter((candidate: any) => {
       const a1 = String(candidate.asn_number || candidate.asnNumber || "").toUpperCase();
       const a2 = normalizePo(candidate.po_number || candidate.poNumber);
-      return a1 === lookupRaw || (a2 && a2 === targetPoNorm);
+      const veh = String(candidate.vehicle_number || candidate.vehicleNumber || "").toUpperCase();
+      const sup = String(candidate.supplier_name || candidate.supplierName || "").toUpperCase();
+      return (
+        a1 === lookupRaw ||
+        (a2 && a2 === targetPoNorm) ||
+        (lookupRaw.length >= 3 && veh.includes(lookupRaw)) ||
+        (lookupRaw.length >= 3 && sup.includes(lookupRaw))
+      );
     });
 
     const matchedAsn = matchingAsns[0];
@@ -448,16 +462,40 @@ export function GateEntryScannerScreen({
         </View>
       )}
 
+      {/* Screen 04 - Scan / Search Delivery */}
       {entryMode === "SCHEDULED" ? (
         /* SCHEDULED PO / ASN MODE */
         <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
-          <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-3`}>
-            1. SEARCH / SCAN PO OR ASN
+          <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-2.5 uppercase`}>
+            SEARCH DELIVERY
           </Text>
-          <View style={tw`flex-row gap-2 mb-2.5`}>
+
+          {/* Camera Scan QR CTA */}
+          <TouchableOpacity
+            style={tw`bg-sky-600 rounded-xl py-3 px-3.5 items-center mb-3 shadow-md flex-row justify-center gap-2`}
+            onPress={handleLaunchNativeCamera}
+          >
+            <Text style={tw`text-white text-base`}>📷</Text>
+            <View style={tw`items-center`}>
+              <Text style={tw`text-white text-xs font-black tracking-wider`}>[ SCAN QR CODE ]</Text>
+              <Text style={tw`text-sky-100 text-[9px]`}>Scan ASN QR, Supplier Delivery QR, or Shipment QR</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={tw`flex-row items-center my-1.5`}>
+            <View style={tw`flex-1 h-px bg-slate-700`} />
+            <Text style={tw`text-slate-400 text-[10px] font-black px-2.5`}>OR MANUAL SEARCH</Text>
+            <View style={tw`flex-1 h-px bg-slate-700`} />
+          </View>
+
+          <Text style={tw`text-slate-400 text-[10px] font-extrabold tracking-wider mb-1.5 uppercase mt-1`}>
+            ASN / PO / VEHICLE NUMBER / SUPPLIER
+          </Text>
+
+          <View style={tw`flex-row gap-2 mb-2`}>
             <TextInput
-              style={tw`flex-1 bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
-              placeholder="Type PO / ASN (e.g. PO-2026-0001)"
+              style={tw`flex-1 bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700 font-semibold`}
+              placeholder="Enter ASN, PO, Vehicle, or Supplier..."
               placeholderTextColor="#64748b"
               value={searchInput}
               onChangeText={(text) => {
@@ -478,10 +516,10 @@ export function GateEntryScannerScreen({
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={tw`bg-sky-600 rounded-xl px-3 justify-center`}
+              style={tw`bg-sky-600 rounded-xl px-3.5 justify-center`}
               onPress={() => selectAndAutofillPo(searchInput)}
             >
-              <Text style={tw`text-white text-xs font-black`}>FETCH</Text>
+              <Text style={tw`text-white text-xs font-black`}>SEARCH</Text>
             </TouchableOpacity>
           </View>
 
