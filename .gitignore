@@ -1,0 +1,68 @@
+# Media Uploads & Temp files
+media_uploads/
+*.log
+.DS_Store
+
+# Environment files
+.env
+.env.*
+.env.local
+.env.production
+!.env.example
+*.env
+
+# Python / Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.pytest-tmp/
+.coverage
+htmlcov/
+
+# Node / Frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+dist-ssr/
+*.local
+.output/
+.nitro/
+.wrangler/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Java / Maven target directories
+target/
+**/target/
+
+# Uploads & temporary media
+media_uploads/
+**/media_uploads/
+uploads/
+
+# Cloned or temporary artifacts
+.artifacts/
+/WMS/
+*.log
+# Compiler metadata
+*.iml
+*.tsbuildinfo
+
+# Python caches and local tooling
+.ruff_cache/
+**/.env

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.ams</groupId>
+        <artifactId>ams-wms-platform</artifactId>
+        <version>2.0.0</version>
+    </parent>
+
+    <artifactId>common</artifactId>
+    <packaging>jar</packaging>
+
+    <!--
+        Trimmed down for the post-migration architecture: this is now a
+        shared library for auth-service ONLY (generic exception types and
+        the HTTP error-shape/handler pattern). The outbox/domain-event
+        machinery that used to live here moved to Python
+        (business-service/app/common/domain and app/events) since it now
+        serves the business modules exclusively.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+    </dependencies>
+</project>

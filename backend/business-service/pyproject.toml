@@ -1,0 +1,54 @@
+[project]
+name = "ams-wms-business-service"
+version = "1.0.0"
+description = "AMS/WMS business backend — FastAPI, DDD, Clean Architecture"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-multipart==0.0.20",
+    "sqlalchemy==2.0.36",
+    "asyncpg==0.30.0",
+    "alembic==1.14.0",
+    "aiokafka==0.12.0",
+    "redis==5.2.1",
+    "python-jose[cryptography]==3.3.0",
+    "httpx==0.28.1",
+    "apscheduler==3.11.0",
+    "prometheus-fastapi-instrumentator==7.0.0",
+    "opentelemetry-distro==0.50b0",
+    "opentelemetry-exporter-otlp==1.29.0",
+    "google-genai>=1.0.0,<2.0.0",
+    "Pillow==11.0.0",
+    "reportlab==4.2.5",
+    "opencv-contrib-python==4.10.0.84",
+    "pytesseract==0.3.13",
+    "paddleocr==3.7.0",
+    "paddlex[ocr-core]==3.7.2",
+    "paddlepaddle==3.3.1",
+    "greenlet>=3.5.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "aiosqlite>=0.20.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv]
+link-mode = "copy"
+
