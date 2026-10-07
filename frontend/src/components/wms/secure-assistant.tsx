@@ -40,19 +40,13 @@ const roleModules: Record<string, { label: string; links: { label: string; to: s
       { label: "Putaway tasks", to: "/putaway-tasks" },
     ],
   },
-  FINANCE: {
-    label: "Finance",
-    links: [
-      { label: "Finance dashboard", to: "/finance-dashboard" },
-      { label: "Reports", to: "/reports" },
-    ],
-  },
   ADMIN: {
     label: "Administration",
     links: [
       { label: "User management", to: "/admin/users" },
       { label: "Warehouse dashboard", to: "/warehouse-dashboard" },
-      { label: "Procurement dashboard", to: "/procurement-dashboard" },
+    ],
+  },
     ],
   },
 };

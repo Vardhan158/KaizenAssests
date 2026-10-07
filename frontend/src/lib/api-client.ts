@@ -1576,10 +1576,6 @@ export const api = {
     }, 2000);
   },
 
-  async getFinanceApprovals(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/finance-approvals`);
-  },
-
   async approvePurchaseOrder(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}/approve`, {
       method: "POST",

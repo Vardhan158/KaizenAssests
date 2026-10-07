@@ -186,11 +186,6 @@ const supplierNav = [
   { label: "ASNs", to: "/supplier/asns/new", icon: Truck },
 ];
 
-const financeNav = [
-  { label: "Dashboard", to: "/finance-dashboard", icon: LayoutDashboard },
-  { label: "Pending Approvals", to: "/finance/approvals", icon: FileCheck2 },
-];
-
 const managerNav = [
   { label: "Dashboard", to: "/manager-dashboard", icon: LayoutDashboard },
   {
@@ -210,7 +205,6 @@ const gateSecurityNav = [
 const adminNav = [
   { label: "User Management", to: "/admin/users", icon: Users },
   { label: "Warehouse", to: "/warehouse-dashboard", icon: Warehouse },
-  { label: "Finance", to: "/finance-dashboard", icon: FileCheck2 },
 ];
 
 const ICON_MAP: Record<string, any> = {
@@ -276,8 +270,6 @@ function isDispatchSession(user: { username?: string; roles?: string[] } | null)
 
 function getNotificationRole(user: { username?: string; roles?: string[] } | null): string {
   if (hasUserRole(user, "SUPPLIER")) return "SUPPLIER";
-  if (hasUserRole(user, "FINANCE")) return "FINANCE";
-  if (hasUserRole(user, "PROCUREMENT")) return "PROCUREMENT";
   if (hasUserRole(user, "MANAGER")) return "MANAGER";
   if (hasUserRole(user, "GATE_SECURITY")) return "GATE_SECURITY";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
@@ -290,10 +282,8 @@ function getNotificationRole(user: { username?: string; roles?: string[] } | nul
 function getStrictRoleNav(user: { username?: string; roles?: string[] } | null): NavItem[] {
   if (!user) return [];
   if (hasUserRole(user, "ADMIN") || hasUserRole(user, "SUPERUSER")) return adminNav;
-  if (hasUserRole(user, "PROCUREMENT")) return procurementNav;
   if (hasUserRole(user, "MANAGER")) return managerNav;
   if (hasUserRole(user, "SUPPLIER")) return supplierNav;
-  if (hasUserRole(user, "FINANCE")) return financeNav;
   if (hasUserRole(user, "GATE_SECURITY") || hasUserRole(user, "GATE_OPERATOR"))
     return gateSecurityNav;
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER")) return assemblyNav;
@@ -306,9 +296,7 @@ function getStrictRoleNav(user: { username?: string; roles?: string[] } | null):
 
 function getRoleLabel(user: { username?: string; roles?: string[] } | null): string {
   if (hasUserRole(user, "ADMIN") || hasUserRole(user, "SUPERUSER")) return "Administrator";
-  if (hasUserRole(user, "PROCUREMENT")) return "Procurement Manager";
   if (hasUserRole(user, "MANAGER")) return "Manager";
-  if (hasUserRole(user, "FINANCE")) return "Finance Manager";
   if (hasUserRole(user, "GATE_SECURITY")) return "Security Officer";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
     return "Assembly Manager";

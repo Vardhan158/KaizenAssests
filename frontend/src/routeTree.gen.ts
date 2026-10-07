@@ -42,7 +42,6 @@ import { Route as DispatchTransportAllocationRouteImport } from './routes/dispat
 import { Route as DispatchVehiclesRouteImport } from './routes/dispatch-vehicles'
 import { Route as DockManagementRouteImport } from './routes/dock-management'
 import { Route as DockMasterRouteImport } from './routes/dock-master'
-import { Route as FinanceDashboardRouteImport } from './routes/finance-dashboard'
 import { Route as GateDashboardRouteImport } from './routes/gate-dashboard'
 import { Route as GrnRouteImport } from './routes/grn'
 import { Route as InventoryRouteImport } from './routes/inventory'
@@ -65,7 +64,6 @@ import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashb
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as AssemblyFinishedGoodsRequestsRouteImport } from './routes/assembly.finished-goods-requests'
 import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
-import { Route as FinanceApprovalsRouteImport } from './routes/finance.approvals'
 import { Route as PoCodeRouteImport } from './routes/po.$code'
 import { Route as QCodeRouteImport } from './routes/q.$code'
 import { Route as SupplierSupplierIdRouteImport } from './routes/supplier.$supplierId'
@@ -78,10 +76,7 @@ import { Route as WarehouseMaterialRequestsRouteImport } from './routes/warehous
 import { Route as WarehouseMaterialsRouteImport } from './routes/warehouse.materials'
 import { Route as WarehouseQuarantineRouteImport } from './routes/warehouse.quarantine'
 import { Route as WarehouseStoresRouteImport } from './routes/warehouse.stores'
-import { Route as FinanceApprovalsIndexRouteImport } from './routes/finance.approvals.index'
-import { Route as FinanceApprovalsApprovalIdRouteImport } from './routes/finance.approvals.$approvalId'
 import { Route as SupplierAsnsNewRouteImport } from './routes/supplier.asns.new'
-import { Route as FinanceApprovalsCompareRfqIdRouteImport } from './routes/finance.approvals.compare.$rfqId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -254,11 +249,6 @@ const DockMasterRoute = DockMasterRouteImport.update({
   path: '/dock-master',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FinanceDashboardRoute = FinanceDashboardRouteImport.update({
-  id: '/finance-dashboard',
-  path: '/finance-dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const GateDashboardRoute = GateDashboardRouteImport.update({
   id: '/gate-dashboard',
   path: '/gate-dashboard',
@@ -370,11 +360,6 @@ const AssemblyRequestsRoute = AssemblyRequestsRouteImport.update({
   path: '/assembly/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FinanceApprovalsRoute = FinanceApprovalsRouteImport.update({
-  id: '/finance/approvals',
-  path: '/finance/approvals',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const PoCodeRoute = PoCodeRouteImport.update({
   id: '/po/$code',
   path: '/po/$code',
@@ -440,28 +425,11 @@ const WarehouseStoresRoute = WarehouseStoresRouteImport.update({
   path: '/warehouse/stores',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FinanceApprovalsIndexRoute = FinanceApprovalsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => FinanceApprovalsRoute,
-} as any)
-const FinanceApprovalsApprovalIdRoute =
-  FinanceApprovalsApprovalIdRouteImport.update({
-    id: '/$approvalId',
-    path: '/$approvalId',
-    getParentRoute: () => FinanceApprovalsRoute,
-  } as any)
 const SupplierAsnsNewRoute = SupplierAsnsNewRouteImport.update({
   id: '/supplier/asns/new',
   path: '/supplier/asns/new',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FinanceApprovalsCompareRfqIdRoute =
-  FinanceApprovalsCompareRfqIdRouteImport.update({
-    id: '/compare/$rfqId',
-    path: '/compare/$rfqId',
-    getParentRoute: () => FinanceApprovalsRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -497,7 +465,6 @@ export interface FileRoutesByFullPath {
   '/dispatch-vehicles': typeof DispatchVehiclesRoute
   '/dock-management': typeof DockManagementRoute
   '/dock-master': typeof DockMasterRoute
-  '/finance-dashboard': typeof FinanceDashboardRoute
   '/gate-dashboard': typeof GateDashboardRoute
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
@@ -520,7 +487,6 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
-  '/finance/approvals': typeof FinanceApprovalsRouteWithChildren
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/supplier/$supplierId': typeof SupplierSupplierIdRoute
@@ -533,10 +499,7 @@ export interface FileRoutesByFullPath {
   '/warehouse/materials': typeof WarehouseMaterialsRoute
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
-  '/finance/approvals/$approvalId': typeof FinanceApprovalsApprovalIdRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
-  '/finance/approvals/': typeof FinanceApprovalsIndexRoute
-  '/finance/approvals/compare/$rfqId': typeof FinanceApprovalsCompareRfqIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -572,7 +535,6 @@ export interface FileRoutesByTo {
   '/dispatch-vehicles': typeof DispatchVehiclesRoute
   '/dock-management': typeof DockManagementRoute
   '/dock-master': typeof DockMasterRoute
-  '/finance-dashboard': typeof FinanceDashboardRoute
   '/gate-dashboard': typeof GateDashboardRoute
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
@@ -607,10 +569,7 @@ export interface FileRoutesByTo {
   '/warehouse/materials': typeof WarehouseMaterialsRoute
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
-  '/finance/approvals/$approvalId': typeof FinanceApprovalsApprovalIdRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
-  '/finance/approvals': typeof FinanceApprovalsIndexRoute
-  '/finance/approvals/compare/$rfqId': typeof FinanceApprovalsCompareRfqIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -647,7 +606,6 @@ export interface FileRoutesById {
   '/dispatch-vehicles': typeof DispatchVehiclesRoute
   '/dock-management': typeof DockManagementRoute
   '/dock-master': typeof DockMasterRoute
-  '/finance-dashboard': typeof FinanceDashboardRoute
   '/gate-dashboard': typeof GateDashboardRoute
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
@@ -670,7 +628,6 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
-  '/finance/approvals': typeof FinanceApprovalsRouteWithChildren
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/supplier/$supplierId': typeof SupplierSupplierIdRoute
@@ -683,10 +640,7 @@ export interface FileRoutesById {
   '/warehouse/materials': typeof WarehouseMaterialsRoute
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
-  '/finance/approvals/$approvalId': typeof FinanceApprovalsApprovalIdRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
-  '/finance/approvals/': typeof FinanceApprovalsIndexRoute
-  '/finance/approvals/compare/$rfqId': typeof FinanceApprovalsCompareRfqIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -724,7 +678,6 @@ export interface FileRouteTypes {
     | '/dispatch-vehicles'
     | '/dock-management'
     | '/dock-master'
-    | '/finance-dashboard'
     | '/gate-dashboard'
     | '/grn'
     | '/inventory'
@@ -747,7 +700,6 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/assembly/finished-goods-requests'
     | '/assembly/requests'
-    | '/finance/approvals'
     | '/po/$code'
     | '/q/$code'
     | '/supplier/$supplierId'
@@ -760,10 +712,7 @@ export interface FileRouteTypes {
     | '/warehouse/materials'
     | '/warehouse/quarantine'
     | '/warehouse/stores'
-    | '/finance/approvals/$approvalId'
     | '/supplier/asns/new'
-    | '/finance/approvals/'
-    | '/finance/approvals/compare/$rfqId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -799,7 +748,6 @@ export interface FileRouteTypes {
     | '/dispatch-vehicles'
     | '/dock-management'
     | '/dock-master'
-    | '/finance-dashboard'
     | '/gate-dashboard'
     | '/grn'
     | '/inventory'
@@ -834,10 +782,7 @@ export interface FileRouteTypes {
     | '/warehouse/materials'
     | '/warehouse/quarantine'
     | '/warehouse/stores'
-    | '/finance/approvals/$approvalId'
     | '/supplier/asns/new'
-    | '/finance/approvals'
-    | '/finance/approvals/compare/$rfqId'
   id:
     | '__root__'
     | '/'
@@ -873,7 +818,6 @@ export interface FileRouteTypes {
     | '/dispatch-vehicles'
     | '/dock-management'
     | '/dock-master'
-    | '/finance-dashboard'
     | '/gate-dashboard'
     | '/grn'
     | '/inventory'
@@ -896,7 +840,6 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/assembly/finished-goods-requests'
     | '/assembly/requests'
-    | '/finance/approvals'
     | '/po/$code'
     | '/q/$code'
     | '/supplier/$supplierId'
@@ -909,10 +852,7 @@ export interface FileRouteTypes {
     | '/warehouse/materials'
     | '/warehouse/quarantine'
     | '/warehouse/stores'
-    | '/finance/approvals/$approvalId'
     | '/supplier/asns/new'
-    | '/finance/approvals/'
-    | '/finance/approvals/compare/$rfqId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -949,7 +889,6 @@ export interface RootRouteChildren {
   DispatchVehiclesRoute: typeof DispatchVehiclesRoute
   DockManagementRoute: typeof DockManagementRoute
   DockMasterRoute: typeof DockMasterRoute
-  FinanceDashboardRoute: typeof FinanceDashboardRoute
   GateDashboardRoute: typeof GateDashboardRoute
   GrnRoute: typeof GrnRoute
   InventoryRoute: typeof InventoryRoute
@@ -972,7 +911,6 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   AssemblyFinishedGoodsRequestsRoute: typeof AssemblyFinishedGoodsRequestsRoute
   AssemblyRequestsRoute: typeof AssemblyRequestsRoute
-  FinanceApprovalsRoute: typeof FinanceApprovalsRouteWithChildren
   PoCodeRoute: typeof PoCodeRoute
   QCodeRoute: typeof QCodeRoute
   SupplierSupplierIdRoute: typeof SupplierSupplierIdRoute
@@ -1221,13 +1159,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DockMasterRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/finance-dashboard': {
-      id: '/finance-dashboard'
-      path: '/finance-dashboard'
-      fullPath: '/finance-dashboard'
-      preLoaderRoute: typeof FinanceDashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/gate-dashboard': {
       id: '/gate-dashboard'
       path: '/gate-dashboard'
@@ -1382,13 +1313,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssemblyRequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/finance/approvals': {
-      id: '/finance/approvals'
-      path: '/finance/approvals'
-      fullPath: '/finance/approvals'
-      preLoaderRoute: typeof FinanceApprovalsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/po/$code': {
       id: '/po/$code'
       path: '/po/$code'
@@ -1473,20 +1397,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WarehouseStoresRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/finance/approvals/': {
-      id: '/finance/approvals/'
-      path: '/'
-      fullPath: '/finance/approvals/'
-      preLoaderRoute: typeof FinanceApprovalsIndexRouteImport
-      parentRoute: typeof FinanceApprovalsRoute
-    }
-    '/finance/approvals/$approvalId': {
-      id: '/finance/approvals/$approvalId'
-      path: '/$approvalId'
-      fullPath: '/finance/approvals/$approvalId'
-      preLoaderRoute: typeof FinanceApprovalsApprovalIdRouteImport
-      parentRoute: typeof FinanceApprovalsRoute
-    }
     '/supplier/asns/new': {
       id: '/supplier/asns/new'
       path: '/supplier/asns/new'
@@ -1494,30 +1404,8 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SupplierAsnsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/finance/approvals/compare/$rfqId': {
-      id: '/finance/approvals/compare/$rfqId'
-      path: '/compare/$rfqId'
-      fullPath: '/finance/approvals/compare/$rfqId'
-      preLoaderRoute: typeof FinanceApprovalsCompareRfqIdRouteImport
-      parentRoute: typeof FinanceApprovalsRoute
-    }
   }
 }
-
-interface FinanceApprovalsRouteChildren {
-  FinanceApprovalsApprovalIdRoute: typeof FinanceApprovalsApprovalIdRoute
-  FinanceApprovalsIndexRoute: typeof FinanceApprovalsIndexRoute
-  FinanceApprovalsCompareRfqIdRoute: typeof FinanceApprovalsCompareRfqIdRoute
-}
-
-const FinanceApprovalsRouteChildren: FinanceApprovalsRouteChildren = {
-  FinanceApprovalsApprovalIdRoute: FinanceApprovalsApprovalIdRoute,
-  FinanceApprovalsIndexRoute: FinanceApprovalsIndexRoute,
-  FinanceApprovalsCompareRfqIdRoute: FinanceApprovalsCompareRfqIdRoute,
-}
-
-const FinanceApprovalsRouteWithChildren =
-  FinanceApprovalsRoute._addFileChildren(FinanceApprovalsRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -1553,7 +1441,6 @@ const rootRouteChildren: RootRouteChildren = {
   DispatchVehiclesRoute: DispatchVehiclesRoute,
   DockManagementRoute: DockManagementRoute,
   DockMasterRoute: DockMasterRoute,
-  FinanceDashboardRoute: FinanceDashboardRoute,
   GateDashboardRoute: GateDashboardRoute,
   GrnRoute: GrnRoute,
   InventoryRoute: InventoryRoute,
@@ -1576,7 +1463,6 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   AssemblyFinishedGoodsRequestsRoute: AssemblyFinishedGoodsRequestsRoute,
   AssemblyRequestsRoute: AssemblyRequestsRoute,
-  FinanceApprovalsRoute: FinanceApprovalsRouteWithChildren,
   PoCodeRoute: PoCodeRoute,
   QCodeRoute: QCodeRoute,
   SupplierSupplierIdRoute: SupplierSupplierIdRoute,
