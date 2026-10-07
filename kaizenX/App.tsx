@@ -8,6 +8,7 @@ import { StatusBar, View, Text, TouchableOpacity } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import tw from "twrnc";
 
+import { SplashScreen } from "./src/screens/SplashScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { GateEntryScannerScreen } from "./src/screens/GateEntryScannerScreen";
@@ -18,10 +19,17 @@ import { ProfileScreen } from "./src/screens/ProfileScreen";
 export type TabType = "HOME" | "SCAN" | "VEHICLES" | "PROFILE";
 
 export default function App() {
+  const [isBooting, setIsBooting] = useState(true);
   const [user, setUser] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>("HOME");
   const [currentScreenOverride, setCurrentScreenOverride] = useState<"success" | null>(null);
   const [lastEntryResult, setLastEntryResult] = useState<any | null>(null);
+
+  const handleSplashFinish = (authenticatedUser: any | null) => {
+    setUser(authenticatedUser);
+    setIsBooting(false);
+    setActiveTab("HOME");
+  };
 
   const handleLoginSuccess = (authenticatedUser: any) => {
     setUser(authenticatedUser);
@@ -60,7 +68,9 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
       <SafeAreaView style={tw`flex-1 bg-slate-900`}>
-        {!user ? (
+        {isBooting ? (
+          <SplashScreen onSplashFinish={handleSplashFinish} />
+        ) : !user ? (
           <LoginScreen onLoginSuccess={handleLoginSuccess} />
         ) : (
           <View style={tw`flex-1`}>
