@@ -138,6 +138,13 @@ export const mobileApi = {
         time: "1 hour ago",
         type: "READY_FOR_EXIT",
       },
+      {
+        id: "notif-5",
+        title: "QC Completed",
+        message: "QC Inspection completed for KA 01 AB 4582 (490 KG Accepted / 5 KG Rejected). Store Manager notified for GRN Posting.",
+        time: "5 mins ago",
+        type: "QC_COMPLETED",
+      },
     ];
   },
 
