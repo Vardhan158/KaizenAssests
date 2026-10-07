@@ -9,7 +9,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import tw from "twrnc";
 
 import { SplashScreen } from "./src/screens/SplashScreen";
-import { LoginScreen } from "./src/screens/LoginScreen";
+import { LoginScreen } from "./src/screens/auth/LoginScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { GateEntryScannerScreen } from "./src/screens/GateEntryScannerScreen";
 import { GateEntrySuccessScreen } from "./src/screens/GateEntrySuccessScreen";
