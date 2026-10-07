@@ -32,6 +32,12 @@ export function GateEntryScannerScreen({
 
   const [searchInput, setSearchInput] = useState(initialPoQuery || "");
   const [vehicleInput, setVehicleInput] = useState("");
+  const [vehicleType, setVehicleType] = useState<"Truck" | "Container" | "Mini Truck" | "Trailer" | "Tanker" | "Other">("Truck");
+  const [transporterName, setTransporterName] = useState("");
+  const [lrNumber, setLrNumber] = useState("");
+  const [rcNumber, setRcNumber] = useState("");
+  const [vehicleCondition, setVehicleCondition] = useState<"Normal" | "Damaged" | "Suspicious">("Normal");
+
   const [driverNameInput, setDriverNameInput] = useState("");
   const [driverContactInput, setDriverContactInput] = useState("");
   const [supplierInput, setSupplierInput] = useState("");
@@ -322,41 +328,72 @@ export function GateEntryScannerScreen({
     setVehicleInput(formatVehiclePlate(vObj.vehicleNumber || ""));
     setDriverNameInput(vObj.driverName || "");
     setDriverContactInput(vObj.driverContact || "");
+    if (vObj.transporter) setTransporterName(vObj.transporter);
   };
 
   const handleCreateGateEntry = async () => {
-    if (!vehicleInput.trim()) {
-      Alert.alert("Required", "Please enter a valid truck/vehicle plate number.");
+    const formattedPlate = formatVehiclePlate(vehicleInput);
+
+    if (!formattedPlate.trim()) {
+      Alert.alert("Vehicle Number Required", "Please enter a valid vehicle plate number (e.g., KA 01 AB 4582).");
+      return;
+    }
+
+    if (!capturedImageUri) {
+      Alert.alert("Vehicle Photo Required", "Please capture at least one photograph of the vehicle / license plate before granting entry.");
       return;
     }
 
     setSubmitting(true);
 
     try {
+      // Duplicate Active Entry Check against backend
+      const existingEntries = await mobileApi.getGateEntries();
+      const normInput = formattedPlate.replace(/[^A-Z0-9]/g, "");
+
+      const activeDuplicate = existingEntries.find((e: any) => {
+        const statusUpper = (e.status || "").toUpperCase();
+        const activeStatuses = ["INSIDE_FACILITY", "PO_VERIFIED", "DOCK_ALLOCATED", "APPROVED", "PENDING"];
+        const ePlate = String(e.vehicle_number || e.vehicleNumber || "").replace(/[^A-Z0-9]/g, "");
+        return normInput && ePlate === normInput && activeStatuses.includes(statusUpper);
+      });
+
+      if (activeDuplicate) {
+        setSubmitting(false);
+        const dupPass = activeDuplicate.gate_entry_number || activeDuplicate.id || "N/A";
+        Alert.alert(
+          "DUPLICATE ACTIVE VEHICLE ENTRY",
+          `Vehicle ${formattedPlate} is already registered inside the facility under active Gate Pass ${dupPass}.\n\nPlease inspect the active pass or confirm vehicle exit before creating a new entry.`
+        );
+        return;
+      }
+
+      const combinedRemarks = `[${vehicleType}] [Condition: ${vehicleCondition}] ${transporterName ? `Transporter: ${transporterName}. ` : ""}${lrNumber ? `LR: ${lrNumber}. ` : ""}${rcNumber ? `RC: ${rcNumber}. ` : ""}${remarksInput.trim()}`;
+
       if (entryMode === "EXCEPTION") {
         if (!supplierInput.trim()) {
-          Alert.alert("Required", "Please enter the Supplier Name for exception entry.");
+          Alert.alert("Supplier Required", "Please enter the Supplier / Vendor Name for exception entry.");
           setSubmitting(false);
           return;
         }
 
         const result = await mobileApi.createUnscheduledEntry({
           supplier_name: supplierInput.trim(),
-          vehicle_number: formatVehiclePlate(vehicleInput),
-          driver_name: driverNameInput.trim(),
-          driver_contact: driverContactInput.trim(),
-          reason: exceptionReasonInput.trim(),
-          remarks: remarksInput.trim(),
+          vehicle_number: formattedPlate,
+          driver_name: driverNameInput.trim() || "Unregistered Driver",
+          driver_contact: driverContactInput.trim() || "",
+          reason: exceptionReasonInput.trim() || "Unscheduled Delivery",
+          remarks: combinedRemarks,
         });
 
         setSubmitting(false);
         onSuccess(result);
       } else {
         const poNum = selectedPo?.po_number || selectedPo?.poNumber || searchInput.trim();
-        const suppName = selectedPo?.supplier_name || selectedPo?.supplierName || supplierInput.trim();
+        const suppName = selectedPo?.supplier_name || selectedPo?.supplierName || supplierInput.trim() || "Supplier";
 
         if (!poNum) {
-          Alert.alert("Required", "Please enter or select a valid PO or ASN number.");
+          Alert.alert("PO/ASN Required", "Please enter or select a valid PO or ASN number.");
           setSubmitting(false);
           return;
         }
@@ -365,14 +402,14 @@ export function GateEntryScannerScreen({
 
         const result = await mobileApi.createGateEntry({
           po_number: poNum,
-          vehicle_number: formatVehiclePlate(vehicleInput),
-          driver_name: driverNameInput.trim(),
-          driver_contact: driverContactInput.trim(),
+          vehicle_number: formattedPlate,
+          driver_name: driverNameInput.trim() || "Driver",
+          driver_contact: driverContactInput.trim() || "",
           supplier_name: suppName,
           asn_reference: selectedAsn?.asn_number || selectedAsn?.asnNumber || "",
           line_items: lineItems,
           dock_number: dockNo,
-          remarks: remarksInput.trim(),
+          remarks: combinedRemarks,
         });
 
         setSubmitting(false);
@@ -699,28 +736,90 @@ export function GateEntryScannerScreen({
         </View>
       )}
 
-      {/* Vehicle & Driver Details Form */}
+      {/* Screen 06 - Vehicle Details Form */}
       <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
-        <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-3`}>
+        <Text style={tw`text-sky-400 text-xs font-black tracking-wider mb-3 uppercase`}>
           {entryMode === "SCHEDULED" ? "3. VEHICLE & DRIVER DETAILS" : "2. VEHICLE & DRIVER DETAILS"}
         </Text>
 
+        {/* Vehicle Number (Normalized Uppercase Plate) */}
         <View style={tw`mb-3`}>
-          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>
-            VEHICLE PLATE NUMBER *
+          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
+            VEHICLE NUMBER *
           </Text>
           <TextInput
-            style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
-            placeholder="e.g. KA-01-AB-1234"
+            style={tw`bg-slate-900 rounded-xl text-sky-400 px-3.5 py-2.5 text-sm font-black border border-slate-700 tracking-wider`}
+            placeholder="e.g. KA 01 AB 4582"
             placeholderTextColor="#64748b"
             value={vehicleInput}
             onChangeText={(text) => setVehicleInput(formatVehiclePlate(text))}
+            autoCapitalize="characters"
           />
         </View>
 
+        {/* Vehicle Type Selector */}
+        <View style={tw`mb-3`}>
+          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1.5 uppercase`}>
+            VEHICLE TYPE *
+          </Text>
+          <View style={tw`flex-row flex-wrap gap-1.5`}>
+            {(["Truck", "Container", "Mini Truck", "Trailer", "Tanker", "Other"] as const).map((vt) => {
+              const active = vehicleType === vt;
+              return (
+                <TouchableOpacity
+                  key={vt}
+                  style={tw`px-3 py-1.5 rounded-lg border ${
+                    active
+                      ? "bg-sky-600 border-sky-500"
+                      : "bg-slate-900 border-slate-700"
+                  }`}
+                  onPress={() => setVehicleType(vt)}
+                >
+                  <Text style={tw`text-xs font-bold ${active ? "text-white" : "text-slate-400"}`}>
+                    {vt}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Transporter Name & LR Number */}
         <View style={tw`flex-row gap-2 mb-3`}>
           <View style={tw`flex-1`}>
-            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>DRIVER NAME</Text>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
+              TRANSPORTER NAME
+            </Text>
+            <TextInput
+              style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
+              placeholder="e.g. VRL Logistics Ltd"
+              placeholderTextColor="#64748b"
+              value={transporterName}
+              onChangeText={setTransporterName}
+            />
+          </View>
+
+          <View style={tw`flex-1`}>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
+              LR / LORRY RECEIPT NO.
+            </Text>
+            <TextInput
+              style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
+              placeholder="e.g. LR-2026-9921"
+              placeholderTextColor="#64748b"
+              value={lrNumber}
+              onChangeText={setLrNumber}
+              autoCapitalize="characters"
+            />
+          </View>
+        </View>
+
+        {/* Driver Name & Phone */}
+        <View style={tw`flex-row gap-2 mb-3`}>
+          <View style={tw`flex-1`}>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
+              DRIVER NAME
+            </Text>
             <TextInput
               style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
               placeholder="e.g. Driver Name"
@@ -731,7 +830,9 @@ export function GateEntryScannerScreen({
           </View>
 
           <View style={tw`flex-1`}>
-            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>DRIVER PHONE</Text>
+            <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
+              DRIVER PHONE
+            </Text>
             <TextInput
               style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
               placeholder="Driver Phone"
@@ -743,17 +844,62 @@ export function GateEntryScannerScreen({
           </View>
         </View>
 
-        <View style={tw`mb-1`}>
-          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1`}>
-            SECURITY REMARKS / SEAL NO.
+        {/* Vehicle RC Number (Optional) */}
+        <View style={tw`mb-3`}>
+          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1 uppercase`}>
+            VEHICLE RC NUMBER (OPTIONAL)
           </Text>
           <TextInput
             style={tw`bg-slate-900 rounded-xl text-white px-3 py-2.5 text-xs border border-slate-700`}
-            placeholder="e.g. Physical seal intact, container locked"
+            placeholder="e.g. KA0120260019283"
             placeholderTextColor="#64748b"
-            value={remarksInput}
-            onChangeText={setRemarksInput}
+            value={rcNumber}
+            onChangeText={setRcNumber}
+            autoCapitalize="characters"
           />
+        </View>
+
+        {/* Vehicle Condition Selector */}
+        <View style={tw`mb-3`}>
+          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1.5 uppercase`}>
+            VEHICLE CONDITION
+          </Text>
+          <View style={tw`flex-row gap-2`}>
+            {(["Normal", "Damaged", "Suspicious"] as const).map((vc) => {
+              const active = vehicleCondition === vc;
+              const activeBg =
+                vc === "Normal" ? "bg-emerald-600 border-emerald-500" : vc === "Damaged" ? "bg-amber-600 border-amber-500" : "bg-red-600 border-red-500";
+              return (
+                <TouchableOpacity
+                  key={vc}
+                  style={tw`flex-1 py-2 rounded-xl items-center border ${
+                    active ? activeBg : "bg-slate-900 border-slate-700"
+                  }`}
+                  onPress={() => setVehicleCondition(vc)}
+                >
+                  <Text style={tw`text-xs font-bold ${active ? "text-white" : "text-slate-400"}`}>
+                    {vc === "Normal" ? "✓ Normal" : vc === "Damaged" ? "⚠️ Damaged" : "🚨 Suspicious"}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Vehicle Photograph Capture (Required) */}
+        <View style={tw`mb-1`}>
+          <Text style={tw`text-slate-400 text-[10px] font-bold tracking-wider mb-1.5 uppercase`}>
+            VEHICLE PHOTOGRAPH * (FRONT PLATE / LOADED CARGO)
+          </Text>
+          <TouchableOpacity
+            style={tw`bg-slate-900 py-3 rounded-xl border border-sky-500/50 items-center flex-row justify-center gap-2`}
+            onPress={handleLaunchNativeCamera}
+          >
+            <Text style={tw`text-sky-400 text-sm`}>📷</Text>
+            <Text style={tw`text-sky-400 text-xs font-black`}>
+              {capturedImageUri ? "✓ RETAKE VEHICLE PHOTO" : "CAPTURE VEHICLE PHOTO *"}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
