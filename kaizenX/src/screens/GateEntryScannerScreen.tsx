@@ -45,6 +45,23 @@ export function GateEntryScannerScreen({
   const [transporterEmpId, setTransporterEmpId] = useState("");
   const [driverPhotoUri, setDriverPhotoUri] = useState<string | null>(null);
 
+  // Screen 08 - Invoice & Transport Documents
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split("T")[0]);
+  const [invoiceAmount, setInvoiceAmount] = useState("");
+  const [invoicePhotoUri, setInvoicePhotoUri] = useState<string | null>(null);
+
+  const [challanNumber, setChallanNumber] = useState("");
+  const [challanDate, setChallanDate] = useState("");
+  const [challanPhotoUri, setChallanPhotoUri] = useState<string | null>(null);
+
+  const [ewayBillNumber, setEwayBillNumber] = useState("");
+  const [ewayValidUntil, setEwayValidUntil] = useState("");
+  const [ewayPhotoUri, setEwayPhotoUri] = useState<string | null>(null);
+
+  const [lrDate, setLrDate] = useState("");
+  const [lrPhotoUri, setLrPhotoUri] = useState<string | null>(null);
+
   const [supplierInput, setSupplierInput] = useState("");
   const [exceptionReasonInput, setExceptionReasonInput] = useState("");
   const [remarksInput, setRemarksInput] = useState("");
@@ -175,6 +192,27 @@ export function GateEntryScannerScreen({
       }
     } catch (e: any) {
       Alert.alert("DL Scan Error", e?.message || "Failed to scan driving licence.");
+    }
+  };
+
+  const handleCaptureDocPhoto = async (setDocUri: (uri: string | null) => void, docName: string) => {
+    const hasPermission = await requestCameraPermission();
+    if (!hasPermission) return;
+
+    try {
+      const response: ImagePickerResponse = await launchCamera({
+        mediaType: "photo",
+        cameraType: "back",
+        quality: 0.8,
+        saveToPhotos: false,
+      });
+
+      if (response.assets && response.assets.length > 0) {
+        setDocUri(response.assets[0].uri || null);
+        Alert.alert("Document Attached ✓", `${docName} captured and attached successfully.`);
+      }
+    } catch (e: any) {
+      Alert.alert("Camera Error", e?.message || `Failed to capture ${docName}.`);
     }
   };
 
@@ -407,6 +445,33 @@ export function GateEntryScannerScreen({
       return;
     }
 
+    if (!invoiceNumber.trim()) {
+      Alert.alert("Invoice Number Required", "Please enter the Invoice Number (e.g., INV-2026-9901).");
+      return;
+    }
+
+    if (!invoiceDate.trim()) {
+      Alert.alert("Invoice Date Required", "Please enter the Invoice Date.");
+      return;
+    }
+
+    if (!invoicePhotoUri) {
+      Alert.alert("Invoice Document Upload Required", "Please capture or attach a photograph copy of the Invoice.");
+      return;
+    }
+
+    const todayStr = new Date().toISOString().split("T")[0];
+    const isEwayExpired = Boolean(
+      ewayValidUntil && ewayValidUntil.trim() < todayStr
+    );
+
+    if (isEwayExpired) {
+      Alert.alert(
+        "🚨 E-Way Bill Expired - Supervisor Clearance Required",
+        `The E-Way Bill (${ewayBillNumber || "Provided"}) expired on ${ewayValidUntil}.\n\nSupervisor clearance is required. Ensure supervisor notes are added in Security Remarks before granting entry.`
+      );
+    }
+
     setSubmitting(true);
 
     try {
@@ -431,7 +496,7 @@ export function GateEntryScannerScreen({
         return;
       }
 
-      const combinedRemarks = `[${vehicleType}] [Condition: ${vehicleCondition}] ${transporterName ? `Transporter: ${transporterName}. ` : ""}${lrNumber ? `LR: ${lrNumber}. ` : ""}${rcNumber ? `RC: ${rcNumber}. ` : ""}${remarksInput.trim()}`;
+      const combinedRemarks = `[${vehicleType}] [Condition: ${vehicleCondition}] Inv: ${invoiceNumber} (${invoiceDate}${invoiceAmount ? `, Amount: ₹${invoiceAmount}` : ""}). ${challanNumber ? `Challan: ${challanNumber} (${challanDate}). ` : ""}${ewayBillNumber ? `E-Way: ${ewayBillNumber} (Valid: ${ewayValidUntil}${isEwayExpired ? " - EXPIRED" : ""}). ` : ""}${lrNumber ? `LR: ${lrNumber} (${lrDate}). ` : ""}${transporterName ? `Transporter: ${transporterName}. ` : ""}${rcNumber ? `RC: ${rcNumber}. ` : ""}${remarksInput.trim()}`;
 
       if (entryMode === "EXCEPTION") {
         if (!supplierInput.trim()) {
@@ -1080,6 +1145,186 @@ export function GateEntryScannerScreen({
               <Text style={tw`text-emerald-400 text-[10px] font-bold mt-1`}>Driver Photo Attached ✓</Text>
             </View>
           )}
+        </View>
+      </View>
+
+      {/* Screen 08 - Invoice & Transport Documents Card */}
+      <View style={tw`bg-slate-800 rounded-2xl p-4 mb-3.5 border border-white/10`}>
+        <Text style={tw`text-sky-400 text-xs font-black tracking-wider uppercase mb-3`}>
+          {entryMode === "SCHEDULED" ? "5. INVOICE & TRANSPORT DOCUMENTS" : "4. INVOICE & TRANSPORT DOCUMENTS"}
+        </Text>
+
+        {/* 1. INVOICE SECTION (MANDATORY) */}
+        <View style={tw`bg-slate-900/80 rounded-xl p-3 mb-3.5 border border-slate-700`}>
+          <Text style={tw`text-sky-400 text-[11px] font-black uppercase mb-2`}>📄 INVOICE DETAILS *</Text>
+
+          <View style={tw`flex-row gap-2 mb-2.5`}>
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>INVOICE NO. *</Text>
+              <TextInput
+                style={tw`bg-slate-900 rounded-xl text-white px-3 py-2 text-xs border border-slate-700 font-bold`}
+                placeholder="e.g. INV-2026-9901"
+                placeholderTextColor="#64748b"
+                value={invoiceNumber}
+                onChangeText={setInvoiceNumber}
+                autoCapitalize="characters"
+              />
+            </View>
+
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>INVOICE DATE *</Text>
+              <TextInput
+                style={tw`bg-slate-900 rounded-xl text-white px-3 py-2 text-xs border border-slate-700`}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#64748b"
+                value={invoiceDate}
+                onChangeText={setInvoiceDate}
+              />
+            </View>
+          </View>
+
+          <View style={tw`mb-2.5`}>
+            <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>INVOICE AMOUNT (₹)</Text>
+            <TextInput
+              style={tw`bg-slate-900 rounded-xl text-emerald-400 font-black px-3 py-2 text-xs border border-slate-700`}
+              placeholder="e.g. 245000"
+              placeholderTextColor="#64748b"
+              value={invoiceAmount}
+              onChangeText={setInvoiceAmount}
+              keyboardType="numeric"
+            />
+          </View>
+
+          {/* Upload Invoice Photo */}
+          <TouchableOpacity
+            style={tw`bg-slate-800 py-2.5 rounded-xl border border-sky-500/40 items-center flex-row justify-center gap-1.5`}
+            onPress={() => handleCaptureDocPhoto(setInvoicePhotoUri, "Invoice Document")}
+          >
+            <Text style={tw`text-sky-400 text-xs`}>📷</Text>
+            <Text style={tw`text-sky-400 text-[11px] font-black`}>
+              {invoicePhotoUri ? "✓ RETAKE INVOICE COPY *" : "UPLOAD / CAPTURE INVOICE *"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 2. DELIVERY CHALLAN SECTION */}
+        <View style={tw`bg-slate-900/80 rounded-xl p-3 mb-3.5 border border-slate-700`}>
+          <Text style={tw`text-slate-300 text-[11px] font-black uppercase mb-2`}>📦 DELIVERY CHALLAN</Text>
+
+          <View style={tw`flex-row gap-2 mb-2.5`}>
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>CHALLAN NO.</Text>
+              <TextInput
+                style={tw`bg-slate-900 rounded-xl text-white px-3 py-2 text-xs border border-slate-700`}
+                placeholder="e.g. DC-2026-4412"
+                placeholderTextColor="#64748b"
+                value={challanNumber}
+                onChangeText={setChallanNumber}
+                autoCapitalize="characters"
+              />
+            </View>
+
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>CHALLAN DATE</Text>
+              <TextInput
+                style={tw`bg-slate-900 rounded-xl text-white px-3 py-2 text-xs border border-slate-700`}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#64748b"
+                value={challanDate}
+                onChangeText={setChallanDate}
+              />
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={tw`bg-slate-800 py-2 rounded-xl border border-slate-700 items-center flex-row justify-center gap-1.5`}
+            onPress={() => handleCaptureDocPhoto(setChallanPhotoUri, "Delivery Challan")}
+          >
+            <Text style={tw`text-slate-300 text-xs`}>📎</Text>
+            <Text style={tw`text-slate-300 text-[10px] font-bold`}>
+              {challanPhotoUri ? "✓ CHALLAN ATTACHED" : "UPLOAD CHALLAN COPY"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 3. E-WAY BILL SECTION & EXPIRATION VALIDATION */}
+        <View style={tw`bg-slate-900/80 rounded-xl p-3 mb-3.5 border border-slate-700`}>
+          <Text style={tw`text-slate-300 text-[11px] font-black uppercase mb-2`}>🚛 E-WAY BILL</Text>
+
+          <View style={tw`flex-row gap-2 mb-2`}>
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>E-WAY BILL NO.</Text>
+              <TextInput
+                style={tw`bg-slate-900 rounded-xl text-white px-3 py-2 text-xs border border-slate-700`}
+                placeholder="e.g. EWAY-8812-4091"
+                placeholderTextColor="#64748b"
+                value={ewayBillNumber}
+                onChangeText={setEwayBillNumber}
+                autoCapitalize="characters"
+              />
+            </View>
+
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>VALID UNTIL DATE</Text>
+              <TextInput
+                style={tw`bg-slate-900 rounded-xl text-white px-3 py-2 text-xs border border-slate-700`}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#64748b"
+                value={ewayValidUntil}
+                onChangeText={setEwayValidUntil}
+              />
+            </View>
+          </View>
+
+          {/* E-Way Expiration Warning Banner */}
+          {ewayValidUntil && ewayValidUntil.trim() < new Date().toISOString().split("T")[0] ? (
+            <View style={tw`bg-red-500/15 p-2.5 rounded-lg border border-red-500/40 mb-2.5`}>
+              <Text style={tw`text-red-400 text-xs font-black`}>🚨 E-WAY BILL EXPIRED</Text>
+              <Text style={tw`text-red-300 text-[10px] mt-0.5`}>
+                Valid Until: {ewayValidUntil}. Supervisor verification and clearance note required before vehicle entry.
+              </Text>
+            </View>
+          ) : null}
+
+          <TouchableOpacity
+            style={tw`bg-slate-800 py-2 rounded-xl border border-slate-700 items-center flex-row justify-center gap-1.5`}
+            onPress={() => handleCaptureDocPhoto(setEwayPhotoUri, "E-Way Bill Document")}
+          >
+            <Text style={tw`text-slate-300 text-xs`}>📎</Text>
+            <Text style={tw`text-slate-300 text-[10px] font-bold`}>
+              {ewayPhotoUri ? "✓ E-WAY BILL ATTACHED" : "UPLOAD E-WAY BILL COPY"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 4. LR / TRANSPORT DOCUMENT SECTION */}
+        <View style={tw`bg-slate-900/80 rounded-xl p-3 border border-slate-700`}>
+          <Text style={tw`text-slate-300 text-[11px] font-black uppercase mb-2`}>📑 LR / TRANSPORT DOCUMENT</Text>
+
+          <View style={tw`flex-row gap-2 mb-2`}>
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>LR DATE</Text>
+              <TextInput
+                style={tw`bg-slate-900 rounded-xl text-white px-3 py-2 text-xs border border-slate-700`}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#64748b"
+                value={lrDate}
+                onChangeText={setLrDate}
+              />
+            </View>
+
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-slate-400 text-[10px] font-bold mb-1 uppercase`}>ATTACHMENT</Text>
+              <TouchableOpacity
+                style={tw`bg-slate-800 py-2 rounded-xl border border-slate-700 items-center flex-row justify-center gap-1`}
+                onPress={() => handleCaptureDocPhoto(setLrPhotoUri, "LR Transport Document")}
+              >
+                <Text style={tw`text-slate-300 text-[10px] font-bold`}>
+                  {lrPhotoUri ? "✓ LR ATTACHED" : "UPLOAD LR COPY"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </View>
 
