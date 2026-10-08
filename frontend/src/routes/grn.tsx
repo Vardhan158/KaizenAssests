@@ -179,6 +179,13 @@ const PAGES = [
 
 const GRN_LOCAL_DRAFT_KEY = "grn_wizard_local_draft";
 
+function generateGrnNumber(): string {
+  const now = new Date();
+  const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  const sequence = `${Date.now()}`.slice(-6);
+  return `GRN-${date}-${sequence}`;
+}
+
 function formatCardDate(dateVal?: string | null): string {
   if (!dateVal) return new Date().toISOString().slice(0, 10);
   try {
@@ -810,7 +817,8 @@ function GrnPageWorkflow() {
       toast.error("Please select or enter a valid PO Number");
       return;
     }
-    if (numToFetch.toUpperCase().startsWith("PROP-")) {
+    const isAsnLookup = numToFetch.toUpperCase().startsWith("ASN-");
+    if (!isAsnLookup && numToFetch.toUpperCase().startsWith("PROP-")) {
       toast.error(
         "Proposal numbers (PROP-) cannot be received in GRN. Please select or enter an approved Purchase Order number (e.g. PO-2026-0004).",
       );
@@ -820,49 +828,59 @@ function GrnPageWorkflow() {
     const requestId = ++contextRequest.current;
     setLoadingContext(true);
     try {
-      const ctx = await api.getGrnContext(numToFetch);
+      // Resolve the ASN first, then load the receiving context by its
+      // authoritative PO. This returns the persisted gate-entry number that
+      // was created when Generate Gate Pass was pressed.
+      const ctx = isAsnLookup ? await api.getAsn(numToFetch) : await api.getGrnContext(numToFetch);
+      const receivingContext =
+        isAsnLookup && (ctx.po_number || ctx.poNumber)
+          ? await api.getGrnContext({ poNumber: ctx.po_number || ctx.poNumber })
+          : null;
+      const resolvedContext = receivingContext || ctx;
       if (requestId !== contextRequest.current) return;
-      const supplierName = ctx.supplier_name || ctx.supplierName || "";
-      const supplierComp = ctx.supplier_company_name || ctx.supplierCompanyName || supplierName;
+      const resolvedPoNumber =
+        resolvedContext.po_number || resolvedContext.poNumber || resolvedContext.purchase_order_number || resolvedContext.purchaseOrderNumber || ctx.po_number || ctx.poNumber || "";
+      const supplierName = resolvedContext.supplier_name || resolvedContext.supplierName || ctx.supplier_name || ctx.supplierName || "";
+      const supplierComp = resolvedContext.supplier_company_name || resolvedContext.supplierCompanyName || supplierName;
       const supplierEmail =
-        ctx.supplier_email ||
-        ctx.supplierEmail ||
-        ctx.supplier?.email ||
-        ctx.supplier?.contact?.primary_email ||
+        resolvedContext.supplier_email ||
+        resolvedContext.supplierEmail ||
+        resolvedContext.supplier?.email ||
+        resolvedContext.supplier?.contact?.primary_email ||
         "";
       const asnNum =
-        ctx.asn_number || ctx.asnNumber || ctx.asn?.asn_number || ctx.asn?.asnNumber || "";
+        resolvedContext.asn_number || resolvedContext.asnNumber || ctx.asn_number || ctx.asnNumber || ctx.asn?.asn_number || ctx.asn?.asnNumber || numToFetch;
       const gateNum =
-        ctx.gate_entry_number ||
-        ctx.gateEntryNumber ||
-        ctx.gate_entry?.gate_entry_number ||
-        ctx.gate_entry?.gateEntryNumber ||
+        resolvedContext.gate_entry_number ||
+        resolvedContext.gateEntryNumber ||
+        resolvedContext.gate_entry?.gate_entry_number ||
+        resolvedContext.gate_entry?.gateEntryNumber ||
         "";
       const vehicleNum =
-        ctx.vehicle_number ||
-        ctx.vehicleNumber ||
+        resolvedContext.vehicle_number ||
+        resolvedContext.vehicleNumber ||
         ctx.asn?.vehicle_number ||
         ctx.asn?.vehicleNumber ||
         ctx.gate_entry?.vehicle_number ||
         ctx.gate_entry?.vehicleNumber ||
         "";
       const driverName =
-        ctx.driver_name ||
-        ctx.driverName ||
+        resolvedContext.driver_name ||
+        resolvedContext.driverName ||
         ctx.asn?.driver_name ||
         ctx.asn?.driverName ||
         ctx.gate_entry?.driver_name ||
         ctx.gate_entry?.driverName ||
         "";
-      const warehouseName = ctx.warehouse_name || ctx.warehouseName || "";
+      const warehouseName = resolvedContext.warehouse_name || resolvedContext.warehouseName || "";
 
       // Auto-detect allocated dock from warehouse allocation, gate entry, or PO context
       let prefilledDock =
-        ctx.prefilled_dock_number ||
-        ctx.prefilledDockNumber ||
-        ctx.gate_entry?.dock_number ||
-        ctx.gate_entry?.dockNumber ||
-        ctx.assigned_dock_number ||
+        resolvedContext.prefilled_dock_number ||
+        resolvedContext.prefilledDockNumber ||
+        resolvedContext.gate_entry?.dock_number ||
+        resolvedContext.gate_entry?.dockNumber ||
+        resolvedContext.assigned_dock_number ||
         "";
       if (!prefilledDock && dockOptions.length > 0) {
         const matchedDock = dockOptions.find((d: any) => {
@@ -887,11 +905,11 @@ function GrnPageWorkflow() {
           prefilledDock = matchedDock.dock_number;
         }
       }
-      const generatedGrnNum = ctx.grn_number || ctx.grnNumber || "";
+      const generatedGrnNum = resolvedContext.grn_number || resolvedContext.grnNumber || generateGrnNumber();
 
       setHeader({
-        receipt_type: ctx.receipt_type || ctx.receiptType || "",
-        po_number: numToFetch,
+        receipt_type: resolvedContext.receipt_type || resolvedContext.receiptType || "",
+        po_number: resolvedPoNumber,
         supplier_name: supplierName,
         supplier_company_name: supplierComp,
         supplier_email: supplierEmail,
@@ -907,16 +925,16 @@ function GrnPageWorkflow() {
       });
 
       setDamagePhotos({});
-      setGrnId(ctx.grn_id || ctx.grnId || null);
-      if (ctx.dock_options && ctx.dock_options.length > 0) {
+      setGrnId(resolvedContext.grn_id || resolvedContext.grnId || null);
+      if (resolvedContext.dock_options && resolvedContext.dock_options.length > 0) {
         setDockOptions((prev) => {
           const existingNums = new Set(prev.map((d: any) => d.dock_number));
-          const newDocks = ctx.dock_options.filter((d: any) => !existingNums.has(d.dock_number));
+          const newDocks = resolvedContext.dock_options.filter((d: any) => !existingNums.has(d.dock_number));
           return [...prev, ...newDocks];
         });
       }
 
-      const mapped: GrnLineItem[] = (ctx.lines || []).map((l: any) => {
+      const mapped: GrnLineItem[] = (resolvedContext.lines || ctx.lines || []).map((l: any) => {
         const poQty = Number(l.ordered_quantity ?? l.orderedQuantity ?? 100);
         const recQty = Number(l.received_quantity ?? l.receivedQuantity ?? poQty);
         const goodQty = Number(l.good_quantity ?? l.goodQuantity ?? recQty);
@@ -3663,15 +3681,15 @@ function GrnPageWorkflow() {
                 <div className="flex flex-wrap items-end gap-3 max-w-xl">
                   <div className="flex-1 min-w-[260px]">
                     <label className="text-xs font-bold text-foreground mb-1 flex items-center justify-between">
-                      <span>PO Number *</span>
+                      <span>ASN Number *</span>
                       {loadingContext && (
                         <span className="text-[10px] font-bold text-primary flex items-center gap-1 animate-pulse">
-                          <Loader2 className="size-3 animate-spin" /> Fetching PO Details...
+                        <Loader2 className="size-3 animate-spin" /> Fetching ASN Details...
                         </span>
                       )}
                     </label>
                     <Input
-                      placeholder="Enter PO Number (e.g. PO-2026-0001)"
+                      placeholder="Enter ASN (e.g. ASN-2026-1)"
                       value={header.po_number}
                       disabled={busyAction || loadingContext}
                       onChange={(e) => changePoNumber(e.target.value)}
@@ -3702,7 +3720,7 @@ function GrnPageWorkflow() {
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                {false && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
                   {/* PO Number */}
                   <div className="rounded-xl border bg-muted/10 p-3">
                     <span className="text-[11px] font-semibold uppercase text-muted-foreground">
@@ -3732,7 +3750,7 @@ function GrnPageWorkflow() {
                       {header.supplier_company_name || header.supplier_name || "—"}
                     </p>
                   </div>
-                </div>
+                </div>}
               </Card>
 
               {/* B. INBOUND DETAILS */}
@@ -3768,14 +3786,14 @@ function GrnPageWorkflow() {
                   </div>
 
                   {/* Receipt Type */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
+                  {false && <div className="rounded-xl border bg-muted/10 p-3">
                     <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
                       Receipt Type
                     </label>
                     <div className="rounded-lg border bg-background px-2.5 py-1.5 text-xs font-bold text-foreground">
                       {header.receipt_type}
                     </div>
-                  </div>
+                  </div>}
 
                   {/* Vehicle Number */}
                   <div className="rounded-xl border bg-muted/10 p-3">

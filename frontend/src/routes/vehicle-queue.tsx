@@ -1,10 +1,24 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ArrowRight, Boxes, Eye, Loader2, RefreshCw, ShieldCheck, Truck, Warehouse } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Boxes,
+  Eye,
+  FileCheck2,
+  Loader2,
+  PlusCircle,
+  QrCode,
+  RefreshCw,
+  ShieldCheck,
+  Truck,
+  Warehouse,
+} from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
 
 export const Route = createFileRoute("/vehicle-queue")({
@@ -58,12 +72,46 @@ type Dock = {
 };
 
 function InboundArrivals() {
+  const search = useSearch({ strict: false }) as any;
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [docks, setDocks] = useState<Dock[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selectedDock, setSelectedDock] = useState<Record<string, string>>({});
   const [assigning, setAssigning] = useState<string | null>(null);
+
+  // FR-02 New Gate Entry Registration Modal State
+  const [isNewRegistrationModalOpen, setIsNewRegistrationModalOpen] = useState(
+    Boolean(search?.action === "new")
+  );
+
+  // FR-02 Section A: Supplier and Shipment Details
+  const [selectedWarehouse, setSelectedWarehouse] = useState("Raw Material Warehouse");
+  const [selectedSupplier, setSelectedSupplier] = useState("Bharat Electronics Components Pvt. Ltd.");
+  const [selectedAsn, setSelectedAsn] = useState("ASN-2026-004582");
+  const [autoPoNumber, setAutoPoNumber] = useState("PO-2026-008741");
+  const [autoExpectedDate, setAutoExpectedDate] = useState("07 Oct 2026");
+  const [deliveryType, setDeliveryType] = useState("Regular Delivery");
+  const [remarksText, setRemarksText] = useState("");
+
+  // FR-02 Section B: Vehicle and Driver Details
+  const [vehicleNumberInput, setVehicleNumberInput] = useState("KA 01 AB 4582");
+  const [vehicleTypeInput, setVehicleTypeInput] = useState("Container Truck");
+  const [driverNameInput, setDriverNameInput] = useState("Suresh Gowda");
+  const [driverMobileInput, setDriverMobileInput] = useState("+91 98450 12345");
+  const [transporterInput, setTransporterInput] = useState("VRL Logistics Ltd");
+  const [driverIdTypeInput, setDriverIdTypeInput] = useState("Driving Licence");
+  const [driverIdRefInput, setDriverIdRefInput] = useState("DL-2026-90812");
+  const [entryGateInput, setEntryGateInput] = useState("Main Gate – 01");
+
+  // FR-02 Section C: Invoice & Supporting Documents
+  const [invoiceNoInput, setInvoiceNoInput] = useState("INV-2026-9901");
+  const [invoiceDateInput, setInvoiceDateInput] = useState("2026-10-07");
+  const [challanNoInput, setChallanNoInput] = useState("DC-2026-4412");
+  const [ewayNoInput, setEwayNoInput] = useState("EWAY-8812-4091");
+  const [uploadedInvoiceFile, setUploadedInvoiceFile] = useState<string | null>("invoice_copy_inv9901.pdf");
+  const [uploadedVehiclePhoto, setUploadedVehiclePhoto] = useState<string | null>("truck_front_plate_ka01ab4582.jpg");
+  const [submittingWebEntry, setSubmittingWebEntry] = useState(false);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -252,6 +300,466 @@ function InboundArrivals() {
           </div>
         )}
       </Card>
+
+      {/* FR-02 New Gate Entry Registration Modal */}
+      <Dialog
+        open={isNewRegistrationModalOpen}
+        onOpenChange={setIsNewRegistrationModalOpen}
+      >
+        <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-black text-lg text-primary uppercase">
+              FR-02: NEW GATE ENTRY REGISTRATION
+            </DialogTitle>
+          </DialogHeader>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setSubmittingWebEntry(true);
+              setTimeout(() => {
+                setSubmittingWebEntry(false);
+                setIsNewRegistrationModalOpen(false);
+                toast.success("Web Gate Entry Registered Successfully ✓", {
+                  description: `Supplier: ${selectedSupplier}\nASN: ${selectedAsn} (${autoPoNumber})\nDelivery Type: ${deliveryType}`,
+                });
+                void load();
+              }, 600);
+            }}
+            className="space-y-4 text-xs"
+          >
+            {/* SECTION A: SUPPLIER AND SHIPMENT DETAILS */}
+            <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+              <h3 className="text-xs font-black uppercase tracking-wider text-primary border-b pb-2">
+                SECTION A: SUPPLIER AND SHIPMENT DETAILS
+              </h3>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {/* Warehouse Dropdown */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Warehouse *
+                  </label>
+                  <select
+                    value={selectedWarehouse}
+                    onChange={(e) => setSelectedWarehouse(e.target.value)}
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="Raw Material Warehouse">Raw Material Warehouse</option>
+                    <option value="Central Store">Central Store</option>
+                    <option value="Electrical Spares Store">Electrical Spares Store</option>
+                    <option value="Finished Goods Store">Finished Goods Store</option>
+                  </select>
+                </div>
+
+                {/* Supplier Searchable Dropdown */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Supplier *
+                  </label>
+                  <select
+                    value={selectedSupplier}
+                    onChange={(e) => setSelectedSupplier(e.target.value)}
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="Bharat Electronics Components Pvt. Ltd.">Bharat Electronics Components Pvt. Ltd.</option>
+                    <option value="SteelTech Heavy Precision Alloys">SteelTech Heavy Precision Alloys</option>
+                    <option value="Mysore Electricals Ltd">Mysore Electricals Ltd</option>
+                  </select>
+                </div>
+
+                {/* ASN Number Searchable Dropdown */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    ASN Number (Required for ASN Delivery) *
+                  </label>
+                  <select
+                    value={selectedAsn}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedAsn(val);
+                      if (val === "ASN-2026-004582") {
+                        setAutoPoNumber("PO-2026-008741");
+                        setAutoExpectedDate("07 Oct 2026");
+                      } else if (val === "ASN-2026-009912") {
+                        setAutoPoNumber("PO-8755");
+                        setAutoExpectedDate("08 Oct 2026");
+                      } else {
+                        setAutoPoNumber("PO-8790");
+                        setAutoExpectedDate("09 Oct 2026");
+                      }
+                    }}
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs font-mono focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="ASN-2026-004582">ASN-2026-004582</option>
+                    <option value="ASN-2026-009912">ASN-2026-009912</option>
+                    <option value="ASN-2026-003310">ASN-2026-003310</option>
+                  </select>
+                </div>
+
+                {/* PO Number Auto-Filled */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    PO Number (Auto-Filled)
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={autoPoNumber}
+                    className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-mono font-bold text-xs text-primary"
+                  />
+                </div>
+
+                {/* Expected Delivery Date Auto-Filled */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Expected Delivery Date (Read-Only)
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={autoExpectedDate}
+                    className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-bold text-xs text-emerald-600 dark:text-emerald-400"
+                  />
+                </div>
+
+                {/* Delivery Type Dropdown */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Delivery Type *
+                  </label>
+                  <select
+                    value={deliveryType}
+                    onChange={(e) => setDeliveryType(e.target.value)}
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="Regular Delivery">Regular Delivery</option>
+                    <option value="Partial Delivery">Partial Delivery</option>
+                    <option value="Replacement Delivery">Replacement Delivery</option>
+                    <option value="Return Delivery">Return Delivery</option>
+                    <option value="Other Authorized Inbound">Other Authorized Inbound</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Material Summary Auto-Filled Table */}
+              <div>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                  Material Summary (Auto-Filled Table)
+                </label>
+                <div className="rounded-xl border bg-background overflow-hidden p-2 text-xs">
+                  <div className="flex justify-between font-bold text-primary border-b pb-1">
+                    <span>MAT-SS-304-001</span>
+                    <span>Stainless Steel Sheet 304</span>
+                    <span className="text-emerald-600">500 KG</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Remarks Textarea */}
+              <div>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                  Remarks (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={remarksText}
+                  onChange={(e) => setRemarksText(e.target.value)}
+                  placeholder="Enter any additional inbound shipment or gate notes..."
+                  className="w-full rounded-xl border bg-background p-2.5 text-xs font-medium focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <p className="text-[10px] text-muted-foreground italic">
+                * Deliveries without an ASN or PO trigger a separately authorized exception workflow. Security cannot bypass this validation independently.
+              </p>
+            </div>
+
+            {/* SECTION B: VEHICLE AND DRIVER DETAILS */}
+            <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+              <h3 className="text-xs font-black uppercase tracking-wider text-primary border-b pb-2">
+                SECTION B: VEHICLE AND DRIVER DETAILS
+              </h3>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Vehicle Registration Number *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={vehicleNumberInput}
+                    onChange={(e) => setVehicleNumberInput(e.target.value.toUpperCase())}
+                    placeholder="e.g. KA 01 AB 4582"
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-mono font-bold text-xs focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Vehicle Type *
+                  </label>
+                  <select
+                    value={vehicleTypeInput}
+                    onChange={(e) => setVehicleTypeInput(e.target.value)}
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="Truck">Truck</option>
+                    <option value="Mini Truck">Mini Truck</option>
+                    <option value="Container Truck">Container Truck</option>
+                    <option value="Van">Van</option>
+                    <option value="Tempo">Tempo</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Driver Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={driverNameInput}
+                    onChange={(e) => setDriverNameInput(e.target.value)}
+                    placeholder="Driver's Full Name"
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Driver Mobile Number *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={driverMobileInput}
+                    onChange={(e) => setDriverMobileInput(e.target.value)}
+                    placeholder="+91 98450 12345"
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Transporter Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={transporterInput}
+                    onChange={(e) => setTransporterInput(e.target.value)}
+                    placeholder="Transporter / Logistics Company"
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Driver ID Type
+                  </label>
+                  <select
+                    value={driverIdTypeInput}
+                    onChange={(e) => setDriverIdTypeInput(e.target.value)}
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="Driving Licence">Driving Licence</option>
+                    <option value="Aadhaar">Aadhaar Card</option>
+                    <option value="Government ID">Government ID</option>
+                    <option value="Company Gate Badge">Company Gate Badge</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Driver ID Reference (Site Policy)
+                  </label>
+                  <input
+                    type="text"
+                    value={driverIdRefInput}
+                    onChange={(e) => setDriverIdRefInput(e.target.value)}
+                    placeholder="e.g. DL-2026-90812"
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Entry Gate *
+                  </label>
+                  <select
+                    value={entryGateInput}
+                    onChange={(e) => setEntryGateInput(e.target.value)}
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="Main Gate – 01">Main Gate – 01</option>
+                    <option value="North Gate – 02">North Gate – 02</option>
+                    <option value="South Gate – 03">South Gate – 03</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION C: INVOICE AND SUPPORTING DOCUMENTS */}
+            <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+              <h3 className="text-xs font-black uppercase tracking-wider text-primary border-b pb-2">
+                SECTION C: INVOICE AND SUPPORTING DOCUMENTS
+              </h3>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Supplier Invoice Number *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={invoiceNoInput}
+                    onChange={(e) => setInvoiceNoInput(e.target.value)}
+                    placeholder="e.g. INV-2026-9901"
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-mono font-bold text-xs focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Invoice Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={invoiceDateInput}
+                    onChange={(e) => setInvoiceDateInput(e.target.value)}
+                    className="h-9 w-full rounded-xl border bg-background px-3 text-xs font-semibold focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Delivery Challan Number
+                  </label>
+                  <input
+                    type="text"
+                    value={challanNoInput}
+                    onChange={(e) => setChallanNoInput(e.target.value)}
+                    placeholder="e.g. DC-2026-4412"
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    E-Way Bill Number
+                  </label>
+                  <input
+                    type="text"
+                    value={ewayNoInput}
+                    onChange={(e) => setEwayNoInput(e.target.value)}
+                    placeholder="e.g. EWAY-8812-4091"
+                    className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              {/* Uploads */}
+              <div className="grid gap-3 sm:grid-cols-2 pt-2">
+                <div className="rounded-xl border border-dashed p-3 text-center bg-background">
+                  <p className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                    Supplier Invoice Copy (PDF/JPG/PNG) *
+                  </p>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.png"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setUploadedInvoiceFile(file.name);
+                    }}
+                    className="text-xs w-full"
+                  />
+                  {uploadedInvoiceFile && (
+                    <p className="text-[10px] font-bold text-emerald-600 mt-1">✓ {uploadedInvoiceFile}</p>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-dashed p-3 text-center bg-background">
+                  <p className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                    Vehicle Front Plate Photograph (JPG/PNG)
+                  </p>
+                  <input
+                    type="file"
+                    accept=".jpg,.png"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setUploadedVehiclePhoto(file.name);
+                    }}
+                    className="text-xs w-full"
+                  />
+                  {uploadedVehiclePhoto && (
+                    <p className="text-[10px] font-bold text-emerald-600 mt-1">✓ {uploadedVehiclePhoto}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION D: SHIPMENT VERIFICATION TABLE */}
+            <div className="rounded-xl border bg-muted/30 p-4 space-y-2">
+              <h3 className="text-xs font-black uppercase tracking-wider text-primary border-b pb-2">
+                SECTION D: SHIPMENT VERIFICATION (AUTO-FETCHED FROM PO/ASN)
+              </h3>
+
+              <div className="overflow-x-auto rounded-xl border bg-background">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b bg-muted/40 font-bold uppercase text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2">Material</th>
+                      <th className="px-3 py-2 text-right">Ordered Qty</th>
+                      <th className="px-3 py-2 text-right">ASN Qty</th>
+                      <th className="px-3 py-2 text-right">UOM</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    <tr>
+                      <td className="px-3 py-2 font-bold">Stainless Steel Sheet 304 (MAT-SS-304-001)</td>
+                      <td className="px-3 py-2 text-right font-semibold">500</td>
+                      <td className="px-3 py-2 text-right font-bold text-emerald-600">500</td>
+                      <td className="px-3 py-2 text-right font-mono">KG</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="text-[10px] text-muted-foreground italic">
+                * Security verifies the shipment reference and documentation, but does not perform final quantity acceptance or quality inspection. Actual received quantities are determined later in the receiving/GRN process.
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setIsNewRegistrationModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={submittingWebEntry}
+                className="rounded-xl font-bold shadow-sm"
+              >
+                {submittingWebEntry ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <PlusCircle className="mr-2 size-4" />
+                )}
+                Save & Proceed to Vehicle Details →
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

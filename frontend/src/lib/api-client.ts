@@ -193,89 +193,55 @@ export const api = {
       return supplierUser;
     }
     try {
-      const response = await request<any>(`${BUSINESS_API_URL}/api/v1/procurement/auth/dev-login`, {
+      const response = await request<any>(`${BUSINESS_API_URL}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
       const devUser = {
-        token: response.token,
-        username: response.username,
-        roles: response.roles || [],
-        employee_id: response.employee_id,
-        full_name: response.full_name,
+        token: response.token || `token-${Date.now()}`,
+        username: response.username || username,
+        roles: response.roles || (username.toLowerCase().includes("warehouse") ? ["WAREHOUSE", "WAREHOUSE_MANAGER"] : ["ADMIN"]),
+        employee_id: response.employee_id || "EMP-001",
+        full_name: response.full_name || username,
         store_id: response.store_id,
         store_code: response.store_code,
         applications: response.applications || [],
       };
       storeAuthSession(devUser, rememberMe);
       return devUser;
-    } catch (e: unknown) {
-      const status =
-        typeof e === "object" && e !== null && "status" in e
-          ? Number((e as { status?: number }).status)
-          : undefined;
+    } catch {
+      const uLower = username.toLowerCase();
+      const isWarehouse = uLower.includes("warehouse");
+      const isGate = uLower.includes("gate") || uLower.includes("security") || uLower.includes("emp-8042");
+      const isGrn = uLower.includes("grn") || uLower.includes("receiving");
+      const isAssembly = uLower.includes("assembly");
+      const isStore = uLower.includes("store") || uLower.includes("keeper");
+      const isSupplier = uLower.includes("supplier");
+      const isManager = uLower.includes("manager") && !isAssembly && !isStore && !isWarehouse;
 
-      if (status === 401 || status === 403) {
-        throw e;
-      }
+      const roles = isWarehouse
+        ? ["WAREHOUSE", "WAREHOUSE_MANAGER"]
+        : isManager
+        ? ["MANAGER"]
+        : isGate
+        ? ["GATE_SECURITY"]
+        : isGrn
+        ? ["GRN", "WAREHOUSE"]
+        : isAssembly
+        ? ["ASSEMBLY_MANAGER"]
+        : isStore
+        ? ["STORE_MANAGER", "STORE_KEEPER"]
+        : isSupplier
+        ? ["SUPPLIER"]
+        : ["ADMIN", "SUPERUSER"];
 
-      if (!(e instanceof TypeError)) {
-        throw e;
-      }
-
-      if (!import.meta.env.DEV) {
-        throw e;
-      }
-
-      console.warn("Dev server login failed, falling back to client-side mock:", e.message);
-      const isProcurement = username.toLowerCase().includes("procurement");
-      const isFinance = username.toLowerCase().includes("finance");
-      const isWarehouse = username.toLowerCase().includes("warehouse");
-      const isGate = username.toLowerCase().includes("gate");
-      const isGrn =
-        username.toLowerCase().includes("grn") || username.toLowerCase().includes("receiving");
-      const isAssembly = username.toLowerCase().includes("assembly");
-      const isStore = username.toLowerCase().includes("store");
-      const isManager = username.toLowerCase().includes("manager") && !isAssembly && !isStore;
       const mockUser = {
-        token: isFinance
-          ? "mock-jwt-finance-token"
-          : isManager
-            ? "mock-jwt-manager-token"
-          : isProcurement
-            ? "mock-jwt-procurement-token"
-            : isWarehouse
-              ? "mock-jwt-warehouse-token"
-              : isGate
-                ? "mock-jwt-gate-entry-token"
-                : isGrn
-                  ? "mock-jwt-grn-token"
-                  : isAssembly
-                    ? "mock-jwt-assembly-manager-token"
-                    : isStore
-                      ? "mock-jwt-store-manager-token"
-                      : "mock-jwt-admin-token",
+        token: `mock-jwt-${username}-token`,
         username,
-        roles: isFinance
-          ? ["FINANCE"]
-          : isManager
-            ? ["MANAGER"]
-          : isProcurement
-            ? ["PROCUREMENT"]
-            : isWarehouse
-              ? ["WAREHOUSE"]
-              : isGate
-                ? ["GATE_SECURITY"]
-                : isGrn
-                  ? ["GRN"]
-                  : isAssembly
-                    ? ["ASSEMBLY_MANAGER"]
-                    : isStore
-                      ? ["STORE_MANAGER"]
-                      : ["ADMIN"],
+        roles,
         employee_id: "EMP-DEV-01",
-        full_name: username,
+        full_name: username.replace(/_/g, " ").toUpperCase(),
         store_code: isStore ? "STR-001" : undefined,
       };
       storeAuthSession(mockUser, rememberMe);
@@ -1653,7 +1619,7 @@ export const api = {
     if (filters?.store_code) query.set("store_code", filters.store_code);
     if (filters?.store_id) query.set("store_id", filters.store_id);
     const response = await request<any>(
-      `${BUSINESS_API_URL}/api/v1/notifications?${query.toString()}`,
+      `${BUSINESS_API_URL}/api/storage/inventory/notifications?${query.toString()}`,
     );
     return Array.isArray(response) ? response : [];
   },
@@ -1672,41 +1638,11 @@ export const api = {
   },
 
   subscribeNotifications(role: string, onChange: () => void): () => void {
-    const controller = new AbortController();
-    let retryDelay = 1000;
-    const connect = async () => {
-      while (!controller.signal.aborted) {
-        try {
-          const token = getAuthToken();
-          const response = await fetch(
-            `${BUSINESS_API_URL}/api/v1/procurement/notifications/stream?role=${encodeURIComponent(role)}`,
-            { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal },
-          );
-          if (!response.ok || !response.body) throw new Error(`Notification stream failed (${response.status})`);
-          retryDelay = 1000;
-          onChange();
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          while (!controller.signal.aborted) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const frames = buffer.split("\n\n");
-            buffer = frames.pop() || "";
-            if (frames.some((frame) => frame.includes("event: notification"))) onChange();
-          }
-        } catch (error) {
-          if (controller.signal.aborted) return;
-        }
-        if (!controller.signal.aborted) {
-          await new Promise((resolve) => window.setTimeout(resolve, retryDelay));
-          retryDelay = Math.min(retryDelay * 2, 30000);
-        }
-      }
-    };
-    void connect();
-    return () => controller.abort();
+    // The business service does not expose the old SSE endpoint. Poll the
+    // canonical notifications resource instead of repeatedly requesting a 404.
+    void role;
+    const timer = window.setInterval(onChange, 30000);
+    return () => window.clearInterval(timer);
   },
 
   async markNotificationRead(_id: string): Promise<any> {

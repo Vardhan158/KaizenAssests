@@ -164,9 +164,15 @@ export function getSafeRedirectPath(redirectPath: unknown): string | null {
 
 export function getDefaultRouteForUser(user = getUserInfo()): string {
   const roles = user?.roles || [];
-  // Route by explicit permissions only. Username-based routing can send users
-  // such as `storemanager` to a dashboard they cannot access, causing a
-  // redirect loop between the route guard and this fallback.
+  const username = (user?.username || "").toLowerCase();
+
+  if (
+    roles.includes("WAREHOUSE") ||
+    roles.includes("WAREHOUSE_MANAGER") ||
+    username.includes("warehouse")
+  ) {
+    return "/warehouse-dashboard";
+  }
   if (roles.includes("MANAGER")) return "/manager-dashboard";
   if (roles.includes("ADMIN") || roles.includes("SUPERUSER")) return "/admin/users";
   if (roles.includes("GATE_SECURITY")) return "/gate-dashboard";

@@ -106,6 +106,7 @@ export function GateEntryScannerScreen({
   // Selected Data & Status
   const [selectedPo, setSelectedPo] = useState<any | null>(null);
   const [selectedAsn, setSelectedAsn] = useState<any | null>(null);
+  const [warehouseDocks, setWarehouseDocks] = useState<any[]>([]);
   const [lineItems, setLineItems] = useState<any[]>([]);
   const [vehiclesExtracted, setVehiclesExtracted] = useState<any[]>([]);
   const [selectedVehicleIdx, setSelectedVehiclePickerIdx] = useState<
@@ -287,7 +288,24 @@ export function GateEntryScannerScreen({
       const health = await mobileApi.checkHealth();
       setIsOnline(health);
 
-      const asns = await mobileApi.getAsns();
+      const [asns, docks, allocationRequests] = await Promise.all([
+        mobileApi.getAsns(),
+        mobileApi.getWarehouseDocks().catch(() => []),
+        mobileApi.getDockAllocationRequests().catch(() => []),
+      ]);
+      setWarehouseDocks(Array.isArray(docks) ? docks : []);
+      const vehicle = formatVehiclePlate(vehicleInput).replace(/[^A-Z0-9]/g, '');
+      const assignedRequest = (Array.isArray(allocationRequests) ? allocationRequests : []).find(
+        (request: any) =>
+          String(request.vehicle_number || '').replace(/[^A-Z0-9]/gi, '').toUpperCase() === vehicle &&
+          request.assigned_dock_code &&
+          ['DOCK_ASSIGNED', 'AT_DOCK', 'RECEIVING'].includes(String(request.status || '').toUpperCase()),
+      );
+      if (assignedRequest?.assigned_dock_code) {
+        setDockAcknowledged(true);
+        setSelectedAsn((current: any) => current ? { ...current, dock_number: assignedRequest.assigned_dock_code } : current);
+        setSelectedPo((current: any) => current ? { ...current, dock_number: assignedRequest.assigned_dock_code } : current);
+      }
       const pos: any[] = [];
       setPoList([]);
       setAsnList(asns);
@@ -298,6 +316,44 @@ export function GateEntryScannerScreen({
     } catch {
       setIsOnline(false);
       setNotFoundError('Failed to load backend records.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestManagerDockAllocation = async () => {
+    const vehicleNumber = formatVehiclePlate(vehicleInput);
+    const reference = String(
+      selectedAsn?.asn_number || selectedAsn?.asnNumber ||
+      selectedPo?.po_number || selectedPo?.poNumber || searchInput || vehicleNumber,
+    ).trim();
+    if (!vehicleNumber) {
+      Alert.alert('Vehicle Required', 'Enter the vehicle number before requesting dock allocation.');
+      return;
+    }
+    try {
+      setLoading(true);
+      const items = Array.isArray(selectedAsn?.line_items)
+        ? selectedAsn.line_items
+        : Array.isArray(selectedAsn?.items) ? selectedAsn.items : [];
+      const quantity = items.reduce(
+        (total: number, item: any) => total + Number(item.quantity || item.shipped_quantity || item.expected_quantity || 0),
+        0,
+      );
+      await mobileApi.createDockAllocationRequest({
+        gate_pass_id: reference,
+        vehicle_number: vehicleNumber,
+        vendor_reference: String(selectedAsn?.supplier_name || selectedAsn?.supplier || supplierInput || '').trim() || undefined,
+        material_reference: items[0]?.material_code || items[0]?.material_reference || undefined,
+        material_description: items[0]?.material_name || items[0]?.description || undefined,
+        quantity: quantity || undefined,
+        priority: 'NORMAL',
+      });
+      setDockAcknowledged(false);
+      await loadBaseData();
+      Alert.alert('Dock Request Sent', `Vehicle ${vehicleNumber} has been added to the warehouse pending dock allocations. Wait for the warehouse to assign a dock.`);
+    } catch (error: any) {
+      Alert.alert('Dock Request Failed', error?.message || 'Could not notify the warehouse for dock allocation.');
     } finally {
       setLoading(false);
     }
@@ -720,16 +776,10 @@ export function GateEntryScannerScreen({
 
   // Section 18 - Full Gate Entry Validation & Gate Pass Generation
   const executeGenerateGatePass = async () => {
-    const allocatedDock =
-      selectedPo?.dock_number || selectedAsn?.dock_number || '';
-    if (!allocatedDock || !dockAcknowledged) {
-      Alert.alert(
-        'Dock Allocation Required',
-        'The warehouse must allocate a dock before the gate pass can be generated.',
-      );
-      return;
-    }
-
+    // Gate pass generation happens before warehouse dock allocation. The
+    // backend creates the pass in AWAITING_DOCK and creates a pending
+    // allocation request for Warehouse. Allocation status is refreshed later
+    // and changes to DOCK_ASSIGNED when the warehouse selects a dock.
     const formattedPlate = formatVehiclePlate(vehicleInput);
     const todayStr = new Date().toISOString().split('T')[0];
     const isEwayExpired = Boolean(
@@ -1180,7 +1230,7 @@ export function GateEntryScannerScreen({
                       📍 DOCK:{' '}
                       {selectedPo?.dock_number ||
                         selectedAsn?.dock_number ||
-                        'D-04'}
+                        'WAITING FOR ALLOCATION'}
                     </Text>
                   </View>
                 </View>
@@ -1483,6 +1533,15 @@ export function GateEntryScannerScreen({
                           Vehicle status: WAITING_FOR_DOCK
                         </Text>
                       </View>
+                      <Text style={tw`text-slate-400 text-[10px] mt-2`}>
+                        Warehouse docks:{' '}
+                        {warehouseDocks.length
+                          ? warehouseDocks
+                              .map(d => d.dock_code || d.dock_number || d.code)
+                              .filter(Boolean)
+                              .join(', ')
+                          : 'No docks available'}
+                      </Text>
                     </View>
 
                     <TouchableOpacity
@@ -1491,23 +1550,14 @@ export function GateEntryScannerScreen({
                         // Dock allocation is performed by warehouse management.
                         // This action only re-checks the current assignment and
                         // must never create a local/default dock assignment.
-                        const assigned = '';
-                        if (selectedPo)
-                          setSelectedPo({
-                            ...selectedPo,
-                            dock_number: assigned,
-                          });
-                        if (selectedAsn)
-                          setSelectedAsn({
-                            ...selectedAsn,
-                            dock_number: assigned,
-                          });
-                        setDockAcknowledged(true);
+                        void requestManagerDockAllocation();
+                        setDockAcknowledged(false);
+                        void loadBaseData();
                         Alert.alert(
-                          'Dock Assigned ✓',
+                          'Dock Allocation Request',
                           `Vehicle ${
                             formatVehiclePlate(vehicleInput) || '—'
-                          }\n\nAssigned Dock: ${assigned}\n\nProceed with Gate Entry.`,
+                          }\n\nAssigned Dock: Not allocated\n\nWait for warehouse allocation before proceeding.`,
                         );
                       }}
                     >
@@ -1541,8 +1591,8 @@ export function GateEntryScannerScreen({
               <Text style={tw`text-amber-400 text-[10px] font-black uppercase`}>
                 APPROVAL_REQUIRED
               </Text>
-            </View>
-          </View>
+                      </View>
+                    </View>
 
           {/* Supervisor Rule Banner */}
           <View
@@ -2772,10 +2822,10 @@ export function GateEntryScannerScreen({
                   11. DOCK ASSIGNMENT
                 </Text>
                 <Text style={tw`text-emerald-400 text-xs font-black`}>
-                  {selectedPo?.dock_number ||
-                    selectedAsn?.dock_number ||
-                    'Dock D-04'}{' '}
-                  (Inbound Receiving)
+                  {selectedPo?.dock_number || selectedAsn?.dock_number
+                    ? `DOCK ASSIGNED: ${selectedPo?.dock_number || selectedAsn?.dock_number}`
+                    : 'PENDING ALLOCATION'}{' '}
+                  (Warehouse)
                 </Text>
               </View>
 
@@ -2869,22 +2919,10 @@ export function GateEntryScannerScreen({
 
               <TouchableOpacity
                 style={tw`flex-1 py-3.5 rounded-xl items-center shadow-lg ${
-                  submitting ||
-                  !(
-                    (selectedPo?.dock_number || selectedAsn?.dock_number) &&
-                    dockAcknowledged
-                  )
-                    ? 'bg-slate-700 opacity-60'
-                    : 'bg-emerald-600'
+                  submitting ? 'bg-slate-700 opacity-60' : 'bg-emerald-600'
                 }`}
                 onPress={executeGenerateGatePass}
-                disabled={
-                  submitting ||
-                  !(
-                    (selectedPo?.dock_number || selectedAsn?.dock_number) &&
-                    dockAcknowledged
-                  )
-                }
+                disabled={submitting}
               >
                 {submitting ? (
                   <ActivityIndicator color="#ffffff" />
@@ -2993,7 +3031,7 @@ export function GateEntryScannerScreen({
                     <Text
                       style={tw`text-sky-400 text-xs font-black text-right mt-0.5`}
                     >
-                      {scannedGatePassRecord.dock_number || 'D-04'}
+                      {scannedGatePassRecord.dock_number || 'Not allocated'}
                     </Text>
                   </View>
                 </View>

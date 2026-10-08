@@ -58,12 +58,12 @@ export const Route = createFileRoute("/inventory")({
   component: SimpleWarehouseModule,
 });
 
-type TabType = "dashboard" | "putaway" | "inventory" | "requests" | "picking" | "locations";
+type TabType = "dashboard" | "putaway" | "inventory" | "picking" | "locations";
 
 function SimpleWarehouseModule() {
   const navigate = useNavigate();
   const searchParams: any = useSearch({ from: "/inventory" });
-  const tabOptions: TabType[] = ["dashboard", "putaway", "inventory", "requests", "picking", "locations"];
+  const tabOptions: TabType[] = ["dashboard", "putaway", "inventory", "picking", "locations"];
   const activeTab: TabType = tabOptions.includes(searchParams?.tab) ? searchParams.tab : "dashboard";
 
   // Data States (All coming strictly from backend)
@@ -409,7 +409,7 @@ function SimpleWarehouseModule() {
 
         {/* 7 Simple Warehouse Navbar Sub-Tabs */}
         <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as TabType)} className="w-full">
-          <TabsList className="bg-slate-100 dark:bg-slate-900 p-1 rounded-xl flex flex-wrap gap-1 w-full justify-start border border-slate-200 dark:border-slate-800">
+          {false && <TabsList className="bg-slate-100 dark:bg-slate-900 p-1 rounded-xl flex flex-wrap gap-1 w-full justify-start border border-slate-200 dark:border-slate-800">
             <TabsTrigger value="dashboard" className="gap-2 px-4 py-2 text-xs font-semibold">
               <Boxes className="h-4 w-4" />
               Dashboard
@@ -449,7 +449,7 @@ function SimpleWarehouseModule() {
               <Building2 className="h-4 w-4" />
               Locations
             </TabsTrigger>
-          </TabsList>
+          </TabsList>}
 
           {/* ========================================================================= */}
           {/* 1. DASHBOARD TAB */}
@@ -803,7 +803,7 @@ function SimpleWarehouseModule() {
               </div>
             </div>
 
-            <Card className="p-5 space-y-4">
+            {false && <Card className="p-5 space-y-4">
               <div>
                 <h3 className="text-base font-bold">Dock allocation for Gate Entry</h3>
                 <p className="text-xs text-muted-foreground mt-1">Allocate an available dock to an approved gate entry. Gate Security is notified on allocation and release.</p>
@@ -838,7 +838,7 @@ function SimpleWarehouseModule() {
                 ))}
                 {!dockRequests.length && !docks.some((dock) => ["OCCUPIED", "RESERVED"].includes(dock.status)) && <p className="text-xs text-muted-foreground">No pending gate entries or active dock allocations.</p>}
               </div>
-            </Card>
+            </Card>}
 
             {/* Bins List Table */}
             <Card className="p-5 overflow-x-auto">

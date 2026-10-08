@@ -4,7 +4,7 @@ import { AppShell } from "@/components/wms/app-shell";
 import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/warehouse/material-requests")({
-  component: WarehouseMaterialRequestsPage,
+  component: MaterialRequestsPage,
 });
 
 export function MaterialRequestsPage(_props?: any) {

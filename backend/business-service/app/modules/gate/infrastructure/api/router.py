@@ -9,6 +9,7 @@ import base64
 import asyncio
 import datetime
 import logging
+import os
 import re
 import uuid
 from decimal import Decimal, InvalidOperation
@@ -604,10 +605,13 @@ def get_gate_repo() -> InMemoryGateEntryRepository:
 
 
 def _generate_gate_entry_number() -> str:
-    """Generate sequential Gate Entry Number: GE-YYYYMMDD-<6-HEX-SUFFIX>"""
+    """Generate a configurable, opaque, unique gate-pass reference."""
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
-    hex_suffix = uuid.uuid4().hex[:6].upper()
-    return f"GE-{today_str}-{hex_suffix}"
+    prefix = os.getenv("GATE_PASS_PREFIX", "GP").strip().upper() or "GP"
+    site = os.getenv("GATE_PASS_SITE", "BLR").strip().upper() or "BLR"
+    # UUID entropy prevents duplicate passes when the client retries.
+    suffix = uuid.uuid4().hex[:8].upper()
+    return f"{prefix}-{site}-{today_str}-{suffix}"
 
 
 def _to_gate_entry_response(
@@ -664,6 +668,8 @@ def _to_gate_entry_response(
     return GateEntryResponse(
         id=entry.id,
         gate_entry_number=entry.gate_entry_number or f"GE-{entry.id[:8]}",
+        gate_pass_number=entry.gate_entry_number or f"GE-{entry.id[:8]}",
+        qr_token=f"KX-GP-{uuid.uuid5(uuid.NAMESPACE_URL, str(entry.gate_entry_number or entry.id)).hex}",
         vehicle_plate=entry.vehicle_plate or "",
         status=status_val,
         created_by=entry.created_by,
@@ -1102,23 +1108,24 @@ async def create_gate_entry(
         mismatched_fields=mismatches,
     )
     entry.gate_entry_number = gate_entry_num
-    entry.approve_gate_entry(user.username)
+    # Dock allocation is the warehouse control point for this flow.  A
+    # separate gate-entry approval is not required before queuing the arrival.
+    entry.queue_for_dock_allocation()
     if asn:
-        asn.status = GateEntryStatus.GATE_ENTRY_APPROVED.value
+        asn.status = GateEntryStatus.AWAITING_DOCK.value
         uow.session.add(NotificationModel(
             user_role="WAREHOUSE",
             title="Gate Entry Approved",
-            message=f"{asn.asn_number} for vehicle {plate} has been approved at the gate and is ready for warehouse processing.",
+            message=f"{asn.asn_number} for vehicle {plate} is ready for warehouse dock allocation.",
             link=f"/procurement/asns/{asn.id}",
         ))
     else:
         uow.session.add(NotificationModel(
             user_role="WAREHOUSE",
             title="Direct Gate Entry Approved",
-            message=f"Vehicle {plate} for PO {po_num} has been approved at the gate and is ready for warehouse processing.",
+            message=f"Vehicle {plate} for PO {po_num} is ready for warehouse dock allocation.",
             link="/dock-management",
         ))
-    entry.move_to_inbound_queue()
 
     document_data = base64.b64decode(request.document_image_base64) if request.document_image_base64 else None
     await _save_gate_entry(uow.session, entry, document_data=document_data)
@@ -3266,7 +3273,7 @@ async def approve_gate_entry_by_qr(
     }
     if entry.status not in approved_states:
         entry.approve_gate_entry(user.username)
-        entry.move_to_inbound_queue()
+        entry.queue_for_dock_allocation()
         await _save_gate_entry(uow.session, entry)
 
     # QR approval uses the same persisted dock request and notification path as
@@ -3334,7 +3341,7 @@ async def approve_gate_entry_by_qr(
     }
     if entry.status not in approved_states:
         entry.approve_gate_entry(user.username)
-        entry.move_to_inbound_queue()
+        entry.queue_for_dock_allocation()
         await _save_gate_entry(uow.session, entry)
 
     response = _to_gate_entry_response(entry)

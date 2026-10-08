@@ -9,7 +9,6 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { getServerBaseUrl } from '../services/api';
 
 const artwork = require('../assests/kaizenx-splash-reference-v2.png');
 const WIDTH = 941;
@@ -46,15 +45,6 @@ export function SplashScreen({ onSplashFinish }: SplashScreenProps) {
       if (cancelled) {
         return;
       }
-      // Preserve the existing local gate-session handoff.
-      const session = {
-        username: 'gate_security',
-        full_name: 'Gate Security Officer',
-        roles: ['GATE_SECURITY'],
-        gate_location: 'Main Perimeter Gate 01',
-        facility_code: 'FAC-BLR-01',
-        server_url: getServerBaseUrl(),
-      };
       if (!reduced) {
         waves = Animated.loop(
           Animated.sequence([
@@ -98,7 +88,7 @@ export function SplashScreen({ onSplashFinish }: SplashScreenProps) {
       ]);
       timeline.start(({ finished }) => {
         if (finished && !cancelled) {
-          finish.current(session);
+          finish.current(null);
         }
       });
     }

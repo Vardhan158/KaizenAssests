@@ -183,6 +183,32 @@ export const mobileApi = {
     return mobileRequest<any[]>('/api/gate-entries');
   },
 
+  // Warehouse-created docks, including their current allocation/status.
+  async getWarehouseDocks(): Promise<any[]> {
+    const docks = await mobileRequest<any[]>('/api/v1/warehouse/docks');
+    return Array.isArray(docks) ? docks : [];
+  },
+
+  async getDockAllocationRequests(): Promise<any[]> {
+    const requests = await mobileRequest<any[]>('/api/v1/warehouse/dock-allocation-requests');
+    return Array.isArray(requests) ? requests : [];
+  },
+
+  async createDockAllocationRequest(data: {
+    gate_pass_id: string;
+    vehicle_number: string;
+    vendor_reference?: string;
+    material_reference?: string;
+    material_description?: string;
+    quantity?: number;
+    priority?: string;
+  }): Promise<any> {
+    return mobileRequest<any>('/api/v1/warehouse/dock-allocation-requests/auto-create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
   // Submit New Scheduled Gate Entry
   async createGateEntry(data: {
     po_number: string;

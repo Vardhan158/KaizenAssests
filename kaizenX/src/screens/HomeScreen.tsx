@@ -73,14 +73,20 @@ export function HomeScreen({
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [pos, asns, entries, notifs] = await Promise.all([
-        mobileApi.getPurchaseOrders(),
-        mobileApi.getAsns(),
-        mobileApi.getGateEntries(),
-        mobileApi.getNotifications(),
-      ]);
-
-      setNotifications(notifs || []);
+      const [asnsResult, entriesResult, notificationsResult] =
+        await Promise.allSettled([
+          mobileApi.getAsns(),
+          mobileApi.getGateEntries(),
+          mobileApi.getNotifications(),
+        ]);
+      const asns = asnsResult.status === 'fulfilled' ? asnsResult.value : [];
+      const entries =
+        entriesResult.status === 'fulfilled' ? entriesResult.value : [];
+      const notifs =
+        notificationsResult.status === 'fulfilled'
+          ? notificationsResult.value
+          : [];
+      setNotifications(Array.isArray(notifs) ? notifs : []);
 
       const inside = entries.filter(
         e =>
@@ -97,39 +103,20 @@ export function HomeScreen({
         e => e.status === 'VEHICLE_EXITED' || e.status === 'EXITED',
       );
 
-      // Construct Expected Deliveries list from POs & ASNs & Entries
+      // The mobile home is ASN-only; detailed vehicle search was removed.
       const expectedList: any[] = [];
 
-      pos.forEach((po: any, idx: number) => {
+      asns.forEach((asn: any, idx: number) => {
         expectedList.push({
-          id: po.id || `exp-po-${idx}`,
-          vehicle_number: po.vehicle_number || po.vehicleNumber || '',
-          supplier_name: po.supplier_name || po.supplierName || '',
-          asn_number: po.asn_number || po.asnNumber || '',
-          po_number: po.po_number || po.poNumber || '',
-          expected_time: po.expected_time || '',
-          dock_number: po.dock_number || po.dockNumber || '',
+          id: asn.id || `exp-asn-${idx}`,
+          vehicle_number: asn.vehicle_number || asn.vehicleNumber || '',
+          supplier_name: asn.supplier_name || asn.supplierName || '',
+          asn_number: asn.asn_number || asn.asnNumber || '',
+          po_number: asn.po_number || asn.poNumber || '',
+          expected_time: asn.expected_time || '',
+          dock_number: asn.dock_number || '',
           status: 'EXPECTED',
         });
-      });
-
-      asns.forEach((asn: any, idx: number) => {
-        if (
-          !expectedList.some(
-            e => e.po_number === (asn.po_number || asn.poNumber),
-          )
-        ) {
-          expectedList.push({
-            id: asn.id || `exp-asn-${idx}`,
-            vehicle_number: asn.vehicle_number || asn.vehicleNumber || '',
-            supplier_name: asn.supplier_name || asn.supplierName || '',
-            asn_number: asn.asn_number || asn.asnNumber || '',
-            po_number: asn.po_number || asn.poNumber || '',
-            expected_time: asn.expected_time || '',
-            dock_number: asn.dock_number || '',
-            status: 'EXPECTED',
-          });
-        }
       });
 
       setExpectedVehicles(expectedList);
@@ -179,7 +166,7 @@ export function HomeScreen({
           <Text style={tw`text-slate-950 text-2xl font-black tracking-tight`}>
             {getGreeting()}, {firstName}
           </Text>
-          <Text style={tw`text-slate-500 text-sm font-semibold mt-1`}>
+          <Text style={tw`text-cyan-700 text-sm font-bold mt-1`}>
             {user?.gate_location || 'Main Gate – 01'}
           </Text>
         </View>
@@ -192,7 +179,7 @@ export function HomeScreen({
 
             {/* Notification Bell Icon */}
             <TouchableOpacity
-              style={tw`bg-white p-1.5 rounded-xl border border-slate-200 relative`}
+            style={tw`bg-white p-2 rounded-full border border-slate-200 relative shadow-sm`}
               onPress={() => setShowNotificationsModal(true)}
             >
               <Text style={tw`text-sky-400 text-xs`}>🔔</Text>
@@ -209,7 +196,7 @@ export function HomeScreen({
           </View>
 
           <TouchableOpacity
-            style={tw`bg-white px-2.5 py-1 rounded-xl border border-slate-200`}
+            style={tw`bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm`}
             onPress={loadDashboardData}
           >
             <Text style={tw`text-sky-400 text-[10px] font-bold`}>
@@ -219,7 +206,7 @@ export function HomeScreen({
         </View>
       </View>
 
-      <View style={tw`h-52 rounded-b-3xl overflow-hidden relative mx-4`}>
+      <View style={tw`h-52 rounded-3xl overflow-hidden relative mx-4 shadow-lg`}>
         <Image
           source={require('../assests/home-gate-hero.png')}
           style={tw`w-full h-full`}
@@ -240,21 +227,21 @@ export function HomeScreen({
 
       {/* Primary CTA: + NEW GATE ENTRY */}
       <TouchableOpacity
-        style={tw`bg-slate-950 rounded-3xl p-5 mx-5 mt-5 flex-row items-center justify-between mb-7 shadow-lg`}
+        style={tw`bg-cyan-600 rounded-3xl p-5 mx-5 mt-5 flex-row items-center justify-between mb-7 shadow-lg`}
         onPress={onNewEntry}
         activeOpacity={0.85}
       >
         <View style={tw`flex-row items-center gap-3`}>
           <View
-            style={tw`w-11 h-11 rounded-full bg-white/20 items-center justify-center`}
+              style={tw`w-12 h-12 rounded-full bg-white/20 items-center justify-center`}
           >
-            <Text style={tw`text-white text-2xl font-black -mt-0.5`}>+</Text>
+            <Text style={tw`text-white text-3xl font-black -mt-1`}>+</Text>
           </View>
           <View>
             <Text style={tw`text-white text-base font-black tracking-wide`}>
               NEW GATE ENTRY
             </Text>
-            <Text style={tw`text-sky-200 text-xs font-medium mt-0.5`}>
+            <Text style={tw`text-cyan-50 text-xs font-semibold mt-0.5`}>
               Scan PO / ASN or Register Vehicle
             </Text>
           </View>
@@ -263,11 +250,14 @@ export function HomeScreen({
       </TouchableOpacity>
 
       {/* Dashboard KPI Cards Grid */}
-      <Text
-        style={tw`text-slate-700 text-base font-black tracking-wide mb-3 mx-5`}
-      >
-        DASHBOARD OVERVIEW
-      </Text>
+      <View style={tw`flex-row justify-between items-center mb-3 mx-5`}>
+        <Text style={tw`text-slate-700 text-base font-black tracking-wide`}>
+          DASHBOARD OVERVIEW
+        </Text>
+        <View style={tw`bg-white border border-slate-200 rounded-full px-3 py-1`}>
+          <Text style={tw`text-slate-600 text-xs font-bold`}>Today  ˅</Text>
+        </View>
+      </View>
       <View style={tw`flex-row flex-wrap gap-3 mb-6 mx-5`}>
         <View
           style={tw`flex-1 min-w-[45%] bg-white rounded-2xl p-4 border border-sky-100 shadow-sm`}

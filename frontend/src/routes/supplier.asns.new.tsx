@@ -1,7 +1,7 @@
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowLeft, CheckCircle2, FileText, Loader2, Package, Truck } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FileText, Loader2, Package, Truck, Headphones, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/wms/app-shell";
 import { SectionCard } from "@/components/wms/primitives";
 import { Button } from "@/components/ui/button";
@@ -187,7 +187,8 @@ function NewAsn() {
         </Button>
       }
     >
-      <form onSubmit={submit} className="mx-auto max-w-4xl space-y-6 pb-20">
+      <form onSubmit={submit} className="mx-auto grid max-w-7xl gap-5 pb-20 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="space-y-5">
         <SectionCard title="ASN Details" icon={FileText}>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -198,7 +199,7 @@ function NewAsn() {
             </div>
             <div>
               <Label htmlFor="delivery-date">Delivery Date</Label>
-              <Input
+                <Input
                 id="delivery-date"
                 type="date"
                 placeholder="Select delivery date"
@@ -219,13 +220,14 @@ function NewAsn() {
                   <th className="p-3 text-left">Material</th>
                   <th className="p-3 text-right">Quantity</th>
                   <th className="p-3 text-left">UOM</th>
+                  <th className="p-3 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {lines.map((line, index) => (
                   <tr key={index}>
                     <td className="p-3">
-                      <Input
+                <Input
                         placeholder="Material name"
                         value={line.material_name}
                         onChange={(e) =>
@@ -288,11 +290,24 @@ function NewAsn() {
                         <option value="PALLET">PALLET</option>
                       </select>
                     </td>
+                    <td className="p-3 text-center">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label={`Delete material ${index + 1}`}
+                        disabled={lines.length === 1}
+                        className="border-red-200 text-red-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                        onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </td>
                   </tr>
                 ))}
                 {lines.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="p-8 text-center text-muted-foreground">
+                    <td colSpan={4} className="p-8 text-center text-muted-foreground">
                       Add a material to this ASN.
                     </td>
                   </tr>
@@ -365,6 +380,16 @@ function NewAsn() {
           )}
           Submit ASN
         </Button>
+        </div>
+        <aside className="h-fit space-y-5 lg:sticky lg:top-5">
+          <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black text-slate-900">ASN Creation</h2>
+            <div className="mt-5 space-y-5">
+              {[['1', 'ASN Details', 'Basic shipment information'], ['2', 'Materials', 'Add materials and quantities'], ['3', 'Vehicle and Driver', 'Transport details'], ['4', 'Review & Submit', 'Verify and submit ASN']].map(([step, title, description], index) => <div key={step} className="relative flex gap-3">{index < 3 && <span className="absolute left-4 top-9 h-8 border-l border-slate-200" />}<span className={`z-10 grid size-8 shrink-0 place-items-center rounded-full text-sm font-bold ${index === 0 ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'}`}>{step}</span><div><p className="text-sm font-bold text-slate-900">{title}</p><p className="text-xs text-slate-500">{description}</p></div></div>)}
+            </div>
+          </div>
+          <div className="rounded-2xl bg-blue-50 p-5"><div className="flex items-center gap-3"><Headphones className="size-8 text-blue-600" /><div><p className="font-bold text-slate-900">Need Help?</p><p className="text-xs text-slate-500">Contact your warehouse team for support.</p></div></div></div>
+        </aside>
       </form>
     </AppShell>
   );

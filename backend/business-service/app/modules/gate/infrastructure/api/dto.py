@@ -104,6 +104,8 @@ class VerifyGateEntryRequest(ApiModel):
 class GateEntryResponse(ApiModel):
     id: str
     gate_entry_number: str
+    gate_pass_number: Optional[str] = None
+    qr_token: Optional[str] = None
     vehicle_plate: str
     status: str
     created_by: str

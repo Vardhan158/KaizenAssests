@@ -528,24 +528,11 @@ function DockManagement() {
       return;
     }
 
-    const chosenSm = storeManagers.find(
-      (m) => m.id === selectedStoreManagerId || m.employee_id === selectedStoreManagerId
-    );
-    if (!selectedStoreId) {
-      toast.error("Select an active store before allocating the dock.");
-      return;
-    }
-
     setActionBusy(true);
     try {
-      await api.allocateDock(reqId, dockId, {
-        assignedStoreId: selectedStoreId,
-        storeManagerId: chosenSm?.employee_id || chosenSm?.id || selectedStoreManagerId || undefined,
-        storeManagerUsername: chosenSm?.username || undefined,
-        storeManagerName: chosenSm?.full_name || undefined,
-      });
+      await api.allocateDock(reqId, dockId);
       toast.success(`Dock ${dockCode} allocated successfully`, {
-        description: `Status updated to OCCUPIED.${chosenSm ? ` Assigned to Store Manager ${chosenSm.full_name}.` : ""}`,
+        description: "Status updated to OCCUPIED.",
       });
       setAllocateModalPendingReq(null);
       setAllocateModalDock(null);
@@ -1287,7 +1274,7 @@ function DockManagement() {
                 </div>
               )}
               {/* Assigned Store Selection */}
-              <div className="pt-2">
+              <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
                   <span>Assign Available Store:</span>
                   <span className="text-[10px] text-muted-foreground font-normal">Required</span>
@@ -1300,7 +1287,7 @@ function DockManagement() {
                 </select>
               </div>
               {/* Store Manager Selection */}
-              <div className="pt-2">
+              <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
                   <span>Assign Responsible Store Manager:</span>
                   <span className="text-[10px] text-muted-foreground font-normal">Required</span>
@@ -1332,7 +1319,7 @@ function DockManagement() {
                 Cancel
               </Button>
               <Button
-                disabled={!selectedRequestIdToAllocate || !selectedStoreId || actionBusy}
+                disabled={!selectedRequestIdToAllocate || actionBusy}
                 className="rounded-xl shadow-glow bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                 onClick={() => void handleAllocateDock()}
               >
@@ -1398,7 +1385,7 @@ function DockManagement() {
               )}
 
               {/* Assigned Store Selection */}
-              <div className="pt-2">
+              <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
                   <span>Assign Available Store:</span>
                   <span className="text-[10px] text-muted-foreground font-normal">Required</span>
@@ -1411,7 +1398,7 @@ function DockManagement() {
                 </select>
               </div>
               {/* Store Manager Selection */}
-              <div className="pt-2">
+              <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
                   <span>Assign Responsible Store Manager:</span>
                   <span className="text-[10px] text-muted-foreground font-normal">Required</span>
@@ -1440,7 +1427,7 @@ function DockManagement() {
                 Cancel
               </Button>
               <Button
-                disabled={!selectedDockIdToAllocate || !selectedStoreId || actionBusy}
+                disabled={!selectedDockIdToAllocate || actionBusy}
                 className="rounded-xl shadow-glow bg-purple-600 hover:bg-purple-700 text-white font-semibold"
                 onClick={() => void handleAllocateDock()}
               >

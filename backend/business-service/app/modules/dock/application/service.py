@@ -267,8 +267,8 @@ class DockAllocationService:
         session: AsyncSession,
         allocation_request_id: uuid.UUID,
         dock_id: uuid.UUID,
-        assigned_store_id: uuid.UUID,
         allocated_by: str,
+        assigned_store_id: Optional[uuid.UUID] = None,
         store_manager_id: Optional[str] = None,
         store_manager_username: Optional[str] = None,
         store_manager_name: Optional[str] = None,
@@ -295,10 +295,14 @@ class DockAllocationService:
             )
 
         from app.modules.store.infrastructure.persistence.models import StoreModel
-        assigned_store = await session.get(StoreModel, assigned_store_id)
-        if not assigned_store or (assigned_store.status or "").upper() != "ACTIVE":
+        # Store assignment is optional. If the dock is already tied to a
+        # warehouse store, use that relationship; otherwise allocate the dock
+        # without requiring a store or store manager from the UI.
+        effective_store_id = assigned_store_id or dock.store_id
+        assigned_store = await session.get(StoreModel, effective_store_id) if effective_store_id else None
+        if assigned_store and (assigned_store.status or "").upper() != "ACTIVE":
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected store is not active or available")
-        if dock.store_id and dock.store_id != assigned_store.id:
+        if dock.store_id and assigned_store and dock.store_id != assigned_store.id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Selected dock is permanently assigned to another store")
 
         # 2. Lock Allocation Request
@@ -326,9 +330,9 @@ class DockAllocationService:
         req.assigned_at = datetime.now(timezone.utc)
         req.status = "DOCK_ASSIGNED"
 
-        req.assigned_store_id = assigned_store.id
-        req.assigned_store_code = assigned_store.store_code
-        req.assigned_store_name = assigned_store.store_name
+        req.assigned_store_id = assigned_store.id if assigned_store else None
+        req.assigned_store_code = assigned_store.store_code if assigned_store else None
+        req.assigned_store_name = assigned_store.store_name if assigned_store else None
 
         # Resolve and assign Store Manager
         if store_manager_id or store_manager_username or store_manager_name:
@@ -392,7 +396,14 @@ class DockAllocationService:
                 select(GateEntryModel).where(GateEntryModel.gate_entry_number == req.existing_gate_pass_id).with_for_update()
             )).scalar_one_or_none()
         if gate_entry is None:
-            raise HTTPException(status_code=409, detail="The allocation request is not linked to a persisted gate entry")
+            # Security can request a dock before the gate-entry record is
+            # persisted. Keep the warehouse allocation as a reservation and
+            # let the later gate-entry flow link it to the vehicle.
+            dock.status = DockStatus.RESERVED.value
+            await DockAllocationService._sync_warehouse_dock_status(
+                session, dock.dock_code, DockStatus.RESERVED.value
+            )
+            return req
         if gate_entry.vehicle_number != req.vehicle_number:
             raise HTTPException(status_code=409, detail="Gate entry vehicle does not match the dock request")
         gate_entry.status = "DOCK_ASSIGNED"

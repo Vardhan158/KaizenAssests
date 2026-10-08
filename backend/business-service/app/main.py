@@ -36,6 +36,7 @@ from app.modules.storage.infrastructure.api.assembly_requisition_router import r
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.modules.store.infrastructure.api.router import router as store_router, zone_router, bin_router
 from app.modules.quarantine.infrastructure.api.router import router as quarantine_router
+from app.security.auth_router import router as auth_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -166,6 +167,20 @@ async def lifespan(app: FastAPI):
             "ON material (material_code) WHERE material_code IS NOT NULL"
         )
         logger.info("Ensured canonical Material Master columns and legacy data mapping")
+
+        for column, column_type in [
+            ("location_id", "VARCHAR(64)"),
+            ("warehouse_id", "VARCHAR(64) DEFAULT 'Main Warehouse'"),
+            ("on_hand_quantity", "NUMERIC(18, 4) DEFAULT 0.0"),
+            ("allocated_quantity", "NUMERIC(18, 4) DEFAULT 0.0"),
+            ("available_quantity", "NUMERIC(18, 4) DEFAULT 0.0"),
+            ("uom", "VARCHAR(32) DEFAULT 'PCS'"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"),
+        ]:
+            try:
+                await run_ddl(f"ALTER TABLE material_stock ADD COLUMN IF NOT EXISTS {column} {column_type}")
+            except Exception:
+                pass
 
         # Allow nullable PO columns in inventory_receipt_posting for Unexpected Delivery
         try:
@@ -1612,6 +1627,7 @@ def create_app() -> FastAPI:
     app.include_router(inventory_router)
     app.include_router(storage_req_router)
     app.include_router(v1_inventory_router)
+    app.include_router(auth_router)
 
     from fastapi.staticfiles import StaticFiles
     import os

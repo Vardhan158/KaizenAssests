@@ -164,14 +164,15 @@ const warehouseNav = [
   { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
   { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
   { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
-  { label: "Material Requests", to: "/inventory?tab=requests", icon: ClipboardList },
   { label: "Assembly Requisitions", to: "/warehouse/assembly-requisitions", icon: ClipboardList },
   { label: "Picking", to: "/inventory?tab=picking", icon: ListOrdered },
   { label: "Locations", to: "/inventory?tab=locations", icon: Building2 },
+  { label: "Dock Allocation", to: "/dock-management", icon: Warehouse },
 ];
 
 const supplierNav = [
-  { label: "Advanced Shipping Notices (ASNs)", to: "/supplier/asns/new", icon: Truck },
+  { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
+  { label: "Create ASN", to: "/supplier/asns/new", icon: Truck },
 ];
 
 const managerNav = [
@@ -185,9 +186,12 @@ const managerNav = [
 
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
-  { label: "Inbound Arrivals", to: "/vehicle-queue", icon: Truck },
-  { label: "Outbound Arrivals", to: "/vehicle-exit", icon: Truck },
-  { label: "Gate Exit", to: "/dispatch-gate-exit", icon: LogOut },
+  { label: "New Gate Entry", to: "/vehicle-queue?action=new", icon: PlusCircle },
+  { label: "Active Gate Entries", to: "/vehicle-queue", icon: Truck },
+  { label: "Gate Passes", to: "/vehicle-queue?tab=passes", icon: QrCode },
+  { label: "Vehicle Exit", to: "/vehicle-exit", icon: LogOut },
+  { label: "Entry & Exit History", to: "/vehicle-queue?tab=history", icon: ClipboardList },
+  { label: "Notifications", to: "/notifications", icon: Bell },
 ];
 
 const adminNav = [
@@ -730,7 +734,7 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 glass-strong">
+        {false && <header className="sticky top-0 z-30 glass-strong">
           <div className="flex h-16 items-center gap-3 px-4 lg:px-7">
             <button
               type="button"
@@ -841,7 +845,7 @@ export function AppShell({
               </div>
             </div>
           </div>
-        </header>
+        </header>}
 
         <main className="page-enter flex-1 px-4 py-6 lg:px-7">
           <div className="mx-auto w-full max-w-[1360px]">
