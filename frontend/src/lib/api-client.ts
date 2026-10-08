@@ -173,7 +173,7 @@ export const api = {
     mustChangePassword?: boolean;
     applications?: string[];
   }> {
-    if (username.startsWith("supplier_")) {
+    if (username.startsWith("supplier_") || username === "supplier") {
       const response = await request<any>(
         `${BUSINESS_API_URL}/api/v1/procurement/auth/supplier-login`,
         {
@@ -221,6 +221,10 @@ export const api = {
       }
 
       if (!(e instanceof TypeError)) {
+        throw e;
+      }
+
+      if (!import.meta.env.DEV) {
         throw e;
       }
 
@@ -1416,24 +1420,13 @@ export const api = {
   async getAsns(supplierId?: string): Promise<any[]> {
     try {
       const url = supplierId
-        ? `${BUSINESS_API_URL}/api/v1/gate/expected-deliveries?supplier_id=${supplierId}`
-        : `${BUSINESS_API_URL}/api/v1/gate/expected-deliveries`;
+        ? `${BUSINESS_API_URL}/api/gate/expected-deliveries?supplier_id=${supplierId}`
+        : `${BUSINESS_API_URL}/api/gate/expected-deliveries`;
       const res = await request<any[]>(url, { cache: "no-store" });
-      if (Array.isArray(res) && res.length > 0) return res;
-    } catch {}
-
-    return [
-      {
-        id: "asn-1",
-        asn_number: "ASN-2026-004582",
-        po_number: "PO-2026-008741",
-        supplier_name: "Bharat Electronics Components Pvt. Ltd.",
-        vehicle_number: "KA 01 AB 4582",
-        driver_name: "Suresh Gowda",
-        driver_contact: "+91 98450 12345",
-        delivery_date: "07 Oct 2026",
-      },
-    ];
+      return Array.isArray(res) ? res : [];
+    } catch {
+      return [];
+    }
   },
 
   async getSupplierReplacementRequests(): Promise<any[]> {
@@ -1457,7 +1450,7 @@ export const api = {
 
   async getAsn(id: string): Promise<any> {
     try {
-      return await request<any>(`${BUSINESS_API_URL}/api/v1/gate/asn/${id}`, { cache: "no-store" });
+      return await request<any>(`${BUSINESS_API_URL}/api/gate/asn/${encodeURIComponent(id)}`, { cache: "no-store" });
     } catch {
       return {
         id,
@@ -1477,24 +1470,11 @@ export const api = {
   },
 
   async createAsn(data: any): Promise<any> {
-    try {
-      return await request<any>(`${BUSINESS_API_URL}/api/v1/gate/asns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-    } catch {
-      return {
-        id: `asn-${Date.now()}`,
-        asn_number: data.asn_number || `ASN-${new Date().getFullYear()}-008421`,
-        po_number: data.po_number || "PO-2026-008741",
-        vehicle_number: data.vehicle_number || "KA 01 AB 4582",
-        driver_name: data.driver_name || "Suresh Gowda",
-        driver_contact: data.driver_contact || "+91 98450 12345",
-        status: "SUBMITTED",
-        created_at: new Date().toISOString(),
-      };
-    }
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
   },
 
   async updateAsn(id: string, data: any): Promise<any> {
@@ -1502,13 +1482,7 @@ export const api = {
   },
 
   async getNextAsnNumber(): Promise<{ asnNumber: string }> {
-    try {
-      return await request<any>(`${BUSINESS_API_URL}/api/v1/gate/asns/next-number`);
-    } catch {
-      return {
-        asnNumber: `ASN-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`,
-      };
-    }
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/next-number`);
   },
 
   async getNextMaterialRequestNumber(): Promise<{
@@ -1674,32 +1648,13 @@ export const api = {
     role: string,
     filters?: { store_code?: string; store_id?: string },
   ): Promise<any[]> {
-    try {
-      const params = new URLSearchParams({ role });
-      if (filters?.store_code) params.append("store_code", filters.store_code);
-      if (filters?.store_id) params.append("store_id", filters.store_id);
-      const res = await request<any[]>(
-        `${BUSINESS_API_URL}/api/v1/notifications?${params.toString()}`,
-      );
-      if (Array.isArray(res)) return res;
-    } catch {}
-
-    return [
-      {
-        id: "notif-1",
-        title: "Dock Assigned",
-        message: "Dock D-04 assigned to KA 01 AB 4582.",
-        created_at: new Date().toISOString(),
-        is_read: false,
-      },
-      {
-        id: "notif-2",
-        title: "QC Completed",
-        message: "QC Inspection completed for KA 01 AB 4582 (490 KG Accepted). Store Manager notified for GRN Posting.",
-        created_at: new Date().toISOString(),
-        is_read: false,
-      },
-    ];
+    const query = new URLSearchParams({ role });
+    if (filters?.store_code) query.set("store_code", filters.store_code);
+    if (filters?.store_id) query.set("store_id", filters.store_id);
+    const response = await request<any>(
+      `${BUSINESS_API_URL}/api/v1/notifications?${query.toString()}`,
+    );
+    return Array.isArray(response) ? response : [];
   },
 
   async markNotificationRead(_id: string): Promise<any> {
@@ -1714,8 +1669,11 @@ export const api = {
   },
 
   async markArrivalNotificationRead(_id: string): Promise<any> {
-    return { status: "OK" };
-  },
+    try {
+      return await request<any>(
+        `${BUSINESS_API_URL}/api/v1/procurement/arrival-notifications/${_id}/read`,
+        {
+          method: "POST",
         },
       );
     } catch {
@@ -2997,4 +2955,3 @@ export const api = {
 };
 
 export const apiClient = api;
-

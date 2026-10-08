@@ -3,7 +3,7 @@
  * Connects directly to Python FastAPI backend (Port 8000)
  */
 
-let serverBaseUrl = "http://192.168.1.175:8000";
+let serverBaseUrl = "http://192.168.88.45:8000";
 
 export function setServerBaseUrl(url: string) {
   if (url && url.trim()) {
@@ -64,11 +64,19 @@ export async function mobileRequest<T>(endpoint: string, options: RequestInit = 
 export const mobileApi = {
   // Check backend health
   async checkHealth(): Promise<boolean> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
     try {
-      const res = await fetch(`${serverBaseUrl}/health`, { method: "GET" });
+      const res = await fetch(`${serverBaseUrl}/health`, {
+        method: "GET",
+        signal: controller.signal,
+      });
       return res.ok;
     } catch {
       return false;
+    } finally {
+      clearTimeout(timeoutId);
     }
   },
 
@@ -109,7 +117,7 @@ export const mobileApi = {
 
   // Section 25 - Fetch Mobile Push / In-App Notifications
   async getNotifications(): Promise<any[]> {
-    return [
+    return mobileRequest<any[]>("/api/v1/notifications?role=GATE_SECURITY"); /*
       {
         id: "notif-1",
         title: "Dock Assigned",
@@ -145,156 +153,29 @@ export const mobileApi = {
         time: "5 mins ago",
         type: "QC_COMPLETED",
       },
-    ];
+    ]; */
   },
 
-  // Fetch POs directly from backend (with offline fallback)
+  // Fetch POs directly from backend.
   async getPurchaseOrders(): Promise<any[]> {
-    const endpoints = [
-      "/api/v1/procurement/purchase-orders",
-      "/api/procurement/purchase-orders",
-      "/api/purchase-orders",
-    ];
-
-    for (const ep of endpoints) {
-      try {
-        const res = await mobileRequest<any[]>(ep);
-        if (Array.isArray(res) && res.length > 0) return res;
-      } catch {
-        // try next endpoint
-      }
-    }
-
-    return [
-      {
-        id: "po-1",
-        po_number: "PO-2026-008741",
-        supplier_name: "Bharat Electronics Components Pvt. Ltd.",
-        supplier_code: "SUP-IND-1042",
-        po_date: "01 Oct 2026",
-        vehicle_number: "KA 01 AB 4582",
-        dock_number: "Dock D-04",
-        warehouse: "Raw Material Warehouse",
-        zone: "Inbound Receiving Bay",
-        items: [
-          {
-            material_name: "Stainless Steel Sheet 304",
-            material_code: "MAT-SS-304-001",
-            quantity: 500,
-            uom: "KG",
-          },
-        ],
-      },
-      {
-        id: "po-2",
-        po_number: "PO-8755",
-        supplier_name: "SteelTech Heavy Precision Alloys",
-        supplier_code: "SUP-IND-2098",
-        po_date: "02 Oct 2026",
-        vehicle_number: "KA 05 MN 7821",
-        dock_number: "Dock D-02",
-        items: [
-          {
-            material_name: "High Tensile Alloy Rod",
-            material_code: "MAT-HT-901",
-            quantity: 1000,
-            uom: "KG",
-          },
-        ],
-      },
-    ];
+    return mobileRequest<any[]>("/api/v1/procurement/purchase-orders");
   },
 
-  // Fetch ASNs directly from backend (with offline fallback)
+  // Fetch ASNs directly from backend.
   async getAsns(): Promise<any[]> {
-    const endpoints = [
-      "/api/v1/procurement/asns",
-      "/api/procurement/asns",
-      "/api/asns",
-    ];
-
-    for (const ep of endpoints) {
-      try {
-        const res = await mobileRequest<any[]>(ep);
-        if (Array.isArray(res) && res.length > 0) return res;
-      } catch {
-        // try next endpoint
-      }
-    }
-
-    return [
-      {
-        id: "asn-1",
-        asn_number: "ASN-2026-004582",
-        po_number: "PO-2026-008741",
-        supplier_name: "Bharat Electronics Components Pvt. Ltd.",
-        supplier_code: "SUP-IND-1042",
-        vehicle_number: "KA 01 AB 4582",
-        delivery_date: "07 Oct 2026",
-        dock_number: "Dock D-04",
-        lines: [
-          {
-            material_name: "Stainless Steel Sheet 304",
-            material_code: "MAT-SS-304-001",
-            quantity: 500,
-            uom: "KG",
-          },
-        ],
-      },
-      {
-        id: "asn-2",
-        asn_number: "ASN-2026-009912",
-        po_number: "PO-8755",
-        supplier_name: "SteelTech Heavy Precision Alloys",
-        supplier_code: "SUP-IND-2098",
-        vehicle_number: "KA 05 MN 7821",
-        delivery_date: "08 Oct 2026",
-        dock_number: "Dock D-02",
-      },
-    ];
+    return mobileRequest<any[]>("/api/gate/expected-deliveries");
   },
 
-  // Fetch Recent Gate Entries directly from backend (with offline fallback)
+  async getAsnByNumber(asnNumber: string): Promise<any> {
+    const raw = asnNumber.trim().toUpperCase();
+    const match = raw.match(/^ASN-(\d{4})-(\d+)$/);
+    const canonical = match ? `ASN-${match[1]}-${Number(match[2])}` : raw;
+    return mobileRequest<any>(`/api/gate/asn/${encodeURIComponent(canonical)}`);
+  },
+
+  // Fetch Recent Gate Entries directly from backend.
   async getGateEntries(): Promise<any[]> {
-    const endpoints = [
-      "/api/gate-entries",
-      "/api/v1/gate/entries",
-      "/api/gate/entries",
-    ];
-
-    for (const ep of endpoints) {
-      try {
-        const res = await mobileRequest<any[]>(ep);
-        if (Array.isArray(res) && res.length > 0) return res;
-      } catch {
-        // try next endpoint
-      }
-    }
-
-    return [
-      {
-        id: "ge-1",
-        gate_pass_number: "GP-BLR-20261007-0048",
-        vehicle_number: "KA 01 AB 4582",
-        supplier_name: "Bharat Electronics Components Pvt. Ltd.",
-        po_number: "PO-2026-008741",
-        asn_number: "ASN-2026-004582",
-        dock_number: "Dock D-04",
-        status: "INSIDE_FACILITY",
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: "ge-2",
-        gate_pass_number: "GP-BLR-20261007-0049",
-        vehicle_number: "KA 05 MN 7821",
-        supplier_name: "SteelTech Heavy Precision Alloys",
-        po_number: "PO-8755",
-        asn_number: "ASN-2026-009912",
-        dock_number: "Dock D-02",
-        status: "UNLOADING",
-        created_at: new Date().toISOString(),
-      },
-    ];
+    return mobileRequest<any[]>("/api/gate-entries");
   },
 
   // Submit New Scheduled Gate Entry

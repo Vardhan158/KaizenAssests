@@ -1,11 +1,16 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { ArrowRight, CheckCircle2, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getDefaultRouteForUser, getUserInfo, isAuthenticated } from "@/lib/auth-utils";
 import logoUrl from "@/assets/Logo.png";
-import { WarehouseJourney } from "@/components/journey/WarehouseJourney";
+
+// Keep the landing page's first paint independent from the heavy Three.js/WebGL
+// journey. The interactive scene is loaded after the lightweight page shell.
+const WarehouseJourney = lazy(() => import("@/components/journey/WarehouseJourney").then((module) => ({
+  default: module.WarehouseJourney,
+})));
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -83,7 +88,20 @@ function HomePage() {
 
       {/* Main 3D Continuous Scroll-Controlled Warehouse Journey */}
       <main className="w-full">
-        <WarehouseJourney />
+        <Suspense
+          fallback={
+            <section className="relative flex h-screen w-full items-center justify-center overflow-hidden bg-slate-950">
+              <div className="text-center">
+                <div className="mx-auto mb-4 size-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-300">
+                  Loading logistics journey…
+                </p>
+              </div>
+            </section>
+          }
+        >
+          <WarehouseJourney />
+        </Suspense>
 
         {/* Final Lifecycle Completion Screen */}
         <section

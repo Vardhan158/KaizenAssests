@@ -11,10 +11,10 @@ import datetime
 import logging
 import re
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -23,7 +23,7 @@ from app.common.email_utils import render_premium_email, send_email
 from app.database.session import UnitOfWork, get_uow
 from app.modules.gate.adapters.mock_adapters import InMemoryGateEntryRepository
 from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, VehicleExitApprovalModel
-from app.common.persistence.models import PurchaseOrderModel, AsnModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel
+from app.common.persistence.models import AsnLineModel, PurchaseOrderModel, AsnModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel
 from app.modules.receiving.infrastructure.persistence.models import GrnLineModel, GrnModel, InventoryReceiptPostingModel
 from app.modules.receiving.domain.events import GrnPostedEvent, PostedInventoryLine
 from app.events.outbox_repository import to_outbox_row
@@ -64,6 +64,248 @@ from app.security.dependencies import CurrentUser, get_current_user, require_per
 router = APIRouter(prefix="/api/gate-entries", tags=["gate"])
 preview_router = APIRouter(prefix="/api/gate", tags=["gate"])
 logger = logging.getLogger(__name__)
+
+
+def _asn_response(asn: AsnModel) -> dict:
+    return {
+        "id": str(asn.id),
+        "asn_number": asn.asn_number,
+        "po_id": asn.po_id,
+        "po_number": asn.po_number,
+        "supplier_id": str(asn.supplier_id) if asn.supplier_id else None,
+        "vehicle_number": asn.vehicle_number,
+        "driver_name": asn.driver_name,
+        "driver_contact": asn.driver_contact,
+        "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn.expected_arrival_at else None,
+        "delivery_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
+        "shipment_date": asn.shipment_date.isoformat() if asn.shipment_date else None,
+        "status": asn.status,
+        "transporter": asn.transporter,
+        "logistics": asn.logistics or [],
+        "lines": [
+            {
+                "item_code": line.item_code,
+                "material_name": line.material_name,
+                "shipped_quantity": float(line.shipped_quantity or 0),
+                "quantity": float(line.shipped_quantity or 0),
+                "uom": line.uom or "PCS",
+            }
+            for line in (asn.lines or [])
+        ],
+    }
+
+
+@preview_router.get("/expected-deliveries")
+async def list_expected_deliveries(
+    supplier_id: str | None = Query(default=None),
+    uow: UnitOfWork = Depends(get_uow),
+) -> list[dict]:
+    query = select(AsnModel).options(selectinload(AsnModel.lines)).order_by(AsnModel.created_at.desc())
+    if supplier_id:
+        try:
+            query = query.where(AsnModel.supplier_id == uuid.UUID(supplier_id))
+        except ValueError:
+            return []
+    result = await uow.session.execute(query)
+    return [_asn_response(asn) for asn in result.scalars().all()]
+
+
+@preview_router.get("/asns/next-number")
+async def get_next_asn_number(uow: UnitOfWork = Depends(get_uow)) -> dict:
+    year = datetime.date.today().year
+    prefix = f"ASN-{year}-"
+    result = await uow.session.execute(
+        select(AsnModel.asn_number).where(AsnModel.asn_number.like(f"{prefix}%"))
+    )
+    highest = 0
+    for value in result.scalars().all():
+        match = re.fullmatch(r"ASN-(?:\d{4}-)?(\d+)", str(value).strip().upper())
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return {"asnNumber": f"{prefix}{highest + 1}"}
+
+
+@preview_router.get("/asn/{reference}")
+async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
+    normalized_reference = reference.strip().upper()
+    filters = [func.upper(AsnModel.asn_number) == normalized_reference]
+    try:
+        filters.append(AsnModel.id == uuid.UUID(reference))
+    except ValueError:
+        pass
+    result = await uow.session.execute(
+        select(AsnModel).options(selectinload(AsnModel.lines)).where(or_(*filters))
+    )
+    asn = result.scalars().first()
+    if asn is None:
+        compact_match = re.fullmatch(r"ASN-(\d{4})-(\d+)", normalized_reference)
+        if compact_match:
+            year, sequence = compact_match.groups()
+            all_asns = await uow.session.execute(
+                select(AsnModel).options(selectinload(AsnModel.lines)).where(
+                    func.upper(AsnModel.asn_number).like(f"ASN-{year}-%")
+                )
+            )
+            target_sequence = int(sequence)
+            asn = next(
+                (
+                    candidate
+                    for candidate in all_asns.scalars().all()
+                    if (match := re.fullmatch(rf"ASN-{year}-(\d+)", candidate.asn_number.upper()))
+                    and int(match.group(1)) == target_sequence
+                ),
+                None,
+            )
+    if asn is None:
+        raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
+    return _asn_response(asn)
+
+
+@preview_router.post("/asns", status_code=status.HTTP_201_CREATED)
+async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depends(get_uow)) -> dict:
+    asn_number = str(payload.get("asn_number") or "").strip().upper()
+    if not asn_number:
+        raise HTTPException(status_code=422, detail="asn_number is required")
+    if re.fullmatch(r"ASN-\d{4}-\d+", asn_number) is None:
+        raise HTTPException(status_code=422, detail="asn_number must use format ASN-YYYY-N, for example ASN-2026-1")
+    existing = await uow.session.execute(select(AsnModel).where(AsnModel.asn_number == asn_number))
+    if existing.scalars().first() is not None:
+        raise HTTPException(status_code=409, detail=f"ASN '{asn_number}' already exists")
+
+    po_number = str(payload.get("po_number") or "").strip()
+    po_filters = []
+    if po_number:
+        po_filters.append(func.upper(PurchaseOrderModel.po_number) == po_number.upper())
+    raw_po_id = str(payload.get("po_id") or "").strip()
+    if raw_po_id:
+        try:
+            po_filters.append(PurchaseOrderModel.id == uuid.UUID(raw_po_id))
+        except ValueError:
+            pass
+    po_model = None
+    if po_filters:
+        po_result = await uow.session.execute(
+            select(PurchaseOrderModel)
+            .options(selectinload(PurchaseOrderModel.items))
+            .where(or_(*po_filters))
+        )
+        po_model = po_result.scalars().first()
+        if po_model and not po_number:
+            po_number = po_model.po_number
+
+    submitted_lines = payload.get("lines") or []
+    if not isinstance(submitted_lines, list):
+        raise HTTPException(status_code=422, detail="lines must be a list")
+    validated_lines: list[tuple[dict, Decimal]] = []
+    for raw_line in submitted_lines:
+        if not isinstance(raw_line, dict):
+            raise HTTPException(status_code=422, detail="each ASN line must be an object")
+        quantity = raw_line.get("shipped_quantity", raw_line.get("quantity", 0))
+        try:
+            validated_quantity = Decimal(str(quantity if quantity is not None else 0))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="shipped_quantity must be a valid number") from exc
+        if not validated_quantity.is_finite():
+            raise HTTPException(status_code=422, detail="shipped_quantity must be a finite number")
+        if validated_quantity < 0:
+            raise HTTPException(status_code=422, detail="shipped_quantity cannot be negative")
+        validated_lines.append((raw_line, validated_quantity))
+
+    if po_model and validated_lines:
+        ordered_by_code: dict[str, Decimal] = {}
+        primary_code_by_alias: dict[str, str] = {}
+        for item in po_model.items:
+            primary_code = str(item.variant_code or item.material_code or "").strip().upper()
+            if not primary_code:
+                continue
+            ordered_by_code[primary_code] = ordered_by_code.get(primary_code, Decimal("0")) + Decimal(item.quantity or 0)
+            for alias in (item.material_code, item.variant_code):
+                if alias:
+                    primary_code_by_alias[str(alias).strip().upper()] = primary_code
+
+        shipped_by_code: dict[str, Decimal] = {}
+        prior_result = await uow.session.execute(
+            select(AsnLineModel)
+            .join(AsnModel, AsnModel.id == AsnLineModel.asn_id)
+            .where(func.upper(AsnModel.po_number) == po_model.po_number.upper())
+        )
+        for prior_line in prior_result.scalars().all():
+            code = str(prior_line.item_code or "").strip().upper()
+            primary_code = primary_code_by_alias.get(code, code)
+            shipped_by_code[primary_code] = (
+                shipped_by_code.get(primary_code, Decimal("0")) + Decimal(prior_line.shipped_quantity or 0)
+            )
+
+        requested_by_code: dict[str, Decimal] = {}
+        for raw_line, quantity in validated_lines:
+            code = str(raw_line.get("item_code") or raw_line.get("material_code") or "").strip().upper()
+            primary_code = primary_code_by_alias.get(code, code)
+            if primary_code not in ordered_by_code:
+                raise HTTPException(status_code=422, detail=f"item_code '{code}' is not on the purchase order")
+            requested_by_code[primary_code] = requested_by_code.get(primary_code, Decimal("0")) + quantity
+        for code, quantity in requested_by_code.items():
+            remaining = ordered_by_code[code] - shipped_by_code.get(code, Decimal("0"))
+            if quantity > remaining:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"shipped_quantity for '{code}' exceeds the remaining purchase-order quantity ({max(remaining, Decimal('0'))})",
+                )
+
+    supplier_id = None
+    raw_supplier_id = payload.get("supplier_id")
+    if raw_supplier_id:
+        try:
+            supplier_id = uuid.UUID(str(raw_supplier_id))
+        except ValueError:
+            supplier_id = None
+
+    shipment_date_raw = payload.get("shipment_date")
+    try:
+        shipment_date = datetime.date.fromisoformat(str(shipment_date_raw)) if shipment_date_raw else datetime.date.today()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="shipment_date must be YYYY-MM-DD") from exc
+
+    expected_raw = payload.get("expected_arrival_at")
+    expected_arrival_at = None
+    if expected_raw:
+        try:
+            expected_arrival_at = datetime.datetime.fromisoformat(str(expected_raw).replace("Z", "+00:00"))
+            # The ASN column is TIMESTAMP WITHOUT TIME ZONE. Normalize browser
+            # ISO timestamps before binding them through asyncpg.
+            if expected_arrival_at.tzinfo is not None:
+                expected_arrival_at = expected_arrival_at.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="expected_arrival_at must be an ISO datetime") from exc
+
+    asn = AsnModel(
+        asn_number=asn_number,
+        supplier_id=supplier_id,
+        po_id=str(payload.get("po_id")) if payload.get("po_id") else None,
+        po_number=po_model.po_number if po_model else (po_number or None),
+        status=str(payload.get("status") or "SUBMITTED").upper(),
+        vehicle_number=str(payload.get("vehicle_number") or "").strip().upper() or None,
+        driver_name=str(payload.get("driver_name") or "").strip() or None,
+        driver_contact=str(payload.get("driver_contact") or "").strip() or None,
+        expected_arrival_at=expected_arrival_at,
+        shipment_date=shipment_date,
+        transporter=str(payload.get("transporter") or "").strip() or None,
+        number_of_packages=payload.get("number_of_packages") or None,
+        package_type=str(payload.get("package_type") or "").strip() or None,
+        shipment_type=str(payload.get("shipment_type") or "STANDARD").upper(),
+        invoice_number=str(payload.get("invoice_number") or "").strip() or None,
+        challan_number=str(payload.get("challan_number") or "").strip() or None,
+        logistics=payload.get("logistics") if isinstance(payload.get("logistics"), list) else None,
+    )
+    uow.session.add(asn)
+    for raw_line, quantity in validated_lines:
+        asn.lines.append(AsnLineModel(
+            item_code=str(raw_line.get("item_code") or raw_line.get("material_code") or "ITEM"),
+            material_name=str(raw_line.get("material_name") or raw_line.get("material_description") or ""),
+            shipped_quantity=quantity,
+            uom=str(raw_line.get("uom") or "PCS"),
+        ))
+    await uow.session.flush()
+    return _asn_response(asn)
 
 
 
@@ -768,12 +1010,24 @@ async def create_gate_entry(
         plate = normalize_vehicle_registration((asn.vehicle_number if asn else request.vehicle_plate) or "")
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    po_num = ((asn.po_number if asn else request.po_number) or "").strip().upper()
+    po_num = ((asn.po_number if asn else request.po_number) or (asn.asn_number if asn else "")).strip().upper()
 
     if not plate:
         raise DomainRuleViolationException("Vehicle number is mandatory.")
     if not po_num:
         raise DomainRuleViolationException("Purchase order number is mandatory.")
+    po_record = await _lookup_database_po(uow.session, po_num)
+    if asn and not (request.supplier_name and request.supplier_name.strip()):
+        supplier_name = (po_record.supplier_name if po_record else "").strip()
+        if not supplier_name and asn.supplier_id:
+            supplier_result = await uow.session.execute(
+                select(SupplierModel).where(SupplierModel.id == asn.supplier_id)
+            )
+            supplier = supplier_result.scalars().first()
+            supplier_name = (supplier.supplier_name if supplier else "").strip()
+        request.supplier_name = supplier_name or "ASN Supplier"
+    if asn and request.total_quantity is None:
+        request.total_quantity = sum(float(line.shipped_quantity or 0) for line in asn.lines)
     if not (request.supplier_name and request.supplier_name.strip()):
         raise DomainRuleViolationException("Supplier name is mandatory.")
     if request.total_quantity is None or request.total_quantity <= 0:
@@ -792,7 +1046,6 @@ async def create_gate_entry(
 
     # 2. Dynamic OCR processing or extraction
     ocr_res: Optional[OcrResult] = None
-    po_record = await _lookup_database_po(uow.session, po_num)
 
     # The scan preview or form input has already populated the submitted fields.
     # Master PO data is authoritative whenever it is available.

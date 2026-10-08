@@ -174,12 +174,6 @@ const warehouseNav = [
   { label: "Reports", to: "/reports", icon: BarChart3 },
 ];
 
-const procurementNav = [
-  { label: "Warehouse Dashboard", to: "/warehouse-dashboard", icon: LayoutDashboard },
-  { label: "Receiving Control", to: "/receiving", icon: PackageCheck },
-  { label: "GRN Control", to: "/grn", icon: FileCheck2 },
-];
-
 const supplierNav = [
   { label: "Advanced Shipping Notices (ASNs)", to: "/supplier/asns/new", icon: Truck },
 ];
