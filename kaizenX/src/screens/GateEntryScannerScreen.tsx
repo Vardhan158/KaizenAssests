@@ -54,11 +54,9 @@ export function GateEntryScannerScreen({
   const [transporterEmpId, setTransporterEmpId] = useState('');
   const [driverPhotoUri, setDriverPhotoUri] = useState<string | null>(null);
 
-  // Screen 08 - Invoice & Transport Documents
+  // Retained only for legacy hidden JSX compatibility; invoice is not collected or submitted.
   const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(
-    new Date().toISOString().split('T')[0],
-  );
+  const [invoiceDate, setInvoiceDate] = useState('');
   const [invoiceAmount, setInvoiceAmount] = useState('');
   const [invoicePhotoUri, setInvoicePhotoUri] = useState<string | null>(null);
 
@@ -362,9 +360,6 @@ export function GateEntryScannerScreen({
       driverLicenceNo,
       driverAltContact,
       transporterEmpId,
-      invoiceNumber,
-      invoiceDate,
-      invoiceAmount,
       challanNumber,
       challanDate,
       ewayBillNumber,
@@ -489,6 +484,7 @@ export function GateEntryScannerScreen({
       return;
     }
 
+    const targetPoNorm = normalizePo(lookupRaw);
     const matchedPo = availablePos.find((candidate: any) => {
       const p1 = String(
         candidate.po_number || candidate.poNumber || '',
@@ -724,6 +720,16 @@ export function GateEntryScannerScreen({
 
   // Section 18 - Full Gate Entry Validation & Gate Pass Generation
   const executeGenerateGatePass = async () => {
+    const allocatedDock =
+      selectedPo?.dock_number || selectedAsn?.dock_number || '';
+    if (!allocatedDock || !dockAcknowledged) {
+      Alert.alert(
+        'Dock Allocation Required',
+        'The warehouse must allocate a dock before the gate pass can be generated.',
+      );
+      return;
+    }
+
     const formattedPlate = formatVehiclePlate(vehicleInput);
     const todayStr = new Date().toISOString().split('T')[0];
     const isEwayExpired = Boolean(
@@ -801,19 +807,7 @@ export function GateEntryScannerScreen({
         return;
       }
 
-      // 5. Valid Invoice Number Check
-      if (!/^[A-Z0-9\-\/]{3,30}$/i.test(invoiceNumber.trim())) {
-        setSubmitting(false);
-        Alert.alert(
-          'Validation Failed: Invalid Invoice',
-          'Invoice number must be a valid alphanumeric reference.',
-        );
-        return;
-      }
-
-      const combinedRemarks = `[${vehicleType}] [Condition: ${vehicleCondition}] Inv: ${invoiceNumber} (${invoiceDate}${
-        invoiceAmount ? `, Amount: ₹${invoiceAmount}` : ''
-      }). ${
+      const combinedRemarks = `[${vehicleType}] [Condition: ${vehicleCondition}]. ${
         challanNumber ? `Challan: ${challanNumber} (${challanDate}). ` : ''
       }${
         ewayBillNumber
@@ -839,19 +833,37 @@ export function GateEntryScannerScreen({
         setShowReviewModal(false);
         onSuccess(result);
       } else {
+        // An ASN-backed selection can be represented as a synthetic PO in the
+        // UI. Never send that ASN value as the PO number; the backend resolves
+        // the ASN from `asn_reference` and derives its PO authoritatively.
+        const selectedPoNumber = String(
+          selectedPo?.po_number || selectedPo?.poNumber || '',
+        ).trim();
+        const selectedAsnNumber = String(
+          selectedAsn?.asn_number || selectedAsn?.asnNumber || '',
+        ).trim();
+        const typedReference = searchInput.trim();
+        const asnReference =
+          selectedAsnNumber ||
+          (/^ASN-\d{4}-\d+$/i.test(typedReference)
+            ? typedReference
+            : '');
         const poNum =
-          selectedPo?.po_number || selectedPo?.poNumber || searchInput.trim();
+          selectedPoNumber && !/^ASN-\d{4}-\d+$/i.test(selectedPoNumber)
+            ? selectedPoNumber
+            : String(
+                selectedAsn?.po_number || selectedAsn?.poNumber || '',
+              ).trim();
         const dockNo =
-          selectedPo?.dock_number || selectedAsn?.dock_number || 'Dock D-04';
+          selectedPo?.dock_number || selectedAsn?.dock_number || '';
 
         const result = await mobileApi.createGateEntry({
-          po_number: poNum,
+          po_number: poNum || asnReference,
           vehicle_number: formattedPlate,
           driver_name: driverNameInput.trim() || 'Driver',
           driver_contact: driverContactInput.trim() || '',
           supplier_name: suppName,
-          asn_reference:
-            selectedAsn?.asn_number || selectedAsn?.asnNumber || '',
+          asn_reference: asnReference,
           line_items: lineItems,
           dock_number: dockNo,
           remarks: combinedRemarks,
@@ -1476,7 +1488,10 @@ export function GateEntryScannerScreen({
                     <TouchableOpacity
                       style={tw`bg-amber-600 py-3 rounded-xl items-center shadow`}
                       onPress={() => {
-                        const assigned = 'Dock D-04';
+                        // Dock allocation is performed by warehouse management.
+                        // This action only re-checks the current assignment and
+                        // must never create a local/default dock assignment.
+                        const assigned = '';
                         if (selectedPo)
                           setSelectedPo({
                             ...selectedPo,
@@ -2853,11 +2868,23 @@ export function GateEntryScannerScreen({
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={tw`flex-1 bg-emerald-600 py-3.5 rounded-xl items-center shadow-lg ${
-                  submitting ? 'opacity-60' : ''
+                style={tw`flex-1 py-3.5 rounded-xl items-center shadow-lg ${
+                  submitting ||
+                  !(
+                    (selectedPo?.dock_number || selectedAsn?.dock_number) &&
+                    dockAcknowledged
+                  )
+                    ? 'bg-slate-700 opacity-60'
+                    : 'bg-emerald-600'
                 }`}
                 onPress={executeGenerateGatePass}
-                disabled={submitting}
+                disabled={
+                  submitting ||
+                  !(
+                    (selectedPo?.dock_number || selectedAsn?.dock_number) &&
+                    dockAcknowledged
+                  )
+                }
               >
                 {submitting ? (
                   <ActivityIndicator color="#ffffff" />

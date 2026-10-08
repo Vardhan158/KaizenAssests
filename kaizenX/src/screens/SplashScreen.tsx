@@ -140,7 +140,7 @@ export function SplashScreen({ onSplashFinish }: SplashScreenProps) {
       }
     >
       <Animated.View
-        style={[StyleSheet.absoluteFillObject, { opacity: exit }]}
+        style={[StyleSheet.absoluteFill, { opacity: exit }]}
         pointerEvents="none"
       >
         {/* Decorative strips retain the complete original curves and warehouse. */}

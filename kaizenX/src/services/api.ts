@@ -3,15 +3,15 @@
  * Connects directly to Python FastAPI backend (Port 8000)
  */
 
-let serverBaseUrl = "http://192.168.88.45:8000";
+let serverBaseUrl = 'http://192.168.88.45:8000';
 
 export function setServerBaseUrl(url: string) {
   if (url && url.trim()) {
     let clean = url.trim();
-    if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
       clean = `http://${clean}`;
     }
-    if (clean.endsWith("/")) {
+    if (clean.endsWith('/')) {
       clean = clean.slice(0, -1);
     }
     serverBaseUrl = clean;
@@ -22,12 +22,17 @@ export function getServerBaseUrl(): string {
   return serverBaseUrl;
 }
 
-export async function mobileRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const url = `${serverBaseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+export async function mobileRequest<T>(
+  endpoint: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const url = `${serverBaseUrl}${
+    endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+  }`;
   const headers = new Headers(options.headers || {});
 
-  if (typeof options.body === "string" && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
+  if (typeof options.body === 'string' && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
 
   const controller = new AbortController();
@@ -45,7 +50,7 @@ export async function mobileRequest<T>(endpoint: string, options: RequestInit = 
       let errorDetail = `HTTP ${response.status} ${response.statusText}`;
       try {
         const payload = await response.json();
-        if (payload && typeof payload === "object") {
+        if (payload && typeof payload === 'object') {
           errorDetail = payload.detail || payload.message || errorDetail;
         }
       } catch {
@@ -69,7 +74,7 @@ export const mobileApi = {
 
     try {
       const res = await fetch(`${serverBaseUrl}/health`, {
-        method: "GET",
+        method: 'GET',
         signal: controller.signal,
       });
       return res.ok;
@@ -83,41 +88,41 @@ export const mobileApi = {
   // Login Gate Security Staff with complete officer assignment metadata
   async loginStaff(username: string, password: string): Promise<any> {
     try {
-      const rawRes = await mobileRequest<any>("/api/v1/auth/login", {
-        method: "POST",
+      const rawRes = await mobileRequest<any>('/api/v1/auth/login', {
+        method: 'POST',
         body: JSON.stringify({ username, password }),
       });
 
       return {
         ...rawRes,
         username: rawRes.username || username,
-        full_name: rawRes.full_name || rawRes.name || "Rajesh Kumar",
-        role: rawRes.role || rawRes.roles?.[0] || "Security Officer",
-        company: rawRes.company || "Kaizentrix Global Manufacturing Ltd",
-        site: rawRes.site || "Bengaluru Manufacturing Plant",
-        warehouse: rawRes.warehouse || "Central Inbound Warehouse",
-        gate_location: rawRes.gate_location || rawRes.gate || "Main Gate – 01",
-        shift: rawRes.shift || "Morning Shift (06:00 AM - 02:00 PM)",
+        full_name: rawRes.full_name || rawRes.name || 'Rajesh Kumar',
+        role: rawRes.role || rawRes.roles?.[0] || 'Security Officer',
+        company: rawRes.company || 'Kaizentrix Global Manufacturing Ltd',
+        site: rawRes.site || 'Bengaluru Manufacturing Plant',
+        warehouse: rawRes.warehouse || 'Central Inbound Warehouse',
+        gate_location: rawRes.gate_location || rawRes.gate || 'Main Gate – 01',
+        shift: rawRes.shift || 'Morning Shift (06:00 AM - 02:00 PM)',
       };
     } catch (err) {
       // Direct assignment object for mobile security officer session
       return {
         token: `token-${Date.now()}`,
         username: username,
-        full_name: "Rajesh Kumar",
-        role: "Security Officer",
-        company: "Kaizentrix Global Manufacturing Ltd",
-        site: "Bengaluru Manufacturing Plant",
-        warehouse: "Central Inbound Warehouse",
-        gate_location: "Main Gate – 01",
-        shift: "Morning Shift (06:00 AM - 02:00 PM)",
+        full_name: 'Rajesh Kumar',
+        role: 'Security Officer',
+        company: 'Kaizentrix Global Manufacturing Ltd',
+        site: 'Bengaluru Manufacturing Plant',
+        warehouse: 'Central Inbound Warehouse',
+        gate_location: 'Main Gate – 01',
+        shift: 'Morning Shift (06:00 AM - 02:00 PM)',
       };
     }
   },
 
   // Section 25 - Fetch Mobile Push / In-App Notifications
   async getNotifications(): Promise<any[]> {
-    return mobileRequest<any[]>("/api/v1/notifications?role=GATE_SECURITY"); /*
+    return mobileRequest<any[]>('/api/v1/notifications?role=GATE_SECURITY'); /*
       {
         id: "notif-1",
         title: "Dock Assigned",
@@ -158,12 +163,12 @@ export const mobileApi = {
 
   // Fetch POs directly from backend.
   async getPurchaseOrders(): Promise<any[]> {
-    return mobileRequest<any[]>("/api/v1/procurement/purchase-orders");
+    return mobileRequest<any[]>('/api/v1/procurement/purchase-orders');
   },
 
   // Fetch ASNs directly from backend.
   async getAsns(): Promise<any[]> {
-    return mobileRequest<any[]>("/api/gate/expected-deliveries");
+    return mobileRequest<any[]>('/api/gate/expected-deliveries');
   },
 
   async getAsnByNumber(asnNumber: string): Promise<any> {
@@ -175,7 +180,7 @@ export const mobileApi = {
 
   // Fetch Recent Gate Entries directly from backend.
   async getGateEntries(): Promise<any[]> {
-    return mobileRequest<any[]>("/api/gate-entries");
+    return mobileRequest<any[]>('/api/gate-entries');
   },
 
   // Submit New Scheduled Gate Entry
@@ -192,34 +197,30 @@ export const mobileApi = {
   }): Promise<any> {
     const payload = {
       po_number: data.po_number,
+      vehicle_plate: data.vehicle_number,
       vehicle_number: data.vehicle_number,
       driver_name: data.driver_name,
-      driver_contact: data.driver_contact || "",
+      driver_contact: data.driver_contact || '',
       supplier_name: data.supplier_name,
-      asn_reference: data.asn_reference || "",
+      asn_reference: data.asn_reference || '',
       line_items: data.line_items || [],
-      dock_number: data.dock_number || "",
-      remarks: data.remarks || "Gate Entry recorded via KaizenX Mobile Scanner",
-      status: "INSIDE_FACILITY",
+      total_quantity:
+        (data.line_items || []).reduce(
+          (total: number, item: any) =>
+            total + Number(item.quantity || item.shipped_quantity || 0),
+          0,
+        ) || 1,
+      dock_number: data.dock_number || '',
+      remarks: data.remarks || 'Gate Entry recorded via KaizenX Mobile Scanner',
+      status: 'INSIDE_FACILITY',
     };
 
-    const endpoints = [
-      "/api/gate-entries",
-      "/api/v1/gate/entries",
-    ];
-
-    for (const ep of endpoints) {
-      try {
-        return await mobileRequest<any>(ep, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        // try next
-      }
-    }
-
-    throw new Error("Failed to post gate entry to backend API.");
+    // This is the canonical backend route. Do not fall back to the old
+    // `/api/v1/gate/entries` path: its 404 response hides the actual API error.
+    return mobileRequest<any>('/api/gate-entries', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   },
 
   // Section 26 - Submit Exception Gate Entry (APPROVAL_REQUIRED)
@@ -235,24 +236,24 @@ export const mobileApi = {
       supplier_name: data.supplier_name,
       vehicle_number: data.vehicle_number,
       driver_name: data.driver_name,
-      driver_contact: data.driver_contact || "",
-      po_number: "UNSCHEDULED",
-      remarks: `UNSCHEDULED ENTRY: ${data.reason}. ${data.remarks || ""}`,
-      status: "APPROVAL_REQUIRED",
+      driver_contact: data.driver_contact || '',
+      po_number: 'UNSCHEDULED',
+      remarks: `UNSCHEDULED ENTRY: ${data.reason}. ${data.remarks || ''}`,
+      status: 'APPROVAL_REQUIRED',
       is_unscheduled: true,
     };
 
     const endpoints = [
-      "/api/v1/gate/entries/unscheduled",
-      "/api/gate-entries/unscheduled",
-      "/api/gate-entries",
-      "/api/v1/gate/entries",
+      '/api/v1/gate/entries/unscheduled',
+      '/api/gate-entries/unscheduled',
+      '/api/gate-entries',
+      '/api/v1/gate/entries',
     ];
 
     for (const ep of endpoints) {
       try {
         return await mobileRequest<any>(ep, {
-          method: "POST",
+          method: 'POST',
           body: JSON.stringify(payload),
         });
       } catch {
@@ -260,6 +261,6 @@ export const mobileApi = {
       }
     }
 
-    throw new Error("Failed to post unscheduled gate entry to backend API.");
+    throw new Error('Failed to post unscheduled gate entry to backend API.');
   },
 };
