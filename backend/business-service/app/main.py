@@ -803,6 +803,13 @@ async def lifespan(app: FastAPI):
                 )
             """)
             for col in [
+                ("material_name", "VARCHAR(255)"),
+                ("category", "VARCHAR(128)"),
+                ("uom", "VARCHAR(32) DEFAULT 'PCS'"),
+                ("reorder_point", "NUMERIC(18, 4) DEFAULT 10"),
+                ("on_hand", "NUMERIC(18, 4) DEFAULT 0"),
+                ("allocated", "NUMERIC(18, 4) DEFAULT 0"),
+                ("available", "NUMERIC(18, 4) DEFAULT 0"),
                 ("on_hand_quantity", "NUMERIC(18, 4) DEFAULT 0"),
                 ("available_quantity", "NUMERIC(18, 4) DEFAULT 0"),
                 ("reserved_quantity", "NUMERIC(18, 4) DEFAULT 0"),
@@ -814,8 +821,8 @@ async def lifespan(app: FastAPI):
                 except Exception: pass
 
             try:
-                await run_ddl("UPDATE material_stock SET on_hand_quantity = on_hand WHERE (on_hand_quantity IS NULL OR on_hand_quantity = 0) AND on_hand IS NOT NULL AND on_hand > 0")
-                await run_ddl("UPDATE material_stock SET available_quantity = available WHERE (available_quantity IS NULL OR available_quantity = 0) AND available IS NOT NULL AND available > 0")
+                await run_ddl("UPDATE material_stock SET on_hand_quantity = COALESCE(NULLIF(on_hand_quantity, 0), on_hand, 0), on_hand = COALESCE(NULLIF(on_hand, 0), on_hand_quantity, 0)")
+                await run_ddl("UPDATE material_stock SET available_quantity = COALESCE(NULLIF(available_quantity, 0), available, 0), available = COALESCE(NULLIF(available, 0), available_quantity, 0)")
             except Exception: pass
             logger.debug("Ensured material_stock table and columns exist")
         except Exception as e:
