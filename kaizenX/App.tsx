@@ -15,8 +15,11 @@ import { GateEntryScannerScreen } from "./src/screens/GateEntryScannerScreen";
 import { GateEntrySuccessScreen } from "./src/screens/GateEntrySuccessScreen";
 import { RecentEntriesScreen } from "./src/screens/RecentEntriesScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
+import { PutawayTasksScreen } from "./src/screens/PutawayTasksScreen";
+import { WarehouseLocationsScreen } from "./src/screens/WarehouseLocationsScreen";
+import { setMobileAuthToken } from "./src/services/api";
 
-export type TabType = "HOME" | "SCAN" | "VEHICLES" | "PROFILE";
+export type TabType = "HOME" | "SCAN" | "VEHICLES" | "LOCATIONS" | "PUTAWAY" | "PROFILE";
 
 export default function App() {
   const [isBooting, setIsBooting] = useState(true);
@@ -39,6 +42,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    setMobileAuthToken(null);
     setUser(null);
     setActiveTab("HOME");
     setCurrentScreenOverride(null);
@@ -76,6 +80,14 @@ export default function App() {
     setActiveTab(tab);
   };
 
+  const roleNames = [
+    ...(Array.isArray(user?.roles) ? user.roles : []),
+    user?.role,
+  ].filter(Boolean).map((role: string) => role.toUpperCase());
+  const canAccessPutaway = roleNames.some((role: string) =>
+    ["STORE_MANAGER", "STORE_KEEPER", "WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"].includes(role),
+  );
+
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
@@ -111,6 +123,10 @@ export default function App() {
                 <RecentEntriesScreen
                   onBackToScan={() => handleTabPress("SCAN")}
                 />
+              ) : activeTab === "PUTAWAY" ? (
+                <PutawayTasksScreen user={user} />
+              ) : activeTab === "LOCATIONS" ? (
+                <WarehouseLocationsScreen />
               ) : (
                 <ProfileScreen
                   user={user}
@@ -162,6 +178,32 @@ export default function App() {
                   VEHICLES
                 </Text>
               </TouchableOpacity>
+
+              {canAccessPutaway && (
+                <TouchableOpacity
+                  style={tw`items-center justify-center py-1 px-3 rounded-lg ${activeTab === "LOCATIONS" && !currentScreenOverride ? "bg-sky-500/15" : ""}`}
+                  onPress={() => handleTabPress("LOCATIONS")}
+                >
+                  <Text style={tw`text-lg mb-0.5 ${activeTab === "LOCATIONS" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>📍</Text>
+                  <Text style={tw`text-[10px] tracking-wider ${activeTab === "LOCATIONS" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>LOCATIONS</Text>
+                </TouchableOpacity>
+              )}
+
+              {canAccessPutaway && (
+                <TouchableOpacity
+                  style={tw`items-center justify-center py-1 px-3 rounded-lg ${
+                    activeTab === "PUTAWAY" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                  }`}
+                  onPress={() => handleTabPress("PUTAWAY")}
+                >
+                  <Text style={tw`text-lg mb-0.5 ${activeTab === "PUTAWAY" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
+                    📦
+                  </Text>
+                  <Text style={tw`text-[10px] tracking-wider ${activeTab === "PUTAWAY" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
+                    PUTAWAY
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={tw`items-center justify-center py-1 px-3 rounded-lg ${

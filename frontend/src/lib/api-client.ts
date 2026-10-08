@@ -482,7 +482,8 @@ export const api = {
     warehouse_id?: string;
     capacity?: number;
   }): Promise<any> {
-    const code = (payload.dock_code || payload.dock_number || "D-01").trim().toUpperCase();
+    const code = (payload.dock_code || payload.dock_number || "").trim().toUpperCase();
+    if (!code) throw new Error("Dock code is required");
     const name = (payload.dock_name || code).trim();
     return request<any>(`${BUSINESS_API_URL}/api/v1/warehouse/docks`, {
       method: "POST",
@@ -1640,6 +1641,57 @@ export const api = {
       `${BUSINESS_API_URL}/api/v1/procurement/notifications?${params.toString()}`,
     );
   },
+  async rejectAssemblyRequisition(id: string, reason: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+  },
+  async confirmAssemblyReceipt(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/confirm-receipt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+  },
+
+  subscribeNotifications(role: string, onChange: () => void): () => void {
+    const controller = new AbortController();
+    let retryDelay = 1000;
+    const connect = async () => {
+      while (!controller.signal.aborted) {
+        try {
+          const token = getAuthToken();
+          const response = await fetch(
+            `${BUSINESS_API_URL}/api/v1/procurement/notifications/stream?role=${encodeURIComponent(role)}`,
+            { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal },
+          );
+          if (!response.ok || !response.body) throw new Error(`Notification stream failed (${response.status})`);
+          retryDelay = 1000;
+          onChange();
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (!controller.signal.aborted) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const frames = buffer.split("\n\n");
+            buffer = frames.pop() || "";
+            if (frames.some((frame) => frame.includes("event: notification"))) onChange();
+          }
+        } catch (error) {
+          if (controller.signal.aborted) return;
+        }
+        if (!controller.signal.aborted) {
+          await new Promise((resolve) => window.setTimeout(resolve, retryDelay));
+          retryDelay = Math.min(retryDelay * 2, 30000);
+        }
+      }
+    };
+    void connect();
+    return () => controller.abort();
+  },
 
   async markNotificationRead(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/notifications/${id}/read`, {
@@ -2320,7 +2372,14 @@ export const api = {
       bin_code?: string;
       rack?: string;
       shelf?: string;
+      position?: string;
+      storage_type?: string;
       capacity?: number;
+      maximum_weight?: number;
+      maximum_volume?: number;
+      allowed_material_category?: string;
+      hazardous_material_permitted?: boolean;
+      temperature_requirement?: string;
       status?: string;
     },
   ): Promise<any> {
@@ -2339,7 +2398,14 @@ export const api = {
       bin_name?: string;
       rack?: string;
       shelf?: string;
+      position?: string;
+      storage_type?: string;
       capacity?: number;
+      maximum_weight?: number;
+      maximum_volume?: number;
+      allowed_material_category?: string;
+      hazardous_material_permitted?: boolean;
+      temperature_requirement?: string;
       status?: string;
     },
   ): Promise<any> {
@@ -2519,6 +2585,16 @@ export const api = {
     material_code?: string;
     store_id?: string;
     zone_id?: string;
+    warehouse_id?: string;
+    category?: string;
+    batch?: string;
+    supplier?: string;
+    grn?: string;
+    location?: string;
+    stock_status?: string;
+    qc_status?: string;
+    expiry?: string;
+    availability?: string;
     status_filter?: string;
     search?: string;
   }): Promise<any[]> {
@@ -2526,11 +2602,48 @@ export const api = {
     if (params?.material_code) query.append("material_code", params.material_code);
     if (params?.store_id && params.store_id !== "ALL") query.append("store_id", params.store_id);
     if (params?.zone_id && params.zone_id !== "ALL") query.append("zone_id", params.zone_id);
+    if (params?.warehouse_id && params.warehouse_id !== "ALL") query.append("warehouse_id", params.warehouse_id);
+    if (params?.category && params.category !== "ALL") query.append("category", params.category);
+    if (params?.batch && params.batch !== "ALL") query.append("batch", params.batch);
+    if (params?.supplier && params.supplier !== "ALL") query.append("supplier", params.supplier);
+    if (params?.grn && params.grn !== "ALL") query.append("grn", params.grn);
+    if (params?.location && params.location !== "ALL") query.append("location", params.location);
+    if (params?.stock_status && params.stock_status !== "ALL") query.append("stock_status", params.stock_status);
+    if (params?.qc_status && params.qc_status !== "ALL") query.append("qc_status", params.qc_status);
+    if (params?.expiry && params.expiry !== "ALL") query.append("expiry", params.expiry);
+    if (params?.availability && params.availability !== "ALL") query.append("availability", params.availability);
     if (params?.status_filter && params.status_filter !== "ALL")
       query.append("status_filter", params.status_filter);
     if (params?.search) query.append("search", params.search);
     const qs = query.toString() ? `?${query.toString()}` : "";
     return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/warehouse-summary${qs}`);
+  },
+  async getMovementReasons(): Promise<string[]> {
+    return request<string[]>(`${BUSINESS_API_URL}/api/storage/inventory/movement-reasons`);
+  },
+  async getStockStatuses(): Promise<string[]> {
+    return request<string[]>(`${BUSINESS_API_URL}/api/storage/inventory/stock-statuses`);
+  },
+  async performBinTransfer(data: {
+    material_code: string;
+    source_bin_code: string;
+    destination_bin_code: string;
+    quantity: number;
+    reason: string;
+    remarks?: string;
+    mobile_controlled_mode?: boolean;
+    scanned_source_bin_qr?: string;
+    scanned_dest_bin_qr?: string;
+    scanned_material_qr?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/bin-transfer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
+  async getMaterialInventoryDetail(materialCode: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/materials/${encodeURIComponent(materialCode)}/detail`);
   },
   async getStockLedger(params?: {
     material_code?: string;
@@ -2611,7 +2724,7 @@ export const api = {
   },
   async completePickupTask(
     id: string,
-    data: { material_scan: string; zone_scan: string; quantity: number },
+    data: { material_scan: string; zone_scan: string; quantity: number; notes?: string },
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/storage/pickup-tasks/${encodeURIComponent(id)}/complete`,
@@ -2622,7 +2735,64 @@ export const api = {
       },
     );
   },
-
+  async getStores(params?: { warehouse_id?: string; search?: string }): Promise<any[]> {
+    const q = new URLSearchParams();
+    if (params?.warehouse_id) q.append("warehouse_id", params.warehouse_id);
+    if (params?.search) q.append("search", params.search);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores${qs}`);
+  },
+  async getStore(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(id)}`);
+  },
+  async createStore(data: { store_name: string; store_code?: string; description?: string; warehouse_id?: string }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/stores`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
+  async getStoreZones(storeId: string): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeId)}/zones`);
+  },
+  async createZone(storeId: string, data: { zone_name: string; zone_code?: string; description?: string }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeId)}/zones`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
+  async getStoreBins(storeId: string, zoneId?: string): Promise<any[]> {
+    if (zoneId) {
+      return request<any[]>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins`);
+    }
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeId)}/bins`);
+  },
+  async createBin(storeId: string, zoneId: string, data: { bin_code: string; bin_name?: string; rack?: string; position?: string; qr_identifier?: string }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
+  async getMaterialRequests(params?: { status?: string }): Promise<any[]> {
+    const q = new URLSearchParams();
+    if (params?.status && params.status !== "ALL") q.append("status_filter", params.status);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions${qs}`);
+  },
+  async approveMaterialRequest(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+    });
+  },
+  async createMaterialIssue(data: { requisition_number?: string; assembly_order_number?: string; issued_to?: string }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
   // ============================
   // GRN / RECEIVING
   // ============================
@@ -2944,6 +3114,212 @@ export const api = {
     return request<any>(`${BUSINESS_API_URL}/api/vehicles/${encodeURIComponent(vehicleId)}`, {
       method: "DELETE",
     });
+  },
+
+  // Inventory API endpoints (Parts E, F, J, K, L, M)
+  async getMovementReasons(): Promise<string[]> {
+    return request<string[]>(`${BUSINESS_API_URL}/api/v1/inventory/movement-reasons`);
+  },
+  async getStockStatuses(): Promise<string[]> {
+    return request<string[]>(`${BUSINESS_API_URL}/api/v1/inventory/stock-statuses`);
+  },
+  async getAdjustmentReasons(): Promise<string[]> {
+    return request<string[]>(`${BUSINESS_API_URL}/api/v1/inventory/adjustment-reasons`);
+  },
+  async performBinTransfer(payload: {
+    material_code: string;
+    source_bin_code: string;
+    destination_bin_code: string;
+    quantity: number;
+    reason: string;
+    remarks?: string;
+    scanned_source_bin_qr?: string;
+    scanned_dest_bin_qr?: string;
+    scanned_material_qr?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/inventory/bin-transfer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+  async getMaterialInventoryDetail(materialCode: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/storage/inventory/materials/${encodeURIComponent(materialCode)}/detail`,
+    );
+  },
+  async getWarehouseInventorySummary(params?: Record<string, string | undefined>): Promise<any[]> {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v && v !== "ALL") query.set(k, v);
+      });
+    }
+    const qStr = query.toString() ? `?${query.toString()}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/warehouse-summary${qStr}`);
+  },
+  async getStockLedger(params?: Record<string, string | undefined>): Promise<any[]> {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v && v !== "ALL") query.set(k, v);
+      });
+    }
+    const qStr = query.toString() ? `?${query.toString()}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/ledger${qStr}`);
+  },
+  async getMaterialIssues(status?: string): Promise<any[]> {
+    const qStr = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues${qStr}`);
+  },
+  async createMaterialIssue(payload: {
+    request_number?: string;
+    requisition_number?: string;
+    assembly_order_number?: string;
+    issued_to?: string;
+    issued_to_line?: string;
+    issued_by_name?: string;
+    notes?: string;
+    items?: Array<{
+      material_code: string;
+      batch_number: string;
+      location_code: string;
+      picked_quantity: number;
+    }>;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+  async confirmMaterialHandover(
+    issueNumber: string,
+    payload: {
+      assembly_receiver_name: string;
+      scanned_material_qr?: string;
+      remarks?: string;
+    },
+  ): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/storage/inventory/material-issues/${encodeURIComponent(issueNumber)}/handover-confirm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+  async getMaterialReturns(status?: string): Promise<any[]> {
+    const qStr = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/material-returns${qStr}`);
+  },
+  async createMaterialReturn(payload: {
+    material_issue_number: string;
+    assembly_line: string;
+    material_code: string;
+    batch_number: string;
+    issued_quantity: number;
+    used_quantity: number;
+    return_quantity: number;
+    condition: "GOOD" | "DAMAGED" | "UNKNOWN CONDITION";
+    returned_by: string;
+    notes?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/material-returns`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+  async getCycleCounts(status?: string): Promise<any[]> {
+    const qStr = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/cycle-counts${qStr}`);
+  },
+  async createCycleCount(payload: {
+    zone_code: string;
+    rack_code: string;
+    assigned_operator_name: string;
+    notes?: string;
+    items: Array<{
+      location_code: string;
+      material_code: string;
+      batch_number: string;
+      system_quantity: number;
+    }>;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/cycle-counts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+  async submitCycleCount(
+    countNumber: string,
+    payload: {
+      item_counts: Array<{
+        item_id: string;
+        physical_quantity: number;
+        scanned_bin_qr?: string;
+        scanned_material_qr?: string;
+      }>;
+      operator_notes?: string;
+    },
+  ): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/storage/inventory/cycle-counts/${encodeURIComponent(countNumber)}/submit-count`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+  async getStockAdjustments(status?: string): Promise<any[]> {
+    const qStr = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/stock-adjustments${qStr}`);
+  },
+  async createStockAdjustment(payload: {
+    material_code: string;
+    batch_number: string;
+    location_code: string;
+    current_quantity: number;
+    adjustment_quantity: number;
+    reason: string;
+    notes?: string;
+    evidence_url?: string;
+    requester_name: string;
+    approver_name: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/stock-adjustments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+  async universalScan(scanCode: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/universal-scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scan_code: scanCode }),
+    });
+  },
+  async getMobileTasksSummary(): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/mobile-tasks-summary`);
+  },
+  async getInventoryTraceability(params?: { material_code?: string; batch_number?: string }): Promise<any> {
+    const q = new URLSearchParams();
+    if (params?.material_code) q.append("material_code", params.material_code);
+    if (params?.batch_number) q.append("batch_number", params.batch_number);
+    const qStr = q.toString() ? `?${q.toString()}` : "";
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/traceability${qStr}`);
+  },
+  async getPermissionMatrix(): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/role-permissions`);
+  },
+  async getRoleNotifications(role?: string): Promise<any> {
+    const qStr = role ? `?role=${encodeURIComponent(role)}` : "";
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/notifications${qStr}`);
   },
 };
 

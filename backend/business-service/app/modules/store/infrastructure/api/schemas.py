@@ -63,15 +63,29 @@ class BinCreate(BaseModel):
     bin_code: Optional[str] = Field(None, max_length=64, description="Optional custom code or auto-generated BIN-E01-001")
     rack: Optional[str] = Field(None, max_length=64, description="Rack identifier e.g. R01")
     shelf: Optional[str] = Field(None, max_length=64, description="Shelf/Level identifier e.g. S01")
+    position: Optional[str] = Field(None, max_length=64, description="Position within the level")
+    storage_type: str = Field(default="GENERAL", max_length=64)
     capacity: Decimal = Field(default=Decimal("1000.0"), ge=0, description="Max storage capacity")
-    status: str = Field(default="ACTIVE", max_length=32)
+    maximum_weight: Optional[Decimal] = Field(None, ge=0)
+    maximum_volume: Optional[Decimal] = Field(None, ge=0)
+    allowed_material_category: Optional[str] = Field(None, max_length=128)
+    hazardous_material_permitted: bool = False
+    temperature_requirement: Optional[str] = Field(None, max_length=128)
+    status: str = Field(default="AVAILABLE", max_length=32)
 
 
 class BinUpdate(BaseModel):
     bin_name: Optional[str] = Field(None, min_length=2, max_length=128)
     rack: Optional[str] = Field(None, max_length=64)
     shelf: Optional[str] = Field(None, max_length=64)
+    position: Optional[str] = Field(None, max_length=64)
+    storage_type: Optional[str] = Field(None, max_length=64)
     capacity: Optional[Decimal] = Field(None, ge=0)
+    maximum_weight: Optional[Decimal] = Field(None, ge=0)
+    maximum_volume: Optional[Decimal] = Field(None, ge=0)
+    allowed_material_category: Optional[str] = Field(None, max_length=128)
+    hazardous_material_permitted: Optional[bool] = None
+    temperature_requirement: Optional[str] = Field(None, max_length=128)
     status: Optional[str] = Field(None, max_length=32)
 
 
@@ -87,7 +101,15 @@ class BinResponse(BaseModel):
     bin_name: str
     rack: Optional[str] = None
     shelf: Optional[str] = None
+    position: Optional[str] = None
+    storage_type: str = "GENERAL"
     capacity: Decimal
+    maximum_weight: Optional[Decimal] = None
+    maximum_volume: Optional[Decimal] = None
+    allowed_material_category: Optional[str] = None
+    hazardous_material_permitted: bool = False
+    temperature_requirement: Optional[str] = None
+    qr_identifier: Optional[str] = None
     occupied_quantity: Decimal
     status: str
     created_at: Optional[datetime] = None
@@ -110,6 +132,8 @@ class BinQRResponse(BaseModel):
     warehouse_id: str
     rack: Optional[str] = None
     shelf: Optional[str] = None
+    position: Optional[str] = None
+    qr_identifier: Optional[str] = None
     capacity: Decimal
     status: str
     qr_payload: str

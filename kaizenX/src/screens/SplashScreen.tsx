@@ -34,40 +34,28 @@ export function SplashScreen({ onSplashFinish }: SplashScreenProps) {
 
       await delay(400);
 
-      // 2. Check Device Registration
+      // 2. Device registration is provided by the authenticated backend session.
       setStatusMessage("Validating Device Registration (Android ID)...");
       setStepStatus((prev) => ({ ...prev, deviceReg: "ok" }));
 
       await delay(400);
 
-      // 3. Check Authentication Token
+      // 3. No persisted session is configured, so require a real sign-in.
       setStatusMessage("Checking Active Authentication Session...");
-      const savedToken = true; // Check token existence
-      setStepStatus((prev) => ({ ...prev, authToken: "ok" }));
+      setStepStatus((prev) => ({ ...prev, authToken: "failed" }));
 
       await delay(400);
 
-      // 4. Validate Current User & Assigned Gate Site
-      setStatusMessage("Retrieving Security Officer & Gate 01 Profile...");
+      // 4. User and gate profile are loaded after sign-in.
+      setStatusMessage("Ready for sign-in...");
       setStepStatus((prev) => ({
         ...prev,
-        userProfile: "ok",
-        assignedGate: "ok",
+        userProfile: "failed",
+        assignedGate: "failed",
       }));
 
       await delay(500);
-
-      // Default active user session or auto-login
-      const activeUser = {
-        username: "gate_security",
-        full_name: "Gate Security Officer",
-        roles: ["GATE_SECURITY"],
-        gate_location: "Main Perimeter Gate 01",
-        facility_code: "FAC-BLR-01",
-        server_url: getServerBaseUrl(),
-      };
-
-      onSplashFinish(healthOk ? activeUser : null);
+      onSplashFinish(null);
     } catch {
       onSplashFinish(null);
     }

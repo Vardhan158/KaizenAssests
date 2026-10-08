@@ -77,15 +77,15 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           </View>
           <Text style={tw`text-white text-3xl font-black tracking-wide`}>KaizenX Mobile</Text>
           <Text style={tw`text-cyan-400 text-xs font-bold tracking-widest mt-0.5 uppercase`}>
-            Security Gate Management OS
+            Operations Management OS
           </Text>
         </View>
 
         {/* Login Card Form */}
         <View style={tw`bg-slate-800 rounded-3xl p-5 border border-white/10 shadow-2xl`}>
-          <Text style={tw`text-white text-lg font-black`}>Security Officer Login</Text>
+          <Text style={tw`text-white text-lg font-black`}>Employee Login</Text>
           <Text style={tw`text-slate-400 text-xs mb-5 mt-0.5`}>
-            Sign in to verify inbound vehicles & issue digital gate passes
+            Sign in to access the tools assigned to your role
           </Text>
 
           {/* Employee ID / Username Field */}
@@ -155,7 +155,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {loading ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
-              <Text style={tw`text-white font-black text-xs tracking-wider`}>AUTHENTICATE & LOG IN →</Text>
+              <Text style={tw`text-white font-black text-xs tracking-wider`}>SIGN IN →</Text>
             )}
           </TouchableOpacity>
 

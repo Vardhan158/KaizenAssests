@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 from decimal import Decimal
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.orm import selectinload
 
@@ -103,11 +105,109 @@ async def _sync_finished_goods_putaway_status(uow: UnitOfWork, finished_goods_id
     return order
 
 
+def _parse_uuid(val: Any) -> uuid.UUID | None:
+    if not val:
+        return None
+    if isinstance(val, uuid.UUID):
+        return val
+    try:
+        return uuid.UUID(str(val))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+async def _resolve_task(session: AsyncSession, task_id: Any) -> PutawayTaskModel | None:
+    if not task_id:
+        return None
+    uid = _parse_uuid(task_id)
+    if uid:
+        task = await session.get(PutawayTaskModel, uid)
+        if task:
+            return task
+    stmt = select(PutawayTaskModel).where(
+        or_(
+            func.lower(PutawayTaskModel.task_number) == str(task_id).strip().lower(),
+            func.lower(PutawayTaskModel.grn_number) == str(task_id).strip().lower(),
+        )
+    )
+    res = await session.execute(stmt)
+    return res.scalars().first()
+
+
+async def _resolve_store_entity(session: AsyncSession, store_id: Any) -> StoreModel | None:
+    if not store_id:
+        return None
+    uid = _parse_uuid(store_id)
+    if uid:
+        store = await session.get(StoreModel, uid)
+        if store:
+            return store
+    stmt = select(StoreModel).where(
+        or_(
+            func.lower(StoreModel.store_code) == str(store_id).strip().lower(),
+            func.lower(StoreModel.store_name) == str(store_id).strip().lower(),
+        )
+    )
+    res = await session.execute(stmt)
+    return res.scalars().first()
+
+
+async def _resolve_zone_entity(session: AsyncSession, zone_id: Any) -> StoreZoneModel | None:
+    if not zone_id:
+        return None
+    uid = _parse_uuid(zone_id)
+    if uid:
+        zone = await session.get(StoreZoneModel, uid)
+        if zone:
+            return zone
+    stmt = select(StoreZoneModel).where(
+        or_(
+            func.lower(StoreZoneModel.zone_code) == str(zone_id).strip().lower(),
+            func.lower(StoreZoneModel.zone_name) == str(zone_id).strip().lower(),
+        )
+    )
+    res = await session.execute(stmt)
+    return res.scalars().first()
+
+
+async def _resolve_bin_entity(session: AsyncSession, bin_id: Any) -> StoreBinModel | None:
+    if not bin_id:
+        return None
+    uid = _parse_uuid(bin_id)
+    if uid:
+        b_obj = await session.get(StoreBinModel, uid)
+        if b_obj:
+            return b_obj
+    stmt = select(StoreBinModel).where(
+        or_(
+            func.lower(StoreBinModel.bin_code) == str(bin_id).strip().lower(),
+            func.lower(StoreBinModel.qr_identifier) == str(bin_id).strip().lower(),
+        )
+    )
+    res = await session.execute(stmt)
+    return res.scalars().first()
+
+
+async def _resolve_loc_entity(session: AsyncSession, loc_id: Any) -> StorageLocationModel | None:
+    if not loc_id:
+        return None
+    uid = _parse_uuid(loc_id)
+    if uid:
+        loc = await session.get(StorageLocationModel, uid)
+        if loc:
+            return loc
+    stmt = select(StorageLocationModel).where(
+        func.lower(StorageLocationModel.location_code) == str(loc_id).strip().lower()
+    )
+    res = await session.execute(stmt)
+    return res.scalars().first()
+
+
 class LocationAssignmentRequest(BaseModel):
-    store_id: uuid.UUID | None = None
-    zone_id: uuid.UUID | None = None
-    bin_id: uuid.UUID | None = None
-    location_id: uuid.UUID | None = None
+    store_id: Any = None
+    zone_id: Any = None
+    bin_id: Any = None
+    location_id: Any = None
 
 
 class PutawayConfirmationRequest(BaseModel):
@@ -124,11 +224,11 @@ class ResolveBinQrRequest(BaseModel):
     bin_scan: str | None = None
     bin_qr_code: str | None = None
     qr_code: str | None = None
-    store_id: uuid.UUID | None = None
+    store_id: Any = None
 
 
 class ExecutePutawayRequest(BaseModel):
-    task_id: uuid.UUID | None = None
+    task_id: Any = None
     grn_qr_code: str
     bin_qr_code: str
     quantity: Decimal
@@ -627,17 +727,13 @@ async def list_putaway_tasks(
         if "ADMIN" not in roles_upper and "SUPERUSER" not in roles_upper and "WAREHOUSE" not in roles_upper and "WAREHOUSE_MANAGER" not in roles_upper:
             user_store_ids, user_store_codes = await get_user_store_context(user, uow)
             if user_store_ids:
-                query = query.where(PutawayTaskModel.destination_store_id.in_(user_store_ids))
+                query = query.where((PutawayTaskModel.destination_store_id.in_(user_store_ids)) | (PutawayTaskModel.destination_store_id.is_(None)))
             elif user_store_codes:
                 s_res = await uow.session.execute(select(StoreModel.id).where(func.upper(StoreModel.store_code).in_(user_store_codes)))
                 s_ids = list(s_res.scalars().all())
                 if s_ids:
-                    query = query.where(PutawayTaskModel.destination_store_id.in_(s_ids))
-                else:
-                    return []
-            else:
-                return []
-    elif store_id:
+                    query = query.where((PutawayTaskModel.destination_store_id.in_(s_ids)) | (PutawayTaskModel.destination_store_id.is_(None)))
+    elif store_id and isinstance(store_id, uuid.UUID):
         query = query.where(PutawayTaskModel.destination_store_id == store_id)
 
     result = await uow.session.execute(query)
@@ -917,11 +1013,11 @@ async def get_handling_unit(
 
 @router.get("/{task_id}")
 async def get_putaway_task(
-    task_id: uuid.UUID,
+    task_id: str,
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ):
-    task = await uow.session.get(PutawayTaskModel, task_id)
+    task = await _resolve_task(uow.session, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Putaway task not found")
 
@@ -938,7 +1034,7 @@ async def get_putaway_task(
 
 @router.put("/{task_id}/location")
 async def assign_storage_location(
-    task_id: uuid.UUID,
+    task_id: str,
     request: LocationAssignmentRequest,
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
@@ -955,7 +1051,7 @@ async def assign_storage_location(
             detail="Only Warehouse personnel can assign destination Stores to Putaway tasks",
         )
 
-    task = await uow.session.get(PutawayTaskModel, task_id)
+    task = await _resolve_task(uow.session, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Putaway task not found")
     if task.status in ("PUTAWAY_COMPLETED", "STORED"):
@@ -963,22 +1059,22 @@ async def assign_storage_location(
 
     # Destination Store selection
     if request.store_id:
-        store = await uow.session.get(StoreModel, request.store_id)
-        if store is None or store.status.upper() != "ACTIVE":
+        store = await _resolve_store_entity(uow.session, request.store_id)
+        if store is None or (store.status and store.status.upper() != "ACTIVE"):
             raise HTTPException(status_code=422, detail="Selected destination store is inactive or not found")
 
         zone = None
         if request.zone_id:
-            zone = await uow.session.get(StoreZoneModel, request.zone_id)
-            if zone is None or zone.status.upper() != "ACTIVE":
+            zone = await _resolve_zone_entity(uow.session, request.zone_id)
+            if zone is None or (zone.status and zone.status.upper() != "ACTIVE"):
                 raise HTTPException(status_code=422, detail="Selected destination zone is inactive or not found")
             if zone.store_id != store.id:
                 raise HTTPException(status_code=422, detail=f"Zone '{zone.zone_code}' does not belong to Store '{store.store_code}'")
 
         bin_obj = None
         if request.bin_id:
-            bin_obj = await uow.session.get(StoreBinModel, request.bin_id)
-            if bin_obj is None or bin_obj.status.upper() not in ("ACTIVE", "AVAILABLE"):
+            bin_obj = await _resolve_bin_entity(uow.session, request.bin_id)
+            if bin_obj is None or (bin_obj.status and bin_obj.status.upper() not in ("ACTIVE", "AVAILABLE")):
                 raise HTTPException(status_code=422, detail="Selected destination bin is inactive or not found")
             if zone and bin_obj.zone_id != zone.id:
                 raise HTTPException(status_code=422, detail=f"Bin '{bin_obj.bin_code}' does not belong to Zone '{zone.zone_code}'")
@@ -1041,7 +1137,7 @@ async def assign_storage_location(
         task.destination_rack = bin_obj.rack if bin_obj and bin_obj.rack else (location.rack if location else None)
         task.destination_bin = bin_obj.bin_code if bin_obj else (location.bin if location else None)
     elif request.location_id:
-        location = await uow.session.get(StorageLocationModel, request.location_id)
+        location = await _resolve_loc_entity(uow.session, request.location_id)
         if location is None or not location.active:
             raise HTTPException(status_code=422, detail="Storage location is unavailable")
         if location.warehouse_id != task.warehouse_id:
@@ -1109,11 +1205,11 @@ async def assign_storage_location(
 
 @router.post("/{task_id}/start")
 async def start_putaway(
-    task_id: uuid.UUID,
+    task_id: str,
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ):
-    task = await uow.session.get(PutawayTaskModel, task_id)
+    task = await _resolve_task(uow.session, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Putaway task not found")
     if task.status in ("PUTAWAY_COMPLETED", "STORED"):
@@ -1140,7 +1236,7 @@ async def start_putaway(
 
 @router.post("/{task_id}/complete")
 async def complete_putaway(
-    task_id: uuid.UUID,
+    task_id: str,
     request: PutawayConfirmationRequest,
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
@@ -1149,7 +1245,7 @@ async def complete_putaway(
     Store Keeper confirms physical Putaway by scanning Material QR & Zone/Bin QR.
     Updates Material Stock and Inventory balances to AVAILABLE at the Store, Zone, and Bin.
     """
-    task = await uow.session.get(PutawayTaskModel, task_id)
+    task = await _resolve_task(uow.session, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Putaway task not found")
     if task.status in ("PUTAWAY_COMPLETED", "STORED"):
@@ -2269,6 +2365,36 @@ async def execute_putaway(
     target_zone = await uow.session.get(StoreZoneModel, target_bin.zone_id) if target_bin.zone_id else None
     target_store = await uow.session.get(StoreModel, target_bin.store_id) if target_bin.store_id else None
 
+    # A physical operator may only confirm into the bin assigned on the task.
+    # This makes an incorrect scan a safe exception instead of silently moving
+    # stock to a different location.
+    resolved_task: PutawayTaskModel | None = None
+    if request.task_id:
+        resolved_task = await uow.session.get(PutawayTaskModel, request.task_id)
+        if resolved_task is None:
+            raise HTTPException(status_code=404, detail="Putaway task was not found")
+    elif grn_info.get("putaway_task_id"):
+        resolved_task = await uow.session.get(PutawayTaskModel, uuid.UUID(grn_info["putaway_task_id"]))
+
+    if resolved_task:
+        if resolved_task.status in {"CANCELLED", "PUTAWAY_COMPLETED", "COMPLETED"}:
+            raise HTTPException(status_code=409, detail=f"Putaway task is {resolved_task.status.lower()} and cannot be confirmed")
+        expected_bin_id = resolved_task.destination_bin_id
+        expected_bin_code = (resolved_task.destination_bin_code or resolved_task.destination_bin or "").upper()
+        if (expected_bin_id and target_bin.id != expected_bin_id) or (expected_bin_code and target_bin.bin_code.upper() != expected_bin_code):
+            expected = resolved_task.destination_bin_code or resolved_task.destination_bin or str(expected_bin_id)
+            raise HTTPException(
+                status_code=422,
+                detail=f"WRONG LOCATION. Expected {expected}; scanned {target_bin.bin_code}. Move material to the assigned location.",
+            )
+
+    allowed_category = (getattr(target_bin, "allowed_material_category", None) or "").strip()
+    material_category = (grn_info.get("material_category") or "").strip()
+    if allowed_category and allowed_category.upper() not in {"ANY", "ALL"} and allowed_category.upper() != material_category.upper():
+        raise HTTPException(status_code=422, detail=f"Bin '{target_bin.bin_code}' only permits material category '{allowed_category}'")
+    if grn_info.get("hazardous_material") and not getattr(target_bin, "hazardous_material_permitted", False):
+        raise HTTPException(status_code=422, detail=f"Bin '{target_bin.bin_code}' does not permit hazardous material")
+
     if is_store_user and not is_admin and target_store:
         user_store_ids, user_store_codes = await get_user_store_context(user, uow)
         store_match = False
@@ -2289,6 +2415,8 @@ async def execute_putaway(
             )
 
     # Capacity validation
+    if (target_bin.status or "").upper() not in ("ACTIVE", "AVAILABLE", "OCCUPIED", "PARTIALLY_OCCUPIED"):
+        raise HTTPException(status_code=409, detail=f"Target Bin '{target_bin.bin_code}' is {target_bin.status} and cannot receive material")
     if target_bin.occupied_quantity + request.quantity > target_bin.capacity:
         raise HTTPException(
             status_code=409,
@@ -2353,6 +2481,7 @@ async def execute_putaway(
     stock.updated_at = completed_at.replace(tzinfo=None)
 
     target_bin.occupied_quantity = target_bin.occupied_quantity + request.quantity
+    target_bin.status = "OCCUPIED" if target_bin.occupied_quantity >= target_bin.capacity else "PARTIALLY_OCCUPIED"
     location.occupied_quantity = location.occupied_quantity + request.quantity
 
     # Step 5: Update InventoryLocationBalanceModel
@@ -2384,8 +2513,8 @@ async def execute_putaway(
 
     # Step 6: Update PutawayTaskModel if present
     task_id = request.task_id or (uuid.UUID(grn_info["putaway_task_id"]) if grn_info.get("putaway_task_id") else None)
-    task: PutawayTaskModel | None = None
-    if task_id:
+    task: PutawayTaskModel | None = resolved_task
+    if task is None and task_id:
         task = await uow.session.get(PutawayTaskModel, task_id)
     elif grn_id:
         t_res = await uow.session.execute(

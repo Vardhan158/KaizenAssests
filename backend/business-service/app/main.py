@@ -1,7 +1,7 @@
 """
 FastAPI entrypoint for ams-wms-business-service.
 """
-# Reload triggered for Assembly and Store Manager auth
+# Reload triggered for seed-test-data endpoint registration - v5
 from __future__ import annotations
 
 import asyncio
@@ -26,8 +26,6 @@ from app.modules.gate.infrastructure.api.dashboard import router as dashboard_ro
 from app.modules.gate.infrastructure.api.quality import router as quality_router
 from app.modules.gate.infrastructure.api.damage_claims import router as damage_claims_router
 from app.modules.notification.infrastructure.api.router import router as notification_router
-from app.modules.procurement.infrastructure.api.material_router import router as material_router
-from app.modules.procurement.infrastructure.api.router import router as procurement_router
 from app.modules.receiving.infrastructure.api.router import router as receiving_router
 from app.modules.returns.infrastructure.api.router import router as returns_router
 from app.modules.storage.infrastructure.api.router import router as storage_router
@@ -35,7 +33,7 @@ from app.modules.assembly.infrastructure.api.router import router as assembly_ro
 from app.modules.dispatch.infrastructure.api.router import router as dispatch_router
 from app.modules.storage.infrastructure.api.pickup_router import pickup_router
 from app.modules.storage.infrastructure.api.assembly_requisition_router import router as assembly_requisition_router
-from app.modules.storage.infrastructure.api.inventory_router import inventory_router
+from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.modules.store.infrastructure.api.router import router as store_router, zone_router, bin_router
 from app.modules.quarantine.infrastructure.api.router import router as quarantine_router
 from app.workers.notification_consumer import start_notification_consumer
@@ -66,10 +64,10 @@ async def lifespan(app: FastAPI):
         from app.events import outbox_model  # noqa: F401
         from app.modules.gate.infrastructure.persistence import models as gate_models  # noqa: F401
         from app.modules.notification.infrastructure.persistence import models as notification_models  # noqa: F401
-        from app.modules.procurement.infrastructure.persistence import models as procurement_models  # noqa: F401
         from app.modules.receiving.infrastructure.persistence import models as receiving_models  # noqa: F401
         from app.modules.returns.infrastructure.persistence import models as returns_models  # noqa: F401
         from app.modules.storage.infrastructure.persistence import models as storage_models  # noqa: F401
+        from app.modules.store.infrastructure.persistence import models as store_models  # noqa: F401
         from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
         from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
 
@@ -95,6 +93,22 @@ async def lifespan(app: FastAPI):
             async with session_scope() as session:
                 await session.execute(text(ddl_query))
                 await session.commit()
+
+        # Warehouse location master additions. These are deliberately additive
+        # so existing Store → Zone → Bin records remain valid during rollout.
+        for column, column_type in [
+            ("position", "VARCHAR(64)"),
+            ("storage_type", "VARCHAR(64) NOT NULL DEFAULT 'GENERAL'"),
+            ("maximum_weight", "NUMERIC(18, 4)"),
+            ("maximum_volume", "NUMERIC(18, 4)"),
+            ("allowed_material_category", "VARCHAR(128)"),
+            ("hazardous_material_permitted", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("temperature_requirement", "VARCHAR(128)"),
+            ("qr_identifier", "VARCHAR(128)"),
+        ]:
+            await run_ddl(f"ALTER TABLE store_bin ADD COLUMN IF NOT EXISTS {column} {column_type}")
+        await run_ddl("CREATE UNIQUE INDEX IF NOT EXISTS ix_store_bin_qr_identifier ON store_bin (qr_identifier)")
+        await run_ddl("ALTER TABLE assembly_stock_reservation ADD COLUMN IF NOT EXISTS allocations JSON NOT NULL DEFAULT '[]'")
 
         # Upgrade legacy Material Data columns to the canonical Warehouse
         # Material Master shape. create_all() intentionally does not alter an
@@ -198,6 +212,7 @@ async def lifespan(app: FastAPI):
             ("shipment_type", "VARCHAR(32) DEFAULT 'STANDARD'"),
             ("replacement_request_id", "UUID"),
             ("original_asn_id", "UUID"),
+            ("logistics", "JSONB"),
         ]:
             try:
                 await run_ddl(f"ALTER TABLE asn ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}")
@@ -1499,17 +1514,6 @@ async def lifespan(app: FastAPI):
         coalesce=True,
     )
 
-    # Add arrival notification check (every hour in prod, more frequent for dev demo)
-    from app.modules.procurement.infrastructure.api.router import check_upcoming_arrivals
-    scheduler.add_job(
-        check_upcoming_arrivals,
-        "interval",
-        minutes=1, # Check every minute for real-time demo feel
-        id="arrival-notification-check",
-        max_instances=1,
-        coalesce=True
-    )
-
     scheduler.start()
 
     try:
@@ -1593,14 +1597,12 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(quality_router)
     app.include_router(damage_claims_router)
-    app.include_router(procurement_router)
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():
         return {"status": "ok"}
-    app.include_router(material_router)
     app.include_router(store_router)
     app.include_router(zone_router)
     app.include_router(bin_router)
@@ -1608,6 +1610,8 @@ def create_app() -> FastAPI:
     app.include_router(pickup_router)
     app.include_router(assembly_requisition_router)
     app.include_router(inventory_router)
+    app.include_router(storage_req_router)
+    app.include_router(v1_inventory_router)
 
     from fastapi.staticfiles import StaticFiles
     import os

@@ -62,14 +62,12 @@ export function HomeScreen({
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [pos, asns, entries, notifs] = await Promise.all([
+      const [pos, asns, entries] = await Promise.all([
         mobileApi.getPurchaseOrders(),
         mobileApi.getAsns(),
         mobileApi.getGateEntries(),
-        mobileApi.getNotifications(),
       ]);
-
-      setNotifications(notifs || []);
+      mobileApi.getNotifications().then(setNotifications).catch(() => setNotifications([]));
 
       const todayStr = new Date().toISOString().split("T")[0];
 
@@ -87,12 +85,12 @@ export function HomeScreen({
       pos.forEach((po: any, idx: number) => {
         expectedList.push({
           id: po.id || `exp-po-${idx}`,
-          vehicle_number: po.vehicle_number || po.vehicleNumber || "KA 01 AB 4582",
-          supplier_name: po.supplier_name || po.supplierName || "Bharat Electronics Components Pvt. Ltd.",
-          asn_number: po.asn_number || po.asnNumber || "ASN-2026-004582",
-          po_number: po.po_number || po.poNumber || "PO-2026-008741",
-          expected_time: po.expected_time || "10:30 AM",
-          dock_number: po.dock_number || po.dockNumber || "D-04",
+          vehicle_number: po.vehicle_number || po.vehicleNumber || "",
+          supplier_name: po.supplier_name || po.supplierName || "",
+          asn_number: po.asn_number || po.asnNumber || "",
+          po_number: po.po_number || po.poNumber || "",
+          expected_time: po.expected_time || po.expected_arrival || "",
+          dock_number: po.dock_number || po.dockNumber || "Unassigned",
           status: "EXPECTED",
         });
       });
@@ -101,12 +99,12 @@ export function HomeScreen({
         if (!expectedList.some((e) => e.po_number === (asn.po_number || asn.poNumber))) {
           expectedList.push({
             id: asn.id || `exp-asn-${idx}`,
-            vehicle_number: asn.vehicle_number || asn.vehicleNumber || "KA 04 MH 9988",
-            supplier_name: asn.supplier_name || asn.supplierName || "Karnataka Precision Components",
-            asn_number: asn.asn_number || asn.asnNumber || "ASN-2026-0001",
-            po_number: asn.po_number || asn.poNumber || "PO-2026-0002",
-            expected_time: "11:15 AM",
-            dock_number: asn.dock_number || "D-02",
+            vehicle_number: asn.vehicle_number || asn.vehicleNumber || "",
+            supplier_name: asn.supplier_name || asn.supplierName || "",
+            asn_number: asn.asn_number || asn.asnNumber || "",
+            po_number: asn.po_number || asn.poNumber || "",
+            expected_time: asn.expected_time || asn.expected_arrival || "",
+            dock_number: asn.dock_number || asn.dockNumber || "Unassigned",
             status: "EXPECTED",
           });
         }
@@ -115,10 +113,10 @@ export function HomeScreen({
       setExpectedVehicles(expectedList);
 
       setStats({
-        expectedToday: expectedList.length || 18,
-        waitingAtGate: waiting.length || 3,
-        insideFacility: inside.length || 7,
-        exitedToday: exited.length || 11,
+        expectedToday: expectedList.length,
+        waitingAtGate: waiting.length,
+        insideFacility: inside.length,
+        exitedToday: exited.length,
       });
     } catch {
       setStats({
@@ -142,7 +140,7 @@ export function HomeScreen({
     return veh.includes(q) || po.includes(q) || asn.includes(q) || sup.includes(q);
   });
 
-  const firstName = user?.full_name ? user.full_name.split(" ")[0] : "Rajesh";
+  const firstName = user?.full_name ? user.full_name.split(" ")[0] : user?.username || "";
 
   return (
     <ScrollView style={tw`flex-1 bg-slate-900`} contentContainerStyle={tw`p-4 pb-10`}>
@@ -153,7 +151,7 @@ export function HomeScreen({
             {getGreeting()}, {firstName}
           </Text>
           <Text style={tw`text-sky-400 text-xs font-bold mt-0.5`}>
-            {user?.gate_location || "Main Gate – 01"}
+            {user?.gate_location || ""}
           </Text>
         </View>
 

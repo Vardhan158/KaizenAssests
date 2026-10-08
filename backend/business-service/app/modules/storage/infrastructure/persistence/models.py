@@ -8,10 +8,15 @@ from decimal import Decimal
 import uuid
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, GUID
+try:
+    from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel  # noqa
+except Exception:
+    pass
+
 
 
 class StorageLocationModel(Base):
@@ -145,7 +150,7 @@ class AssemblyRequisitionModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     requisition_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, default="Main Warehouse")
+    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
     department: Mapped[str] = mapped_column(String(64), nullable=False, default="Assembly")
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
     priority: Mapped[str] = mapped_column(String(32), nullable=False, default="MEDIUM")
@@ -178,7 +183,7 @@ class AssemblyRequisitionItemModel(Base):
     requested_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     reserved_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     issued_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    uom: Mapped[str] = mapped_column(String(32), nullable=False)
     is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     custom_material_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
@@ -205,6 +210,9 @@ class AssemblyStockReservationModel(Base):
     bin_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     location_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     storage_location_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("storage_location.id", ondelete="SET NULL"), nullable=True)
+    # Ordered physical allocation lines. A reservation may span multiple
+    # bins/batches while the material remains physically in place.
+    allocations: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     reserved_by: Mapped[str] = mapped_column(String(128), nullable=False)
     reserved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -301,6 +309,89 @@ class InventoryMovementHistoryModel(Base):
     reference_document: Mapped[str | None] = mapped_column(String(128), nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     performed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class MaterialReturnModel(Base):
+    """Stores assembly & production material returns (Part K)."""
+    __tablename__ = "material_return"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    return_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    issue_number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    assembly_line: Mapped[str] = mapped_column(String(128), nullable=False, default="Assembly Line 02")
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    material_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    batch_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    issued_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    used_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    returned_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    condition: Mapped[str] = mapped_column(String(32), nullable=False, default="GOOD")  # GOOD, DAMAGED, UNKNOWN
+    disposition: Mapped[str] = mapped_column(String(64), nullable=False, default="RETURN_TO_INVENTORY")  # RETURN_TO_INVENTORY, BLOCKED, QC_HOLD
+    returned_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    received_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PROCESSED", index=True)
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class CycleCountModel(Base):
+    """Stores Cycle Count tasks created by Warehouse Managers/Controllers (Part L)."""
+    __tablename__ = "cycle_count"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    count_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    zone_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    rack: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    assigned_operator: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="ASSIGNED", index=True)  # ASSIGNED, IN_PROGRESS, VARIANCE_REVIEW_REQUIRED, COMPLETED
+    total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    variance_items_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CycleCountItemModel(Base):
+    """Stores individual line item counts & physical vs system variance for a Cycle Count."""
+    __tablename__ = "cycle_count_item"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    cycle_count_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("cycle_count.id", ondelete="CASCADE"), nullable=False, index=True)
+    bin_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    material_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    batch_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    system_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    physical_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    variance_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="PENDING_COUNT")  # PENDING_COUNT, COUNTED, VARIANCE_REVIEW_REQUIRED, APPROVED
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class StockAdjustmentModel(Base):
+    """Stores approved stock adjustments & audited inventory variance transactions (Part M)."""
+    __tablename__ = "stock_adjustment"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    adjustment_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    material_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    batch_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    location_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    current_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    adjustment_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    new_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    reason: Mapped[str] = mapped_column(String(128), nullable=False)  # Cycle Count Variance, Damage, Loss, Data Correction, UOM Correction, Approved Write-Off, Other
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    requester: Mapped[str] = mapped_column(String(128), nullable=False)
+    approver: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="APPROVED", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
 
 
 

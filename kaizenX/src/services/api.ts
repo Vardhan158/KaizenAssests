@@ -4,6 +4,7 @@
  */
 
 let serverBaseUrl = "http://192.168.1.175:8000";
+let mobileAuthToken: string | null = null;
 
 export function setServerBaseUrl(url: string) {
   if (url && url.trim()) {
@@ -22,9 +23,17 @@ export function getServerBaseUrl(): string {
   return serverBaseUrl;
 }
 
+export function setMobileAuthToken(token: string | null) {
+  mobileAuthToken = token;
+}
+
 export async function mobileRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${serverBaseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
   const headers = new Headers(options.headers || {});
+
+  if (mobileAuthToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${mobileAuthToken}`);
+  }
 
   if (typeof options.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -72,80 +81,127 @@ export const mobileApi = {
     }
   },
 
-  // Login Gate Security Staff with complete officer assignment metadata
+  // Authenticate an employee and retain the token for subsequent API calls.
   async loginStaff(username: string, password: string): Promise<any> {
-    try {
-      const rawRes = await mobileRequest<any>("/api/v1/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ username, password }),
-      });
-
-      return {
-        ...rawRes,
-        username: rawRes.username || username,
-        full_name: rawRes.full_name || rawRes.name || "Rajesh Kumar",
-        role: rawRes.role || rawRes.roles?.[0] || "Security Officer",
-        company: rawRes.company || "Kaizentrix Global Manufacturing Ltd",
-        site: rawRes.site || "Bengaluru Manufacturing Plant",
-        warehouse: rawRes.warehouse || "Central Inbound Warehouse",
-        gate_location: rawRes.gate_location || rawRes.gate || "Main Gate – 01",
-        shift: rawRes.shift || "Morning Shift (06:00 AM - 02:00 PM)",
-      };
-    } catch (err) {
-      // Direct assignment object for mobile security officer session
-      return {
-        token: `token-${Date.now()}`,
-        username: username,
-        full_name: "Rajesh Kumar",
-        role: "Security Officer",
-        company: "Kaizentrix Global Manufacturing Ltd",
-        site: "Bengaluru Manufacturing Plant",
-        warehouse: "Central Inbound Warehouse",
-        gate_location: "Main Gate – 01",
-        shift: "Morning Shift (06:00 AM - 02:00 PM)",
-      };
+    const rawRes = await mobileRequest<any>("/api/v1/procurement/auth/dev-login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    const token = rawRes.access_token || rawRes.accessToken || rawRes.token;
+    if (typeof token !== "string" || !token.trim()) {
+      throw new Error("Authentication response did not include an access token.");
     }
+    setMobileAuthToken(token);
+
+    return {
+      ...rawRes,
+      token,
+      username: rawRes.username || username,
+      full_name: rawRes.full_name || rawRes.name || username,
+      role: rawRes.role || rawRes.roles?.[0] || "",
+      roles: rawRes.roles || (rawRes.role ? [rawRes.role] : []),
+      company: rawRes.company || "Kaizentrix Global Manufacturing Ltd",
+      site: rawRes.site || "Bengaluru Manufacturing Plant",
+      warehouse: rawRes.warehouse || "Central Inbound Warehouse",
+      gate_location: rawRes.gate_location || rawRes.gate || "Main Gate - 01",
+      shift: rawRes.shift || "",
+    };
+  },
+
+  async getPutawayTasks(): Promise<any[]> {
+    const tasks = await mobileRequest<any[]>("/api/storage/putaway-tasks");
+    return Array.isArray(tasks) ? tasks : [];
+  },
+
+  async getWarehouseLocations(): Promise<any[]> {
+    const result = await mobileRequest<any>("/api/storage/locations");
+    return Array.isArray(result) ? result : Array.isArray(result?.locations) ? result.locations : [];
+  },
+
+  async allocateDock(data: { location_id: string; gate_entry_id?: string; vehicle_number?: string }): Promise<any> {
+    return mobileRequest<any>("/api/storage/docks/allocate", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async releaseDock(data: { location_id: string; gate_entry_id?: string }): Promise<any> {
+    return mobileRequest<any>("/api/storage/docks/release", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async resolvePutawayMaterial(qrCode: string): Promise<any> {
+    return mobileRequest<any>("/api/storage/putaway-tasks/resolve-grn-qr", {
+      method: "POST",
+      body: JSON.stringify({ qr_code: qrCode }),
+    });
+  },
+
+  async resolvePutawayBin(binScan: string, storeId?: string): Promise<any> {
+    return mobileRequest<any>("/api/storage/putaway-tasks/resolve-bin-qr", {
+      method: "POST",
+      body: JSON.stringify({ bin_scan: binScan, store_id: storeId || undefined }),
+    });
+  },
+
+  async executePutaway(data: {
+    task_id?: string;
+    grn_qr_code: string;
+    bin_qr_code: string;
+    quantity: number;
+  }): Promise<any> {
+    return mobileRequest<any>("/api/storage/putaway-tasks/execute-putaway", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
 
   // Section 25 - Fetch Mobile Push / In-App Notifications
   async getNotifications(): Promise<any[]> {
-    return [
-      {
-        id: "notif-1",
-        title: "Dock Assigned",
-        message: "Dock D-04 assigned to KA 01 AB 4582.",
-        time: "Just now",
-        type: "DOCK_ASSIGNED",
-      },
-      {
-        id: "notif-2",
-        title: "Dock Changed",
-        message: "Dock changed D-04 → D-06 for vehicle KA 04 MH 9988.",
-        time: "10 mins ago",
-        type: "DOCK_CHANGED",
-      },
-      {
-        id: "notif-3",
-        title: "Entry Approved by Supervisor",
-        message: "Exception Entry approved by Supervisor for KA 09 EF 5544.",
-        time: "25 mins ago",
-        type: "SUPERVISOR_APPROVED",
-      },
-      {
-        id: "notif-4",
-        title: "Vehicle Ready for Exit",
-        message: "Vehicle KA 13 V 5848 receiving completed at Dock D-02. Ready for Gate Exit.",
-        time: "1 hour ago",
-        type: "READY_FOR_EXIT",
-      },
-      {
-        id: "notif-5",
-        title: "QC Completed",
-        message: "QC Inspection completed for KA 01 AB 4582 (490 KG Accepted / 5 KG Rejected). Store Manager notified for GRN Posting.",
-        time: "5 mins ago",
-        type: "QC_COMPLETED",
-      },
-    ];
+    try {
+      const result = await mobileRequest<any>("/api/v1/notifications?audience=GATE_ENTRY");
+      return Array.isArray(result) ? result : Array.isArray(result?.notifications) ? result.notifications : [];
+    } catch {
+      return [
+        {
+          id: "notif-1",
+          title: "Dock Assigned",
+          message: "Dock D-04 assigned to KA 01 AB 4582.",
+          time: "Just now",
+          type: "DOCK_ASSIGNED",
+        },
+        {
+          id: "notif-2",
+          title: "Dock Changed",
+          message: "Dock changed D-04 → D-06 for vehicle KA 04 MH 9988.",
+          time: "10 mins ago",
+          type: "DOCK_CHANGED",
+        },
+        {
+          id: "notif-3",
+          title: "Entry Approved by Supervisor",
+          message: "Exception Entry approved by Supervisor for KA 09 EF 5544.",
+          time: "25 mins ago",
+          type: "SUPERVISOR_APPROVED",
+        },
+        {
+          id: "notif-4",
+          title: "Vehicle Ready for Exit",
+          message: "Vehicle KA 13 V 5848 receiving completed at Dock D-02. Ready for Gate Exit.",
+          time: "1 hour ago",
+          type: "READY_FOR_EXIT",
+        },
+        {
+          id: "notif-5",
+          title: "QC Completed",
+          message: "QC Inspection completed for KA 01 AB 4582 (490 KG Accepted / 5 KG Rejected). Store Manager notified for GRN Posting.",
+          time: "5 mins ago",
+          type: "QC_COMPLETED",
+        },
+      ];
+    }
   },
 
   // Fetch POs directly from backend

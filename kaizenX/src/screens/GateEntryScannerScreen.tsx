@@ -64,6 +64,7 @@ export function GateEntryScannerScreen({
 
   // Screen 10 - Dock Allocation
   const [dockAcknowledged, setDockAcknowledged] = useState(false);
+  const [checkingDock, setCheckingDock] = useState(false);
 
   const [supplierInput, setSupplierInput] = useState("");
   const [exceptionReasonInput, setExceptionReasonInput] = useState("");
@@ -107,8 +108,30 @@ export function GateEntryScannerScreen({
     const timeStr = new Date().toLocaleTimeString("en-IN", { hour12: false });
     setAuditLogs((prev) => [
       ...prev,
-      { time: timeStr, action: actionDescription, user: "Rajesh Kumar (Security)" },
+      { time: timeStr, action: actionDescription, user: "Authenticated user" },
     ]);
+  };
+
+  const checkForDockAllocation = async () => {
+    const plate = formatVehiclePlate(vehicleInput);
+    if (!plate) { Alert.alert("Vehicle required", "Enter the vehicle number to check its dock allocation."); return; }
+    setCheckingDock(true);
+    try {
+      const rows = await mobileApi.getGateEntries();
+      const normalized = plate.replace(/[^A-Z0-9]/g, "");
+      const entry = rows.find((row: any) => String(row.vehicle_number || row.vehicle_plate || "").replace(/[^A-Z0-9]/gi, "").toUpperCase() === normalized);
+      const dock = entry?.dock_number || entry?.assigned_dock_id;
+      if (!entry || !dock || String(dock).toUpperCase() === "UNASSIGNED") {
+        Alert.alert("Dock not allocated", "No dock allocation is available yet. Keep the vehicle in the gate waiting area and check again.");
+        return;
+      }
+      if (selectedPo) setSelectedPo({ ...selectedPo, dock_number: dock });
+      if (selectedAsn) setSelectedAsn({ ...selectedAsn, dock_number: dock });
+      setDockAcknowledged(true);
+      Alert.alert("Dock available", `${plate} is assigned to ${dock}. You can continue gate entry.`);
+    } catch (e) {
+      Alert.alert("Could not check dock", e instanceof Error ? e.message : "Refresh and try again.");
+    } finally { setCheckingDock(false); }
   };
 
   const requestCameraPermission = async (): Promise<boolean> => {

@@ -87,11 +87,11 @@ function AssemblyRequestsPage() {
   const user = getUserInfo();
 
   const [formData, setFormData] = useState({
-    warehouse_id: "Main Warehouse",
+    warehouse_id: "",
     department: "Assembly",
-    requested_by: user?.username || "Assembly Operator",
+    requested_by: user?.username || "",
     priority: "MEDIUM",
-    required_date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+    required_date: "",
     remarks: "",
   });
 
@@ -102,8 +102,8 @@ function AssemblyRequestsPage() {
       material_code: "",
       variant_code: "",
       material_name: "",
-      quantity: 1,
-      uom: "PCS",
+      quantity: "",
+      uom: "",
       is_custom: false,
       custom_material_name: "",
     },
@@ -140,8 +140,8 @@ function AssemblyRequestsPage() {
         material_code: isCustom ? "CUSTOM" : "",
         variant_code: "",
         material_name: "",
-        quantity: 1,
-        uom: "PCS",
+        quantity: "",
+        uom: "",
         is_custom: isCustom,
         custom_material_name: "",
       },
@@ -176,25 +176,17 @@ function AssemblyRequestsPage() {
 
     const foundMat = masterMaterials.find((m) => m.id === matId);
     if (!foundMat) return;
-    const defaultVariant = foundMat.variants?.[0];
-    const specDetails = defaultVariant
-      ? [defaultVariant.size, defaultVariant.color, defaultVariant.grade].filter(Boolean).join(", ")
-      : "";
-    const nameWithSpec = specDetails
-      ? `${foundMat.material_name} (${specDetails})`
-      : foundMat.material_name;
-
     setItems(
       items.map((it, i) =>
         i === idx
           ? {
               ...it,
               material_id: foundMat.id,
-              material_variant_id: defaultVariant?.id || "",
+              material_variant_id: "",
               material_code: foundMat.material_code,
-              variant_code: defaultVariant?.variant_code || "",
-              material_name: nameWithSpec,
-              uom: defaultVariant?.uom || foundMat.base_uom || "PCS",
+              variant_code: "",
+              material_name: foundMat.material_name,
+              uom: foundMat.base_uom || "",
               is_custom: false,
               custom_material_name: "",
             }
@@ -223,8 +215,16 @@ function AssemblyRequestsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.warehouse_id.trim() || !formData.required_date) {
+      toast.error("Enter the warehouse and required date before submitting");
+      return;
+    }
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
+      if (!it.uom?.trim()) {
+        toast.error(`Select a unit of measure for row ${i + 1}`);
+        return;
+      }
       if (it.is_custom) {
         if (!it.custom_material_name?.trim()) {
           toast.error(`Please enter the Custom Material Name for row ${i + 1}`);
@@ -258,8 +258,8 @@ function AssemblyRequestsPage() {
           variant_code: it.is_custom ? null : it.variant_code || null,
           material_name: it.is_custom ? it.custom_material_name.trim() : it.material_name,
           custom_material_name: it.is_custom ? it.custom_material_name.trim() : null,
-          quantity: parseFloat(it.quantity as string) || 1,
-          uom: it.uom || "PCS",
+          quantity: parseFloat(it.quantity as string),
+          uom: it.uom,
           is_custom: !!it.is_custom,
         })),
       };
@@ -281,8 +281,8 @@ function AssemblyRequestsPage() {
           material_code: "",
           variant_code: "",
           material_name: "",
-          quantity: 1,
-          uom: "PCS",
+          quantity: "",
+          uom: "",
           is_custom: false,
           custom_material_name: "",
         },
@@ -290,6 +290,19 @@ function AssemblyRequestsPage() {
       fetchData();
     } catch (err: any) {
       toast.error(err.message || "Failed to create assembly material requisition");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const confirmReceipt = async (req: any) => {
+    setSubmitting(true);
+    try {
+      const receipt = await api.confirmAssemblyReceipt(req.id);
+      toast.success(`Receipt confirmed for ${receipt.requisition_number}`);
+      await fetchData();
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to confirm material receipt");
     } finally {
       setSubmitting(false);
     }
@@ -357,6 +370,7 @@ function AssemblyRequestsPage() {
                 <SelectItem value="ASSIGNED_TO_STORE">Assigned to Store</SelectItem>
                 <SelectItem value="PICKING">Picking In Progress</SelectItem>
                 <SelectItem value="COMPLETED">Completed / Handed Over</SelectItem>
+                <SelectItem value="ASSEMBLY_RECEIVED">Assembly Receipt Confirmed</SelectItem>
               </SelectContent>
             </Select>
 
@@ -524,7 +538,7 @@ function AssemblyRequestsPage() {
                         <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs dark:border-blue-900 dark:bg-blue-950/30">
                           <div className="flex flex-wrap items-center gap-2 font-bold text-blue-800 dark:text-blue-200">
                             <PackageCheck className="size-3.5" />
-                            Store pickup: {String(req.pickup_progress.status || "ASSIGNED").replaceAll("_", " ")}
+                            Store pickup: {req.pickup_progress.status ? String(req.pickup_progress.status).replaceAll("_", " ") : "—"}
                             <span className="font-normal text-blue-700 dark:text-blue-300">
                               {req.pickup_progress.picked_quantity}/{req.pickup_progress.requested_quantity} issued
                             </span>
@@ -532,7 +546,7 @@ function AssemblyRequestsPage() {
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                             {(req.pickup_tracking || []).map((task: any) => (
                               <span key={task.task_number}>
-                                {task.task_number}: {String(task.status || "PENDING").replaceAll("_", " ")} ({task.picked_quantity}/{task.requested_quantity})
+                                {task.task_number}: {task.status ? String(task.status).replaceAll("_", " ") : "—"} ({task.picked_quantity}/{task.requested_quantity})
                               </span>
                             ))}
                           </div>
@@ -547,6 +561,14 @@ function AssemblyRequestsPage() {
                       <p className="text-xs font-bold tabular-nums">
                         {new Date(req.createdAt || req.created_at).toLocaleDateString()}
                       </p>
+                      {req.status === "PICKED_UP" && (
+                        <Button size="sm" disabled={submitting} className="mt-2" onClick={(event) => {
+                          event.stopPropagation();
+                          void confirmReceipt(req);
+                        }}>
+                          Confirm Assembly Receipt
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -567,10 +589,14 @@ function AssemblyRequestsPage() {
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs font-bold text-muted-foreground">Department</Label>
                 <Input value="Assembly" readOnly className="h-9 rounded-xl text-xs bg-muted/50" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-bold text-muted-foreground">Warehouse</Label>
+                <Input value={formData.warehouse_id} onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })} className="h-9 rounded-xl text-xs" required />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs font-bold text-muted-foreground">Priority</Label>
