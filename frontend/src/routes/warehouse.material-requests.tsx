@@ -7,7 +7,7 @@ export const Route = createFileRoute("/warehouse/material-requests")({
   component: WarehouseMaterialRequestsPage,
 });
 
-export function WarehouseMaterialRequestsPage(_props?: any) {
+function WarehouseMaterialRequestsPage(_props?: any) {
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -25,5 +25,3 @@ export function WarehouseMaterialRequestsPage(_props?: any) {
     </AppShell>
   );
 }
-
-export { WarehouseMaterialRequestsPage as MaterialRequestsPage };
