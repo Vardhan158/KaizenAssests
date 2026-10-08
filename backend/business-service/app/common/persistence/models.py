@@ -9,7 +9,7 @@ from typing import List, Optional
 import uuid
 
 from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Table, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.database.base import Base, GUID
 
@@ -544,9 +544,9 @@ class MaterialRequestItemModel(Base):
     )
     material_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material.id", ondelete="SET NULL"), nullable=True)
     material_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material_variant.id", ondelete="SET NULL"), nullable=True)
-    item_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    item_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    material_name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -555,6 +555,9 @@ class MaterialRequestItemModel(Base):
     request: Mapped[MaterialRequestModel] = relationship("MaterialRequestModel", back_populates="items")
     material: Mapped[Optional["MaterialModel"]] = relationship("MaterialModel")
     variant: Mapped[Optional["MaterialVariantModel"]] = relationship("MaterialVariantModel")
+
+    item_code = synonym("material_code")
+    item_name = synonym("material_name")
 
 
 class MaterialStockModel(Base):
@@ -568,18 +571,23 @@ class MaterialStockModel(Base):
         GUID, ForeignKey("material_variant.id", ondelete="SET NULL"), nullable=True, index=True
     )
     material_code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    material_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
-    location_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, default="Main Warehouse")
-    on_hand_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    allocated_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    available_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    category: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    warehouse_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default="Main Warehouse")
+    on_hand: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    allocated: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    available: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    reorder_point: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4), nullable=True)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=datetime.now, onupdate=datetime.now)
 
     material: Mapped[Optional["MaterialModel"]] = relationship("MaterialModel")
     variant: Mapped[Optional["MaterialVariantModel"]] = relationship("MaterialVariantModel")
+
+    available_quantity = synonym("available")
+    on_hand_quantity = synonym("on_hand")
+    allocated_quantity = synonym("allocated")
 
 
 class QuotationMagicLinkModel(Base):

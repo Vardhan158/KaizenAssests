@@ -1,7 +1,7 @@
 """
 FastAPI entrypoint for ams-wms-business-service.
 """
-# Reload triggered for Assembly and Store Manager auth
+# Reload triggered for Notification router and Assembly
 from __future__ import annotations
 
 import asyncio

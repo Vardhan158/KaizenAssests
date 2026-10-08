@@ -420,7 +420,7 @@ async def create_assembly_order(
 
             # Check warehouse stock in material_stock
             stock_res = await uow.session.execute(
-                select(func.coalesce(func.sum(MaterialStockModel.available), Decimal("0")))
+                select(func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0")))
                 .where(MaterialStockModel.material_code == bi.material_code)
             )
             avail_stock = stock_res.scalar() or Decimal("0")
@@ -548,7 +548,7 @@ async def get_assembly_order(
             if isinstance(itm, dict) and "material_code" in itm:
                 mat_code = itm["material_code"]
                 stock_res = await uow.session.execute(
-                    select(func.coalesce(func.sum(MaterialStockModel.available), Decimal("0")))
+                    select(func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0")))
                     .where(MaterialStockModel.material_code == mat_code)
                 )
                 avail_stock = float(stock_res.scalar() or Decimal("0"))
@@ -608,7 +608,7 @@ async def get_assembly_order_materials(
             if isinstance(itm, dict) and "material_code" in itm:
                 mat_code = itm["material_code"]
                 stock_res = await uow.session.execute(
-                    select(func.coalesce(func.sum(MaterialStockModel.available), Decimal("0")))
+                    select(func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0")))
                     .where(MaterialStockModel.material_code == mat_code)
                 )
                 avail_stock = float(stock_res.scalar() or Decimal("0"))
@@ -674,74 +674,73 @@ async def get_product_bom(
     Get active BOM for a product and calculate required materials for a given quantity.
     Queries live warehouse availability for each component.
     """
-    async with uow:
-        bom_query = select(BillOfMaterialsModel).where(
-            or_(
-                BillOfMaterialsModel.product_code == product_code,
-                BillOfMaterialsModel.product_name == product_code,
-            )
+    bom_query = select(BillOfMaterialsModel).where(
+        or_(
+            BillOfMaterialsModel.product_code == product_code,
+            BillOfMaterialsModel.product_name == product_code,
         )
-        res_bom = await uow.session.execute(bom_query)
-        bom = res_bom.scalars().first()
+    )
+    res_bom = await uow.session.execute(bom_query)
+    bom = res_bom.scalars().first()
 
-        if not bom:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No active Bill of Materials found for product: '{product_code}'.",
-            )
-
-        items_res = await uow.session.execute(
-            select(BillOfMaterialsItemModel)
-            .where(BillOfMaterialsItemModel.bom_id == bom.id)
-            .order_by(BillOfMaterialsItemModel.created_at)
+    if not bom:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active Bill of Materials found for product: '{product_code}'.",
         )
-        bom_items = items_res.scalars().all()
 
-        qty_dec = Decimal(str(quantity))
-        calculated_materials = []
-        shortage_count = 0
-        available_count = 0
+    items_res = await uow.session.execute(
+        select(BillOfMaterialsItemModel)
+        .where(BillOfMaterialsItemModel.bom_id == bom.id)
+        .order_by(BillOfMaterialsItemModel.created_at)
+    )
+    bom_items = items_res.scalars().all()
 
-        for bi in bom_items:
-            req_qty = float(bi.quantity_per_unit * qty_dec)
-            stock_res = await uow.session.execute(
-                select(func.coalesce(func.sum(MaterialStockModel.available), Decimal("0")))
-                .where(MaterialStockModel.material_code == bi.material_code)
-            )
-            avail_stock = float(stock_res.scalar() or Decimal("0"))
-            shortage = max(0.0, req_qty - avail_stock)
-            item_status = "AVAILABLE" if avail_stock >= req_qty else "SHORTAGE"
+    qty_dec = Decimal(str(quantity))
+    calculated_materials = []
+    shortage_count = 0
+    available_count = 0
 
-            if item_status == "SHORTAGE":
-                shortage_count += 1
-            else:
-                available_count += 1
+    for bi in bom_items:
+        req_qty = float(bi.quantity_per_unit * qty_dec)
+        stock_res = await uow.session.execute(
+            select(func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0")))
+            .where(MaterialStockModel.material_code == bi.material_code)
+        )
+        avail_stock = float(stock_res.scalar() or Decimal("0"))
+        shortage = max(0.0, req_qty - avail_stock)
+        item_status = "AVAILABLE" if avail_stock >= req_qty else "SHORTAGE"
 
-            calculated_materials.append({
-                "material_code": bi.material_code,
-                "material_name": bi.material_name,
-                "quantity_per_unit": float(bi.quantity_per_unit),
-                "required_quantity": req_qty,
-                "available_quantity": avail_stock,
-                "shortage": shortage,
-                "uom": bi.uom or "PCS",
-                "status": item_status,
-            })
+        if item_status == "SHORTAGE":
+            shortage_count += 1
+        else:
+            available_count += 1
 
-        return {
-            "product_code": bom.product_code,
-            "product_name": bom.product_name,
-            "bom_number": bom.bom_number,
-            "target_quantity": quantity,
-            "uom": "PCS",
-            "summary": {
-                "total_components": len(calculated_materials),
-                "available_components": available_count,
-                "shortage_components": shortage_count,
-                "has_shortage": shortage_count > 0,
-            },
-            "materials": calculated_materials,
-        }
+        calculated_materials.append({
+            "material_code": bi.material_code,
+            "material_name": bi.material_name,
+            "quantity_per_unit": float(bi.quantity_per_unit),
+            "required_quantity": req_qty,
+            "available_quantity": avail_stock,
+            "shortage": shortage,
+            "uom": bi.uom or "PCS",
+            "status": item_status,
+        })
+
+    return {
+        "product_code": bom.product_code,
+        "product_name": bom.product_name,
+        "bom_number": bom.bom_number,
+        "target_quantity": quantity,
+        "uom": "PCS",
+        "summary": {
+            "total_components": len(calculated_materials),
+            "available_components": available_count,
+            "shortage_components": shortage_count,
+            "has_shortage": shortage_count > 0,
+        },
+        "materials": calculated_materials,
+    }
 
 
 # ==============================================================================
@@ -808,7 +807,7 @@ async def create_assembly_material_request(
         for bi in bom_items:
             req_qty = bi.quantity_per_unit * payload.target_quantity
             stock_res = await uow.session.execute(
-                select(func.coalesce(func.sum(MaterialStockModel.available), Decimal("0")))
+                select(func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0")))
                 .where(MaterialStockModel.material_code == bi.material_code)
             )
             avail_stock = stock_res.scalar() or Decimal("0")
@@ -1296,8 +1295,8 @@ async def warehouse_issue_materials(
             )
             stock = stock_res.scalars().first()
             if stock:
-                stock.on_hand = max(Decimal("0"), (stock.on_hand or Decimal("0")) - qty_dec)
-                stock.available = max(Decimal("0"), (stock.available or Decimal("0")) - qty_dec)
+                stock.on_hand_quantity = max(Decimal("0"), (stock.on_hand_quantity or Decimal("0")) - qty_dec)
+                stock.available_quantity = max(Decimal("0"), (stock.available_quantity or Decimal("0")) - qty_dec)
                 stock.updated_at = now
 
         # 4. Insert PickTaskModel
