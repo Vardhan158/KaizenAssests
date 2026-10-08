@@ -11,8 +11,8 @@ export const BUSINESS_API_URL =
   (typeof window !== "undefined"
     ? window.location.hostname.includes("loca.lt")
       ? "https://wms-mobile-backend-8000.loca.lt"
-      : `${window.location.protocol}//${window.location.hostname}:8000`
-    : "http://localhost:8000");
+      : `${window.location.protocol}//${window.location.hostname}:8001`
+    : "http://localhost:8001");
 import { clearAuthSession, getAuthToken, storeAuthSession, getUserInfo } from "./auth-utils";
 function getApiErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
