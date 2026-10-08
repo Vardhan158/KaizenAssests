@@ -297,24 +297,8 @@ async def create_dock(
     uow: UnitOfWork = Depends(get_uow),
 ):
     dock_code = req.dock_code.strip().upper()
-    import re
-    
-    match = re.match(r"^([A-Z]+)-?(\d+)$", dock_code)
-    prefix = ""
-    num = 0
-    if match:
-        prefix = match.group(1)
-        num = int(match.group(2))
-        
-    while True:
-        existing = await uow.session.scalar(select(DockMasterModel).where(DockMasterModel.dock_code == dock_code))
-        if not existing:
-            break
-        if prefix:
-            num += 1
-            dock_code = f"{prefix}-{num:02d}"
-        else:
-            raise HTTPException(status_code=409, detail=f"Dock code '{dock_code}' already exists")
+    if await uow.session.scalar(select(DockMasterModel.id).where(DockMasterModel.dock_code == dock_code)):
+        raise HTTPException(status_code=409, detail=f"Dock code '{dock_code}' already exists")
     dock = DockMasterModel(
         dock_code=dock_code,
         dock_name=req.dock_name.strip(),

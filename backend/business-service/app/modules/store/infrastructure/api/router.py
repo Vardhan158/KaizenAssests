@@ -121,7 +121,15 @@ def _to_bin_response(bin_obj: StoreBinModel) -> BinResponse:
         bin_name=bin_obj.bin_name,
         rack=bin_obj.rack,
         shelf=bin_obj.shelf,
+        position=bin_obj.position,
+        storage_type=bin_obj.storage_type,
         capacity=bin_obj.capacity,
+        maximum_weight=bin_obj.maximum_weight,
+        maximum_volume=bin_obj.maximum_volume,
+        allowed_material_category=bin_obj.allowed_material_category,
+        hazardous_material_permitted=bin_obj.hazardous_material_permitted,
+        temperature_requirement=bin_obj.temperature_requirement,
+        qr_identifier=bin_obj.qr_identifier,
         occupied_quantity=bin_obj.occupied_quantity,
         status=bin_obj.status,
         created_at=bin_obj.created_at,
@@ -258,7 +266,12 @@ async def _resolve_bin(
         pass
 
     if bin_obj is None:
-        stmt = select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == id_or_code.strip().upper())
+        stmt = select(StoreBinModel).where(
+            or_(
+                func.upper(StoreBinModel.bin_code) == id_or_code.strip().upper(),
+                func.upper(StoreBinModel.qr_identifier) == id_or_code.strip().upper(),
+            )
+        )
         if zone_id:
             stmt = stmt.where(StoreBinModel.zone_id == zone_id)
         if store_id:
@@ -382,6 +395,8 @@ def _build_bin_qr_response(bin_obj: StoreBinModel, zone: StoreZoneModel, store: 
         "warehouse_id": store.warehouse_id,
         "rack": bin_obj.rack,
         "shelf": bin_obj.shelf,
+        "position": bin_obj.position,
+        "qr_identifier": bin_obj.qr_identifier or f"LOC-{store.store_code}-{zone.zone_code}-{bin_obj.bin_code}",
         "capacity": float(bin_obj.capacity),
         "status": bin_obj.status,
     }
@@ -399,6 +414,8 @@ def _build_bin_qr_response(bin_obj: StoreBinModel, zone: StoreZoneModel, store: 
         warehouse_id=store.warehouse_id,
         rack=bin_obj.rack,
         shelf=bin_obj.shelf,
+        position=bin_obj.position,
+        qr_identifier=bin_obj.qr_identifier or f"LOC-{store.store_code}-{zone.zone_code}-{bin_obj.bin_code}",
         capacity=bin_obj.capacity,
         status=bin_obj.status,
         qr_payload=qr_payload,
@@ -803,7 +820,10 @@ async def _build_store_dashboard_metrics(uow: UnitOfWork, store: StoreModel) -> 
     bins_map = {b.id: b for b in bins}
     bins_count = len(bins)
     occupied_bins_count = sum(1 for b in bins if float(b.occupied_quantity or 0) > 0)
-    available_bins_count = sum(1 for b in bins if float(b.occupied_quantity or 0) == 0 and (b.status or "").upper() == "ACTIVE")
+    available_bins_count = sum(
+        1 for b in bins
+        if float(b.occupied_quantity or 0) == 0 and (b.status or "").upper() in {"ACTIVE", "AVAILABLE"}
+    )
 
     # 2. Location balances in this store
     loc_stmt = (
@@ -1529,9 +1549,17 @@ async def create_store_bin(
         bin_name=payload.bin_name.strip(),
         rack=payload.rack.strip() if payload.rack else None,
         shelf=payload.shelf.strip() if payload.shelf else None,
+        position=payload.position.strip() if payload.position else None,
+        storage_type=payload.storage_type.strip().upper(),
         capacity=payload.capacity,
+        maximum_weight=payload.maximum_weight,
+        maximum_volume=payload.maximum_volume,
+        allowed_material_category=payload.allowed_material_category.strip() if payload.allowed_material_category else None,
+        hazardous_material_permitted=payload.hazardous_material_permitted,
+        temperature_requirement=payload.temperature_requirement.strip() if payload.temperature_requirement else None,
+        qr_identifier=f"LOC-{store.store_code}-{zone.zone_code}-{clean_code}",
         occupied_quantity=Decimal("0.0"),
-        status=payload.status.strip().upper() if payload.status else "ACTIVE",
+        status=payload.status.strip().upper() if payload.status else "AVAILABLE",
         created_at=now,
         updated_at=now,
     )
@@ -1738,9 +1766,17 @@ async def create_zone_bin(
         bin_name=payload.bin_name.strip(),
         rack=payload.rack.strip() if payload.rack else None,
         shelf=payload.shelf.strip() if payload.shelf else None,
+        position=payload.position.strip() if payload.position else None,
+        storage_type=payload.storage_type.strip().upper(),
         capacity=payload.capacity,
+        maximum_weight=payload.maximum_weight,
+        maximum_volume=payload.maximum_volume,
+        allowed_material_category=payload.allowed_material_category.strip() if payload.allowed_material_category else None,
+        hazardous_material_permitted=payload.hazardous_material_permitted,
+        temperature_requirement=payload.temperature_requirement.strip() if payload.temperature_requirement else None,
+        qr_identifier=f"LOC-{store.store_code}-{zone.zone_code}-{clean_code}",
         occupied_quantity=Decimal("0.0"),
-        status=payload.status.strip().upper() if payload.status else "ACTIVE",
+        status=payload.status.strip().upper() if payload.status else "AVAILABLE",
         created_at=now,
         updated_at=now,
     )
@@ -1808,8 +1844,22 @@ async def update_bin(
         bin_obj.rack = payload.rack.strip() if payload.rack else None
     if payload.shelf is not None:
         bin_obj.shelf = payload.shelf.strip() if payload.shelf else None
+    if payload.position is not None:
+        bin_obj.position = payload.position.strip() if payload.position else None
+    if payload.storage_type is not None:
+        bin_obj.storage_type = payload.storage_type.strip().upper()
     if payload.capacity is not None:
         bin_obj.capacity = payload.capacity
+    if payload.maximum_weight is not None:
+        bin_obj.maximum_weight = payload.maximum_weight
+    if payload.maximum_volume is not None:
+        bin_obj.maximum_volume = payload.maximum_volume
+    if payload.allowed_material_category is not None:
+        bin_obj.allowed_material_category = payload.allowed_material_category.strip() or None
+    if payload.hazardous_material_permitted is not None:
+        bin_obj.hazardous_material_permitted = payload.hazardous_material_permitted
+    if payload.temperature_requirement is not None:
+        bin_obj.temperature_requirement = payload.temperature_requirement.strip() or None
     if payload.status is not None:
         bin_obj.status = payload.status.strip().upper()
 

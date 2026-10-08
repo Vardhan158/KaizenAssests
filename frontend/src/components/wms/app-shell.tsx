@@ -141,10 +141,12 @@ const dispatchNav = [
 ];
 
 const storeManagerNav = [
-  { label: "My Store", to: "/my-store", icon: Store },
-  { label: "Inventory", to: "/inventory", icon: Boxes },
-  { label: "Putaway Tasks", to: "/putaway-tasks", icon: PackageCheck },
-  { label: "Assembly Requisitions", to: "/warehouse/assembly-requisitions", icon: ClipboardList },
+  { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
+  { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
+  { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
+  { label: "Material Requests", to: "/inventory?tab=requests", icon: ClipboardList },
+  { label: "Picking", to: "/inventory?tab=picking", icon: ListOrdered },
+  { label: "Locations", to: "/inventory?tab=locations", icon: Building2 },
 ];
 
 const assemblyNav = [
@@ -159,19 +161,13 @@ const assemblyNav = [
 ];
 
 const warehouseNav = [
-  { label: "Dashboard", to: "/warehouse-dashboard", icon: LayoutDashboard },
-  { label: "Store Master", to: "/warehouse/stores", icon: Building2 },
-  { label: "Material Master", to: "/warehouse/materials", icon: Database },
-  { label: "Finished Goods Store", to: "/warehouse/finished-goods-store", icon: PackageCheck },
-  { label: "Finished Goods Requests", to: "/warehouse/finished-goods-requests", icon: Boxes },
-  { label: "Material Requests", to: "/warehouse/material-requests", icon: ClipboardList },
-  { label: "Dock Management", to: "/dock-management", icon: Warehouse },
-  { label: "Inventory", to: "/inventory", icon: Boxes },
-  { label: "Putaway Tasks", to: "/putaway-tasks", icon: PackageCheck },
+  { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
+  { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
+  { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
+  { label: "Material Requests", to: "/inventory?tab=requests", icon: ClipboardList },
   { label: "Assembly Requisitions", to: "/warehouse/assembly-requisitions", icon: ClipboardList },
-  { label: "Damage & Quarantine", to: "/warehouse/quarantine", icon: ShieldAlert },
-  { label: "Finished Goods Dispatch", to: "/warehouse/dispatch-tracking", icon: Truck },
-  { label: "Reports", to: "/reports", icon: BarChart3 },
+  { label: "Picking", to: "/inventory?tab=picking", icon: ListOrdered },
+  { label: "Locations", to: "/inventory?tab=locations", icon: Building2 },
 ];
 
 const supplierNav = [
@@ -393,11 +389,14 @@ export function AppShell({
           }
         };
         void fetchNotifications();
-        const interval = window.setInterval(fetchNotifications, 2000);
+        const unsubscribe = api.subscribeNotifications(notifRole, () => {
+          void fetchNotifications();
+          window.dispatchEvent(new CustomEvent("notifications:refresh"));
+        });
         window.addEventListener("notifications:refresh", fetchNotifications);
         window.addEventListener("focus", fetchNotifications);
         cleanup = () => {
-          window.clearInterval(interval);
+          unsubscribe();
           window.removeEventListener("notifications:refresh", fetchNotifications);
           window.removeEventListener("focus", fetchNotifications);
         };

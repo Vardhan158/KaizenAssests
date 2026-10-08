@@ -196,7 +196,7 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
   ) {
     return "/dispatch";
   }
-  return "/warehouse-dashboard";
+  return "/inventory";
 }
 
 export function requireAuth() {

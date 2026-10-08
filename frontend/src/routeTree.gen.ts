@@ -49,7 +49,6 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManagerDashboardRouteImport } from './routes/manager-dashboard'
 import { Route as MasterDataRouteImport } from './routes/master-data'
 import { Route as MyStoreRouteImport } from './routes/my-store'
-import { Route as NewSupplierRouteImport } from './routes/new-supplier'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
@@ -63,7 +62,6 @@ import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashb
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as AssemblyFinishedGoodsRequestsRouteImport } from './routes/assembly.finished-goods-requests'
 import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
-import { Route as PoCodeRouteImport } from './routes/po.$code'
 import { Route as QCodeRouteImport } from './routes/q.$code'
 import { Route as WarehouseAssemblyRequisitionsRouteImport } from './routes/warehouse.assembly-requisitions'
 import { Route as WarehouseDispatchTrackingRouteImport } from './routes/warehouse.dispatch-tracking'
@@ -281,11 +279,6 @@ const MyStoreRoute = MyStoreRouteImport.update({
   path: '/my-store',
   getParentRoute: () => rootRouteImport,
 } as any)
-const NewSupplierRoute = NewSupplierRouteImport.update({
-  id: '/new-supplier',
-  path: '/new-supplier',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const NotificationsRoute = NotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
@@ -350,11 +343,6 @@ const AssemblyFinishedGoodsRequestsRoute =
 const AssemblyRequestsRoute = AssemblyRequestsRouteImport.update({
   id: '/assembly/requests',
   path: '/assembly/requests',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PoCodeRoute = PoCodeRouteImport.update({
-  id: '/po/$code',
-  path: '/po/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
 const QCodeRoute = QCodeRouteImport.update({
@@ -454,7 +442,6 @@ export interface FileRoutesByFullPath {
   '/manager-dashboard': typeof ManagerDashboardRoute
   '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
-  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -468,7 +455,6 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
-  '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
@@ -521,7 +507,6 @@ export interface FileRoutesByTo {
   '/manager-dashboard': typeof ManagerDashboardRoute
   '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
-  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -535,7 +520,6 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
-  '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
@@ -589,7 +573,6 @@ export interface FileRoutesById {
   '/manager-dashboard': typeof ManagerDashboardRoute
   '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
-  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -603,7 +586,6 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
-  '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
@@ -658,7 +640,6 @@ export interface FileRouteTypes {
     | '/manager-dashboard'
     | '/master-data'
     | '/my-store'
-    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -672,7 +653,6 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/assembly/finished-goods-requests'
     | '/assembly/requests'
-    | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
@@ -725,7 +705,6 @@ export interface FileRouteTypes {
     | '/manager-dashboard'
     | '/master-data'
     | '/my-store'
-    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -739,7 +718,6 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/assembly/finished-goods-requests'
     | '/assembly/requests'
-    | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
@@ -792,7 +770,6 @@ export interface FileRouteTypes {
     | '/manager-dashboard'
     | '/master-data'
     | '/my-store'
-    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -806,7 +783,6 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/assembly/finished-goods-requests'
     | '/assembly/requests'
-    | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
@@ -860,7 +836,6 @@ export interface RootRouteChildren {
   ManagerDashboardRoute: typeof ManagerDashboardRoute
   MasterDataRoute: typeof MasterDataRoute
   MyStoreRoute: typeof MyStoreRoute
-  NewSupplierRoute: typeof NewSupplierRoute
   NotificationsRoute: typeof NotificationsRoute
   PutawayTasksRoute: typeof PutawayTasksRoute
   ReceivingRoute: typeof ReceivingRoute
@@ -874,7 +849,6 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   AssemblyFinishedGoodsRequestsRoute: typeof AssemblyFinishedGoodsRequestsRoute
   AssemblyRequestsRoute: typeof AssemblyRequestsRoute
-  PoCodeRoute: typeof PoCodeRoute
   QCodeRoute: typeof QCodeRoute
   WarehouseAssemblyRequisitionsRoute: typeof WarehouseAssemblyRequisitionsRoute
   WarehouseDispatchTrackingRoute: typeof WarehouseDispatchTrackingRoute
@@ -1169,13 +1143,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MyStoreRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/new-supplier': {
-      id: '/new-supplier'
-      path: '/new-supplier'
-      fullPath: '/new-supplier'
-      preLoaderRoute: typeof NewSupplierRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/notifications': {
       id: '/notifications'
       path: '/notifications'
@@ -1265,13 +1232,6 @@ declare module '@tanstack/react-router' {
       path: '/assembly/requests'
       fullPath: '/assembly/requests'
       preLoaderRoute: typeof AssemblyRequestsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/po/$code': {
-      id: '/po/$code'
-      path: '/po/$code'
-      fullPath: '/po/$code'
-      preLoaderRoute: typeof PoCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/q/$code': {
@@ -1388,7 +1348,6 @@ const rootRouteChildren: RootRouteChildren = {
   ManagerDashboardRoute: ManagerDashboardRoute,
   MasterDataRoute: MasterDataRoute,
   MyStoreRoute: MyStoreRoute,
-  NewSupplierRoute: NewSupplierRoute,
   NotificationsRoute: NotificationsRoute,
   PutawayTasksRoute: PutawayTasksRoute,
   ReceivingRoute: ReceivingRoute,
@@ -1402,7 +1361,6 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   AssemblyFinishedGoodsRequestsRoute: AssemblyFinishedGoodsRequestsRoute,
   AssemblyRequestsRoute: AssemblyRequestsRoute,
-  PoCodeRoute: PoCodeRoute,
   QCodeRoute: QCodeRoute,
   WarehouseAssemblyRequisitionsRoute: WarehouseAssemblyRequisitionsRoute,
   WarehouseDispatchTrackingRoute: WarehouseDispatchTrackingRoute,

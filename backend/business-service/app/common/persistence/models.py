@@ -3,10 +3,10 @@ SQLAlchemy ORM models shared across WMS modules (Supplier, PO, ASN, Material, No
 """
 from __future__ import annotations
 
-from datetime import date, datetime
-from decimal import Decimal
-from typing import List, Optional
 import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -20,18 +20,10 @@ rfq_supplier_link = Table(
     Column("rfq_id", GUID, ForeignKey("rfq.id"), primary_key=True),
     Column("supplier_id", GUID, ForeignKey("supplier.id"), primary_key=True),
 )
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
 
-
-class VendorTypeModel(Base):
-    __tablename__ = "vendor_type"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-
-
-class SupplierCategoryModel(Base):
-    __tablename__ = "supplier_category"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+from app.database.base import Base
 
 
 class SupplierModel(Base):

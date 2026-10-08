@@ -30,7 +30,7 @@ from app.events.outbox_repository import to_outbox_row
 from app.modules.storage.infrastructure.persistence.models import HandlingUnitModel, PutawayTaskModel, StorageLocationModel
 from app.modules.storage.application.location_strategy import recommend_storage_location
 from app.modules.store.infrastructure.persistence.models import StoreModel, StoreManagerUserModel
-from app.modules.dock.infrastructure.persistence.models import DockMasterModel
+from app.modules.dock.infrastructure.persistence.models import DockMasterModel, DockAllocationRequestModel
 from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
 from app.modules.gate.application.ocr_pipeline import EnterprisePoOcrEngine
 from app.modules.gate.domain.aggregate import GateEntry
@@ -1772,6 +1772,17 @@ async def dock_check_in(
     assignment.dock_arrival_at = arrived_at
     dock.status = "OCCUPIED"
     dock.updated_at = arrived_at
+    allocation_result = await uow.session.execute(
+        select(DockAllocationRequestModel).where(
+            DockAllocationRequestModel.existing_gate_pass_id == (model.gate_entry_number or str(model.id))
+        ).with_for_update()
+    )
+    allocation = allocation_result.scalar_one_or_none()
+    if allocation is not None:
+        if allocation.status != "DOCK_ASSIGNED":
+            raise HTTPException(status_code=409, detail=f"Dock allocation is {allocation.status}, expected DOCK_ASSIGNED")
+        allocation.status = "OCCUPIED"
+        allocation.arrived_at = arrived_at
     await _save_gate_entry(uow.session, entry)
     uow.session.add(NotificationModel(
         user_role="WAREHOUSE",
@@ -2425,6 +2436,17 @@ async def complete_receiving(
     await _save_gate_entry(uow.session, entry)
     uow.session.add(NotificationModel(user_role="WAREHOUSE", title="GRN Draft Created", message=f"{grn_number} is ready for review after receiving {entry.vehicle_plate}.", link="/grn"))
     uow.session.add(NotificationModel(user_role="WAREHOUSE", title="Putaway Tasks Created", message=f"{tasks_created} putaway task(s) were created for accepted quantities on {grn_number}.", link="/putaway-tasks"))
+    allocation_result = await uow.session.execute(
+        select(DockAllocationRequestModel).where(
+            DockAllocationRequestModel.existing_gate_pass_id == (model.gate_entry_number or str(model.id))
+        ).with_for_update()
+    )
+    allocation = allocation_result.scalar_one_or_none()
+    if allocation is not None:
+        if allocation.status != "OCCUPIED":
+            raise HTTPException(status_code=409, detail=f"Dock allocation is {allocation.status}, expected OCCUPIED")
+        from app.modules.dock.application.service import DockAllocationService
+        await DockAllocationService.complete_receiving(uow.session, allocation.id, user.username)
     await uow.session.flush()
     return {"gate_entry_id": entry_id, "status": entry.status.value, "grn_id": str(grn.id), "grn_number": grn_number, "grn_status": grn.status, "putaway_tasks_created": tasks_created, "putaway_status": "AWAITING_PUTAWAY", "completed_by": user.username, "completed_at": completed_at.isoformat()}
 
@@ -3164,10 +3186,12 @@ async def verify_gate_entry(
     if action == "APPROVE":
         entry.approve(supervisor_id=user.username, remarks=request.remarks)
         ge_num = getattr(entry, "gate_entry_number", None) or str(entry.id)
-        veh_plate = getattr(entry, "vehicle_plate", None) or getattr(entry, "vehicle_number", "Vehicle")
+        veh_plate = model.vehicle_number
+        if not veh_plate:
+            raise HTTPException(status_code=422, detail="Gate entry must have a vehicle number before approval")
         supplier = entry.ocr_result.supplier_name if (hasattr(entry, "ocr_result") and entry.ocr_result) else None
-        po_num = getattr(entry, "po_number", "N/A")
-        mat_desc = getattr(entry, "material_description", None) or "Inbound Goods"
+        po_num = model.po_number
+        mat_desc = model.material_description
         qty = getattr(entry, "total_quantity", None)
 
         from app.modules.dock.application.service import DockAllocationService
@@ -3244,6 +3268,22 @@ async def approve_gate_entry_by_qr(
         entry.approve_gate_entry(user.username)
         entry.move_to_inbound_queue()
         await _save_gate_entry(uow.session, entry)
+
+    # QR approval uses the same persisted dock request and notification path as
+    # supervisor approval; repeated scans remain idempotent.
+    if model.vehicle_number:
+        from app.modules.dock.application.service import DockAllocationService
+        await DockAllocationService.auto_create_allocation_request(
+            session=uow.session,
+            gate_pass_id=model.gate_entry_number or str(model.id),
+            vehicle_number=model.vehicle_number,
+            vendor_reference=model.ocr_supplier_name,
+            material_reference=model.ocr_product_material,
+            material_description=model.material_description,
+            quantity=model.ocr_quantity if model.ocr_quantity is not None else model.total_quantity,
+        )
+    else:
+        raise HTTPException(status_code=422, detail="Gate entry must have a vehicle number before approval")
 
     return _to_gate_entry_response(entry)
 
