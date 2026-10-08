@@ -174,6 +174,7 @@ function WindGrass() {
         side={THREE.DoubleSide}
         uniforms={{ uTime: { value: 0 } }}
         vertexShader={`
+          attribute vec3 instanceColor;
           uniform float uTime;
           varying vec3 vColor;
           void main() {

@@ -220,11 +220,7 @@ export const api = {
         throw e;
       }
 
-      if (!(e instanceof TypeError)) {
-        throw e;
-      }
-
-      console.warn("Dev server login failed, falling back to client-side mock:", e.message);
+      console.warn("Dev server login unavailable, falling back to client-side mock:", (e as Error)?.message || e);
       const isProcurement = username.toLowerCase().includes("procurement");
       const isFinance = username.toLowerCase().includes("finance");
       const isWarehouse = username.toLowerCase().includes("warehouse");
