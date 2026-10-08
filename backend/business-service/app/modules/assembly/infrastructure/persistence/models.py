@@ -16,18 +16,23 @@ class AssemblyOrderModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     order_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
-    material_request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("material_request.id", ondelete="RESTRICT"), unique=True, nullable=False)
-    pick_task_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("pick_task.id", ondelete="RESTRICT"), unique=True, nullable=False)
-    material_issue_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("material_issue.id", ondelete="RESTRICT"), unique=True, nullable=False)
-    request_number: Mapped[str] = mapped_column(String(64), nullable=False)
-    department: Mapped[str] = mapped_column(String(64), nullable=False)
+    material_request_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material_request.id", ondelete="RESTRICT"), nullable=True)
+    pick_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("pick_task.id", ondelete="RESTRICT"), nullable=True)
+    material_issue_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material_issue.id", ondelete="RESTRICT"), nullable=True)
+    request_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    department: Mapped[str] = mapped_column(String(64), nullable=False, default="Assembly")
+    product_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="MEDIUM")
+    product_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    bom_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("bill_of_materials.id", ondelete="SET NULL"), nullable=True, index=True)
+    bom_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="NORMAL")
     required_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     assigned_team: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     assembly_steps: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     items: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PLANNED")
     putaway_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PUTAWAY_PENDING", index=True)
     planned_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("1"))
     completed_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
@@ -37,6 +42,8 @@ class AssemblyOrderModel(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    material_received_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    material_received_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
@@ -213,4 +220,66 @@ class BillOfMaterialsItemModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
 
     bom: Mapped["BillOfMaterialsModel"] = relationship("BillOfMaterialsModel", back_populates="items")
+
+
+class AssemblyLineModel(Base):
+    __tablename__ = "assembly_line"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    work_centre_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class AssemblyRoutingRevisionModel(Base):
+    __tablename__ = "assembly_routing_revision"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    routing_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    product_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    revision_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    revision_number: Mapped[int] = mapped_column(nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE")
+    effective_from: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    operations: Mapped[list["AssemblyRoutingOperationModel"]] = relationship(
+        "AssemblyRoutingOperationModel", back_populates="routing_revision", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class AssemblyRoutingOperationModel(Base):
+    __tablename__ = "assembly_routing_operation"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    routing_revision_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("assembly_routing_revision.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    operation_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    sequence: Mapped[int] = mapped_column(nullable=False)
+    operation_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    work_centre_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, nullable=True)
+    expected_duration_minutes: Mapped[Optional[int]] = mapped_column(nullable=True)
+    required_skill: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    qc_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    work_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sop_reference: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    tool_requirement: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    safety_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    required_materials: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    process_parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    quality_checkpoints: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    routing_revision: Mapped["AssemblyRoutingRevisionModel"] = relationship(
+        "AssemblyRoutingRevisionModel", back_populates="operations"
+    )
 

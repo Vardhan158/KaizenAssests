@@ -15,8 +15,9 @@ import { GateEntryScannerScreen } from "./src/screens/GateEntryScannerScreen";
 import { GateEntrySuccessScreen } from "./src/screens/GateEntrySuccessScreen";
 import { RecentEntriesScreen } from "./src/screens/RecentEntriesScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
+import { AssemblyScreen } from "./src/screens/AssemblyScreen";
 
-export type TabType = "HOME" | "SCAN" | "VEHICLES" | "PROFILE";
+export type TabType = "HOME" | "SCAN" | "ASSEMBLY" | "VEHICLES" | "PROFILE";
 
 export default function App() {
   const [isBooting, setIsBooting] = useState(true);
@@ -107,6 +108,8 @@ export default function App() {
                   onLogout={handleLogout}
                   initialPoQuery={scannerPoQuery}
                 />
+              ) : activeTab === "ASSEMBLY" ? (
+                <AssemblyScreen />
               ) : activeTab === "VEHICLES" ? (
                 <RecentEntriesScreen
                   onBackToScan={() => handleTabPress("SCAN")}
@@ -132,6 +135,20 @@ export default function App() {
                 </Text>
                 <Text style={tw`text-[10px] tracking-wider ${activeTab === "HOME" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
                   HOME
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={tw`items-center justify-center py-1 px-2 rounded-lg ${
+                  activeTab === "ASSEMBLY" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                }`}
+                onPress={() => handleTabPress("ASSEMBLY")}
+              >
+                <Text style={tw`text-lg mb-0.5 ${activeTab === "ASSEMBLY" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
+                  ⚙️
+                </Text>
+                <Text style={tw`text-[10px] tracking-wider ${activeTab === "ASSEMBLY" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
+                  ASSEMBLY
                 </Text>
               </TouchableOpacity>
 
