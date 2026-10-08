@@ -1716,12 +1716,6 @@ export const api = {
   async markArrivalNotificationRead(_id: string): Promise<any> {
     return { status: "OK" };
   },
-        },
-      );
-    } catch {
-      return { success: true };
-    }
-  },
 
   async markAllArrivalNotificationsRead(): Promise<any> {
     try {
