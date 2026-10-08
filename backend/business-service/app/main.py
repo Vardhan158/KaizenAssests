@@ -785,21 +785,41 @@ async def lifespan(app: FastAPI):
             await run_ddl("""
                 CREATE TABLE IF NOT EXISTS material_stock (
                     id UUID PRIMARY KEY,
-                    material_code VARCHAR(64) UNIQUE NOT NULL,
-                    material_name VARCHAR(255) NOT NULL,
-                    category VARCHAR(128) NOT NULL,
-                    on_hand NUMERIC(18, 4) NOT NULL DEFAULT 0,
-                    allocated NUMERIC(18, 4) NOT NULL DEFAULT 0,
-                    available NUMERIC(18, 4) NOT NULL DEFAULT 0,
-                    uom VARCHAR(32) NOT NULL DEFAULT 'PCS',
-                    warehouse_id VARCHAR(64) NOT NULL,
-                    reorder_point NUMERIC(18, 4) NOT NULL DEFAULT 10,
+                    material_code VARCHAR(64) NOT NULL,
+                    material_name VARCHAR(255),
+                    category VARCHAR(128),
+                    on_hand NUMERIC(18, 4) DEFAULT 0,
+                    allocated NUMERIC(18, 4) DEFAULT 0,
+                    available NUMERIC(18, 4) DEFAULT 0,
+                    on_hand_quantity NUMERIC(18, 4) DEFAULT 0,
+                    available_quantity NUMERIC(18, 4) DEFAULT 0,
+                    reserved_quantity NUMERIC(18, 4) DEFAULT 0,
+                    quarantine_quantity NUMERIC(18, 4) DEFAULT 0,
+                    uom VARCHAR(32) DEFAULT 'PCS',
+                    warehouse_id VARCHAR(64) DEFAULT 'MAIN',
+                    reorder_point NUMERIC(18, 4) DEFAULT 10,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            logger.debug("Ensured material_stock table exists")
+            for col in [
+                ("on_hand_quantity", "NUMERIC(18, 4) DEFAULT 0"),
+                ("available_quantity", "NUMERIC(18, 4) DEFAULT 0"),
+                ("reserved_quantity", "NUMERIC(18, 4) DEFAULT 0"),
+                ("quarantine_quantity", "NUMERIC(18, 4) DEFAULT 0"),
+                ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"),
+            ]:
+                try:
+                    await run_ddl(f"ALTER TABLE material_stock ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}")
+                except Exception: pass
+
+            try:
+                await run_ddl("UPDATE material_stock SET on_hand_quantity = on_hand WHERE (on_hand_quantity IS NULL OR on_hand_quantity = 0) AND on_hand IS NOT NULL AND on_hand > 0")
+                await run_ddl("UPDATE material_stock SET available_quantity = available WHERE (available_quantity IS NULL OR available_quantity = 0) AND available IS NOT NULL AND available > 0")
+            except Exception: pass
+            logger.debug("Ensured material_stock table and columns exist")
         except Exception as e:
-            logger.warning(f"Failed to create material_stock table: {e}")
+            logger.warning(f"Failed to create/alter material_stock table: {e}")
 
         try:
             await run_ddl("""
