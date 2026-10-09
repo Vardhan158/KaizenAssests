@@ -67,6 +67,46 @@ export async function mobileRequest<T>(
 }
 
 export const mobileApi = {
+  // Assembly / production shop-floor operations
+  async getAssemblyDashboard(): Promise<any> {
+    return mobileRequest<any>("/api/v1/assembly/dashboard");
+  },
+
+  async getAssemblyOrders(): Promise<any[]> {
+    const response = await mobileRequest<any>("/api/v1/assembly/orders");
+    return Array.isArray(response) ? response : response.orders || response.items || [];
+  },
+
+  async getAssemblyOperations(orderId: string): Promise<any[]> {
+    const response = await mobileRequest<any>(`/api/v1/assembly/orders/${orderId}/operations`);
+    return response.operations || [];
+  },
+
+  async getAssemblyOrder(orderId: string): Promise<any> {
+    return mobileRequest<any>(`/api/v1/assembly/orders/${orderId}`);
+  },
+
+  async updateAssemblyOrderStatus(orderId: string, status: string): Promise<any> {
+    return mobileRequest<any>(`/api/v1/assembly/orders/${orderId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  async updateAssemblyStep(orderId: string, stepId: string, status: "IN_PROGRESS" | "COMPLETED"): Promise<any> {
+    return mobileRequest<any>(`/api/v1/assembly/orders/${orderId}/steps/${stepId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  async updateAssemblyProgress(orderId: string, completedQuantity: number): Promise<any> {
+    return mobileRequest<any>(`/api/v1/assembly/orders/${orderId}/progress`, {
+      method: "PATCH",
+      body: JSON.stringify({ completed_quantity: completedQuantity }),
+    });
+  },
+
   // Check backend health
   async checkHealth(): Promise<boolean> {
     const controller = new AbortController();

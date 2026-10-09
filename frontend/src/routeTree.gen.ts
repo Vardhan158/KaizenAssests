@@ -11,21 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AssemblyDashboardRouteImport } from './routes/assembly-dashboard'
-import { Route as AssemblyFinishedGoodsRouteImport } from './routes/assembly-finished-goods'
-import { Route as AssemblyGenealogyRouteImport } from './routes/assembly-genealogy'
-import { Route as AssemblyMaterialConsumptionRouteImport } from './routes/assembly-material-consumption'
-import { Route as AssemblyMaterialIssuesRouteImport } from './routes/assembly-material-issues'
-import { Route as AssemblyMaterialRequestsRouteImport } from './routes/assembly-material-requests'
-import { Route as AssemblyMaterialRequirementsRouteImport } from './routes/assembly-material-requirements'
-import { Route as AssemblyMaterialReservationsRouteImport } from './routes/assembly-material-reservations'
-import { Route as AssemblyOrdersRouteImport } from './routes/assembly-orders'
-import { Route as AssemblyProgressRouteImport } from './routes/assembly-progress'
-import { Route as AssemblyQualityInspectionRouteImport } from './routes/assembly-quality-inspection'
-import { Route as AssemblyReportsRouteImport } from './routes/assembly-reports'
-import { Route as AssemblyReworkRouteImport } from './routes/assembly-rework'
-import { Route as AssemblyScrapWastageRouteImport } from './routes/assembly-scrap-wastage'
-import { Route as AssemblyWorkOrdersRouteImport } from './routes/assembly-work-orders'
-import { Route as AssemblyWorkforceRouteImport } from './routes/assembly-workforce'
 import { Route as DamageClaimsRouteImport } from './routes/damage-claims'
 import { Route as DispatchRouteImport } from './routes/dispatch'
 import { Route as DispatchDriversRouteImport } from './routes/dispatch-drivers'
@@ -49,6 +34,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManagerDashboardRouteImport } from './routes/manager-dashboard'
 import { Route as MasterDataRouteImport } from './routes/master-data'
 import { Route as MyStoreRouteImport } from './routes/my-store'
+import { Route as NewSupplierRouteImport } from './routes/new-supplier'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
@@ -60,8 +46,13 @@ import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
 import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashboard'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
-import { Route as AssemblyFinishedGoodsRequestsRouteImport } from './routes/assembly.finished-goods-requests'
+import { Route as AssemblyFinishedGoodsRouteImport } from './routes/assembly.finished-goods'
+import { Route as AssemblyMaterialRequestsRouteImport } from './routes/assembly.material-requests'
+import { Route as AssemblyOrdersRouteImport } from './routes/assembly.orders'
+import { Route as AssemblyProductionRouteImport } from './routes/assembly.production'
+import { Route as AssemblyQualityRouteImport } from './routes/assembly.quality'
 import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
+import { Route as PoCodeRouteImport } from './routes/po.$code'
 import { Route as QCodeRouteImport } from './routes/q.$code'
 import { Route as WarehouseAssemblyRequisitionsRouteImport } from './routes/warehouse.assembly-requisitions'
 import { Route as WarehouseDispatchTrackingRouteImport } from './routes/warehouse.dispatch-tracking'
@@ -81,86 +72,6 @@ const IndexRoute = IndexRouteImport.update({
 const AssemblyDashboardRoute = AssemblyDashboardRouteImport.update({
   id: '/assembly-dashboard',
   path: '/assembly-dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyFinishedGoodsRoute = AssemblyFinishedGoodsRouteImport.update({
-  id: '/assembly-finished-goods',
-  path: '/assembly-finished-goods',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyGenealogyRoute = AssemblyGenealogyRouteImport.update({
-  id: '/assembly-genealogy',
-  path: '/assembly-genealogy',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyMaterialConsumptionRoute =
-  AssemblyMaterialConsumptionRouteImport.update({
-    id: '/assembly-material-consumption',
-    path: '/assembly-material-consumption',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AssemblyMaterialIssuesRoute = AssemblyMaterialIssuesRouteImport.update({
-  id: '/assembly-material-issues',
-  path: '/assembly-material-issues',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyMaterialRequestsRoute =
-  AssemblyMaterialRequestsRouteImport.update({
-    id: '/assembly-material-requests',
-    path: '/assembly-material-requests',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AssemblyMaterialRequirementsRoute =
-  AssemblyMaterialRequirementsRouteImport.update({
-    id: '/assembly-material-requirements',
-    path: '/assembly-material-requirements',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AssemblyMaterialReservationsRoute =
-  AssemblyMaterialReservationsRouteImport.update({
-    id: '/assembly-material-reservations',
-    path: '/assembly-material-reservations',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AssemblyOrdersRoute = AssemblyOrdersRouteImport.update({
-  id: '/assembly-orders',
-  path: '/assembly-orders',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyProgressRoute = AssemblyProgressRouteImport.update({
-  id: '/assembly-progress',
-  path: '/assembly-progress',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyQualityInspectionRoute =
-  AssemblyQualityInspectionRouteImport.update({
-    id: '/assembly-quality-inspection',
-    path: '/assembly-quality-inspection',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AssemblyReportsRoute = AssemblyReportsRouteImport.update({
-  id: '/assembly-reports',
-  path: '/assembly-reports',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyReworkRoute = AssemblyReworkRouteImport.update({
-  id: '/assembly-rework',
-  path: '/assembly-rework',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyScrapWastageRoute = AssemblyScrapWastageRouteImport.update({
-  id: '/assembly-scrap-wastage',
-  path: '/assembly-scrap-wastage',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyWorkOrdersRoute = AssemblyWorkOrdersRouteImport.update({
-  id: '/assembly-work-orders',
-  path: '/assembly-work-orders',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssemblyWorkforceRoute = AssemblyWorkforceRouteImport.update({
-  id: '/assembly-workforce',
-  path: '/assembly-workforce',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DamageClaimsRoute = DamageClaimsRouteImport.update({
@@ -279,6 +190,11 @@ const MyStoreRoute = MyStoreRouteImport.update({
   path: '/my-store',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NewSupplierRoute = NewSupplierRouteImport.update({
+  id: '/new-supplier',
+  path: '/new-supplier',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NotificationsRoute = NotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
@@ -334,15 +250,40 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/admin/users',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AssemblyFinishedGoodsRequestsRoute =
-  AssemblyFinishedGoodsRequestsRouteImport.update({
-    id: '/assembly/finished-goods-requests',
-    path: '/assembly/finished-goods-requests',
+const AssemblyFinishedGoodsRoute = AssemblyFinishedGoodsRouteImport.update({
+  id: '/assembly/finished-goods',
+  path: '/assembly/finished-goods',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssemblyMaterialRequestsRoute =
+  AssemblyMaterialRequestsRouteImport.update({
+    id: '/assembly/material-requests',
+    path: '/assembly/material-requests',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AssemblyOrdersRoute = AssemblyOrdersRouteImport.update({
+  id: '/assembly/orders',
+  path: '/assembly/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssemblyProductionRoute = AssemblyProductionRouteImport.update({
+  id: '/assembly/production',
+  path: '/assembly/production',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssemblyQualityRoute = AssemblyQualityRouteImport.update({
+  id: '/assembly/quality',
+  path: '/assembly/quality',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AssemblyRequestsRoute = AssemblyRequestsRouteImport.update({
   id: '/assembly/requests',
   path: '/assembly/requests',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PoCodeRoute = PoCodeRouteImport.update({
+  id: '/po/$code',
+  path: '/po/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
 const QCodeRoute = QCodeRouteImport.update({
@@ -404,21 +345,6 @@ const SupplierAsnsNewRoute = SupplierAsnsNewRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
-  '/assembly-finished-goods': typeof AssemblyFinishedGoodsRoute
-  '/assembly-genealogy': typeof AssemblyGenealogyRoute
-  '/assembly-material-consumption': typeof AssemblyMaterialConsumptionRoute
-  '/assembly-material-issues': typeof AssemblyMaterialIssuesRoute
-  '/assembly-material-requests': typeof AssemblyMaterialRequestsRoute
-  '/assembly-material-requirements': typeof AssemblyMaterialRequirementsRoute
-  '/assembly-material-reservations': typeof AssemblyMaterialReservationsRoute
-  '/assembly-orders': typeof AssemblyOrdersRoute
-  '/assembly-progress': typeof AssemblyProgressRoute
-  '/assembly-quality-inspection': typeof AssemblyQualityInspectionRoute
-  '/assembly-reports': typeof AssemblyReportsRoute
-  '/assembly-rework': typeof AssemblyReworkRoute
-  '/assembly-scrap-wastage': typeof AssemblyScrapWastageRoute
-  '/assembly-work-orders': typeof AssemblyWorkOrdersRoute
-  '/assembly-workforce': typeof AssemblyWorkforceRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
   '/dispatch-drivers': typeof DispatchDriversRoute
@@ -442,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/manager-dashboard': typeof ManagerDashboardRoute
   '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
+  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -453,8 +380,13 @@ export interface FileRoutesByFullPath {
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
   '/admin/users': typeof AdminUsersRoute
-  '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
+  '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
+  '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
+  '/assembly/orders': typeof AssemblyOrdersRoute
+  '/assembly/production': typeof AssemblyProductionRoute
+  '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
+  '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
@@ -469,21 +401,6 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
-  '/assembly-finished-goods': typeof AssemblyFinishedGoodsRoute
-  '/assembly-genealogy': typeof AssemblyGenealogyRoute
-  '/assembly-material-consumption': typeof AssemblyMaterialConsumptionRoute
-  '/assembly-material-issues': typeof AssemblyMaterialIssuesRoute
-  '/assembly-material-requests': typeof AssemblyMaterialRequestsRoute
-  '/assembly-material-requirements': typeof AssemblyMaterialRequirementsRoute
-  '/assembly-material-reservations': typeof AssemblyMaterialReservationsRoute
-  '/assembly-orders': typeof AssemblyOrdersRoute
-  '/assembly-progress': typeof AssemblyProgressRoute
-  '/assembly-quality-inspection': typeof AssemblyQualityInspectionRoute
-  '/assembly-reports': typeof AssemblyReportsRoute
-  '/assembly-rework': typeof AssemblyReworkRoute
-  '/assembly-scrap-wastage': typeof AssemblyScrapWastageRoute
-  '/assembly-work-orders': typeof AssemblyWorkOrdersRoute
-  '/assembly-workforce': typeof AssemblyWorkforceRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
   '/dispatch-drivers': typeof DispatchDriversRoute
@@ -507,6 +424,7 @@ export interface FileRoutesByTo {
   '/manager-dashboard': typeof ManagerDashboardRoute
   '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
+  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -518,8 +436,13 @@ export interface FileRoutesByTo {
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
   '/admin/users': typeof AdminUsersRoute
-  '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
+  '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
+  '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
+  '/assembly/orders': typeof AssemblyOrdersRoute
+  '/assembly/production': typeof AssemblyProductionRoute
+  '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
+  '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
@@ -535,21 +458,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
-  '/assembly-finished-goods': typeof AssemblyFinishedGoodsRoute
-  '/assembly-genealogy': typeof AssemblyGenealogyRoute
-  '/assembly-material-consumption': typeof AssemblyMaterialConsumptionRoute
-  '/assembly-material-issues': typeof AssemblyMaterialIssuesRoute
-  '/assembly-material-requests': typeof AssemblyMaterialRequestsRoute
-  '/assembly-material-requirements': typeof AssemblyMaterialRequirementsRoute
-  '/assembly-material-reservations': typeof AssemblyMaterialReservationsRoute
-  '/assembly-orders': typeof AssemblyOrdersRoute
-  '/assembly-progress': typeof AssemblyProgressRoute
-  '/assembly-quality-inspection': typeof AssemblyQualityInspectionRoute
-  '/assembly-reports': typeof AssemblyReportsRoute
-  '/assembly-rework': typeof AssemblyReworkRoute
-  '/assembly-scrap-wastage': typeof AssemblyScrapWastageRoute
-  '/assembly-work-orders': typeof AssemblyWorkOrdersRoute
-  '/assembly-workforce': typeof AssemblyWorkforceRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
   '/dispatch-drivers': typeof DispatchDriversRoute
@@ -573,6 +481,7 @@ export interface FileRoutesById {
   '/manager-dashboard': typeof ManagerDashboardRoute
   '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
+  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -584,8 +493,13 @@ export interface FileRoutesById {
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
   '/admin/users': typeof AdminUsersRoute
-  '/assembly/finished-goods-requests': typeof AssemblyFinishedGoodsRequestsRoute
+  '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
+  '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
+  '/assembly/orders': typeof AssemblyOrdersRoute
+  '/assembly/production': typeof AssemblyProductionRoute
+  '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
+  '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
@@ -602,21 +516,6 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/assembly-dashboard'
-    | '/assembly-finished-goods'
-    | '/assembly-genealogy'
-    | '/assembly-material-consumption'
-    | '/assembly-material-issues'
-    | '/assembly-material-requests'
-    | '/assembly-material-requirements'
-    | '/assembly-material-reservations'
-    | '/assembly-orders'
-    | '/assembly-progress'
-    | '/assembly-quality-inspection'
-    | '/assembly-reports'
-    | '/assembly-rework'
-    | '/assembly-scrap-wastage'
-    | '/assembly-work-orders'
-    | '/assembly-workforce'
     | '/damage-claims'
     | '/dispatch'
     | '/dispatch-drivers'
@@ -640,6 +539,7 @@ export interface FileRouteTypes {
     | '/manager-dashboard'
     | '/master-data'
     | '/my-store'
+    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -651,8 +551,13 @@ export interface FileRouteTypes {
     | '/vehicle-queue'
     | '/warehouse-dashboard'
     | '/admin/users'
-    | '/assembly/finished-goods-requests'
+    | '/assembly/finished-goods'
+    | '/assembly/material-requests'
+    | '/assembly/orders'
+    | '/assembly/production'
+    | '/assembly/quality'
     | '/assembly/requests'
+    | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
@@ -667,21 +572,6 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/assembly-dashboard'
-    | '/assembly-finished-goods'
-    | '/assembly-genealogy'
-    | '/assembly-material-consumption'
-    | '/assembly-material-issues'
-    | '/assembly-material-requests'
-    | '/assembly-material-requirements'
-    | '/assembly-material-reservations'
-    | '/assembly-orders'
-    | '/assembly-progress'
-    | '/assembly-quality-inspection'
-    | '/assembly-reports'
-    | '/assembly-rework'
-    | '/assembly-scrap-wastage'
-    | '/assembly-work-orders'
-    | '/assembly-workforce'
     | '/damage-claims'
     | '/dispatch'
     | '/dispatch-drivers'
@@ -705,6 +595,7 @@ export interface FileRouteTypes {
     | '/manager-dashboard'
     | '/master-data'
     | '/my-store'
+    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -716,8 +607,13 @@ export interface FileRouteTypes {
     | '/vehicle-queue'
     | '/warehouse-dashboard'
     | '/admin/users'
-    | '/assembly/finished-goods-requests'
+    | '/assembly/finished-goods'
+    | '/assembly/material-requests'
+    | '/assembly/orders'
+    | '/assembly/production'
+    | '/assembly/quality'
     | '/assembly/requests'
+    | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
@@ -732,21 +628,6 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/assembly-dashboard'
-    | '/assembly-finished-goods'
-    | '/assembly-genealogy'
-    | '/assembly-material-consumption'
-    | '/assembly-material-issues'
-    | '/assembly-material-requests'
-    | '/assembly-material-requirements'
-    | '/assembly-material-reservations'
-    | '/assembly-orders'
-    | '/assembly-progress'
-    | '/assembly-quality-inspection'
-    | '/assembly-reports'
-    | '/assembly-rework'
-    | '/assembly-scrap-wastage'
-    | '/assembly-work-orders'
-    | '/assembly-workforce'
     | '/damage-claims'
     | '/dispatch'
     | '/dispatch-drivers'
@@ -770,6 +651,7 @@ export interface FileRouteTypes {
     | '/manager-dashboard'
     | '/master-data'
     | '/my-store'
+    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -781,8 +663,13 @@ export interface FileRouteTypes {
     | '/vehicle-queue'
     | '/warehouse-dashboard'
     | '/admin/users'
-    | '/assembly/finished-goods-requests'
+    | '/assembly/finished-goods'
+    | '/assembly/material-requests'
+    | '/assembly/orders'
+    | '/assembly/production'
+    | '/assembly/quality'
     | '/assembly/requests'
+    | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
@@ -798,21 +685,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AssemblyDashboardRoute: typeof AssemblyDashboardRoute
-  AssemblyFinishedGoodsRoute: typeof AssemblyFinishedGoodsRoute
-  AssemblyGenealogyRoute: typeof AssemblyGenealogyRoute
-  AssemblyMaterialConsumptionRoute: typeof AssemblyMaterialConsumptionRoute
-  AssemblyMaterialIssuesRoute: typeof AssemblyMaterialIssuesRoute
-  AssemblyMaterialRequestsRoute: typeof AssemblyMaterialRequestsRoute
-  AssemblyMaterialRequirementsRoute: typeof AssemblyMaterialRequirementsRoute
-  AssemblyMaterialReservationsRoute: typeof AssemblyMaterialReservationsRoute
-  AssemblyOrdersRoute: typeof AssemblyOrdersRoute
-  AssemblyProgressRoute: typeof AssemblyProgressRoute
-  AssemblyQualityInspectionRoute: typeof AssemblyQualityInspectionRoute
-  AssemblyReportsRoute: typeof AssemblyReportsRoute
-  AssemblyReworkRoute: typeof AssemblyReworkRoute
-  AssemblyScrapWastageRoute: typeof AssemblyScrapWastageRoute
-  AssemblyWorkOrdersRoute: typeof AssemblyWorkOrdersRoute
-  AssemblyWorkforceRoute: typeof AssemblyWorkforceRoute
   DamageClaimsRoute: typeof DamageClaimsRoute
   DispatchRoute: typeof DispatchRoute
   DispatchDriversRoute: typeof DispatchDriversRoute
@@ -836,6 +708,7 @@ export interface RootRouteChildren {
   ManagerDashboardRoute: typeof ManagerDashboardRoute
   MasterDataRoute: typeof MasterDataRoute
   MyStoreRoute: typeof MyStoreRoute
+  NewSupplierRoute: typeof NewSupplierRoute
   NotificationsRoute: typeof NotificationsRoute
   PutawayTasksRoute: typeof PutawayTasksRoute
   ReceivingRoute: typeof ReceivingRoute
@@ -847,8 +720,13 @@ export interface RootRouteChildren {
   VehicleQueueRoute: typeof VehicleQueueRoute
   WarehouseDashboardRoute: typeof WarehouseDashboardRoute
   AdminUsersRoute: typeof AdminUsersRoute
-  AssemblyFinishedGoodsRequestsRoute: typeof AssemblyFinishedGoodsRequestsRoute
+  AssemblyFinishedGoodsRoute: typeof AssemblyFinishedGoodsRoute
+  AssemblyMaterialRequestsRoute: typeof AssemblyMaterialRequestsRoute
+  AssemblyOrdersRoute: typeof AssemblyOrdersRoute
+  AssemblyProductionRoute: typeof AssemblyProductionRoute
+  AssemblyQualityRoute: typeof AssemblyQualityRoute
   AssemblyRequestsRoute: typeof AssemblyRequestsRoute
+  PoCodeRoute: typeof PoCodeRoute
   QCodeRoute: typeof QCodeRoute
   WarehouseAssemblyRequisitionsRoute: typeof WarehouseAssemblyRequisitionsRoute
   WarehouseDispatchTrackingRoute: typeof WarehouseDispatchTrackingRoute
@@ -875,111 +753,6 @@ declare module '@tanstack/react-router' {
       path: '/assembly-dashboard'
       fullPath: '/assembly-dashboard'
       preLoaderRoute: typeof AssemblyDashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-finished-goods': {
-      id: '/assembly-finished-goods'
-      path: '/assembly-finished-goods'
-      fullPath: '/assembly-finished-goods'
-      preLoaderRoute: typeof AssemblyFinishedGoodsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-genealogy': {
-      id: '/assembly-genealogy'
-      path: '/assembly-genealogy'
-      fullPath: '/assembly-genealogy'
-      preLoaderRoute: typeof AssemblyGenealogyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-material-consumption': {
-      id: '/assembly-material-consumption'
-      path: '/assembly-material-consumption'
-      fullPath: '/assembly-material-consumption'
-      preLoaderRoute: typeof AssemblyMaterialConsumptionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-material-issues': {
-      id: '/assembly-material-issues'
-      path: '/assembly-material-issues'
-      fullPath: '/assembly-material-issues'
-      preLoaderRoute: typeof AssemblyMaterialIssuesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-material-requests': {
-      id: '/assembly-material-requests'
-      path: '/assembly-material-requests'
-      fullPath: '/assembly-material-requests'
-      preLoaderRoute: typeof AssemblyMaterialRequestsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-material-requirements': {
-      id: '/assembly-material-requirements'
-      path: '/assembly-material-requirements'
-      fullPath: '/assembly-material-requirements'
-      preLoaderRoute: typeof AssemblyMaterialRequirementsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-material-reservations': {
-      id: '/assembly-material-reservations'
-      path: '/assembly-material-reservations'
-      fullPath: '/assembly-material-reservations'
-      preLoaderRoute: typeof AssemblyMaterialReservationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-orders': {
-      id: '/assembly-orders'
-      path: '/assembly-orders'
-      fullPath: '/assembly-orders'
-      preLoaderRoute: typeof AssemblyOrdersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-progress': {
-      id: '/assembly-progress'
-      path: '/assembly-progress'
-      fullPath: '/assembly-progress'
-      preLoaderRoute: typeof AssemblyProgressRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-quality-inspection': {
-      id: '/assembly-quality-inspection'
-      path: '/assembly-quality-inspection'
-      fullPath: '/assembly-quality-inspection'
-      preLoaderRoute: typeof AssemblyQualityInspectionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-reports': {
-      id: '/assembly-reports'
-      path: '/assembly-reports'
-      fullPath: '/assembly-reports'
-      preLoaderRoute: typeof AssemblyReportsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-rework': {
-      id: '/assembly-rework'
-      path: '/assembly-rework'
-      fullPath: '/assembly-rework'
-      preLoaderRoute: typeof AssemblyReworkRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-scrap-wastage': {
-      id: '/assembly-scrap-wastage'
-      path: '/assembly-scrap-wastage'
-      fullPath: '/assembly-scrap-wastage'
-      preLoaderRoute: typeof AssemblyScrapWastageRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-work-orders': {
-      id: '/assembly-work-orders'
-      path: '/assembly-work-orders'
-      fullPath: '/assembly-work-orders'
-      preLoaderRoute: typeof AssemblyWorkOrdersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assembly-workforce': {
-      id: '/assembly-workforce'
-      path: '/assembly-workforce'
-      fullPath: '/assembly-workforce'
-      preLoaderRoute: typeof AssemblyWorkforceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/damage-claims': {
@@ -1143,6 +916,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MyStoreRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/new-supplier': {
+      id: '/new-supplier'
+      path: '/new-supplier'
+      fullPath: '/new-supplier'
+      preLoaderRoute: typeof NewSupplierRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/notifications': {
       id: '/notifications'
       path: '/notifications'
@@ -1220,11 +1000,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/assembly/finished-goods-requests': {
-      id: '/assembly/finished-goods-requests'
-      path: '/assembly/finished-goods-requests'
-      fullPath: '/assembly/finished-goods-requests'
-      preLoaderRoute: typeof AssemblyFinishedGoodsRequestsRouteImport
+    '/assembly/finished-goods': {
+      id: '/assembly/finished-goods'
+      path: '/assembly/finished-goods'
+      fullPath: '/assembly/finished-goods'
+      preLoaderRoute: typeof AssemblyFinishedGoodsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assembly/material-requests': {
+      id: '/assembly/material-requests'
+      path: '/assembly/material-requests'
+      fullPath: '/assembly/material-requests'
+      preLoaderRoute: typeof AssemblyMaterialRequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assembly/orders': {
+      id: '/assembly/orders'
+      path: '/assembly/orders'
+      fullPath: '/assembly/orders'
+      preLoaderRoute: typeof AssemblyOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assembly/production': {
+      id: '/assembly/production'
+      path: '/assembly/production'
+      fullPath: '/assembly/production'
+      preLoaderRoute: typeof AssemblyProductionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assembly/quality': {
+      id: '/assembly/quality'
+      path: '/assembly/quality'
+      fullPath: '/assembly/quality'
+      preLoaderRoute: typeof AssemblyQualityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/assembly/requests': {
@@ -1232,6 +1040,13 @@ declare module '@tanstack/react-router' {
       path: '/assembly/requests'
       fullPath: '/assembly/requests'
       preLoaderRoute: typeof AssemblyRequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/po/$code': {
+      id: '/po/$code'
+      path: '/po/$code'
+      fullPath: '/po/$code'
+      preLoaderRoute: typeof PoCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/q/$code': {
@@ -1310,21 +1125,6 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AssemblyDashboardRoute: AssemblyDashboardRoute,
-  AssemblyFinishedGoodsRoute: AssemblyFinishedGoodsRoute,
-  AssemblyGenealogyRoute: AssemblyGenealogyRoute,
-  AssemblyMaterialConsumptionRoute: AssemblyMaterialConsumptionRoute,
-  AssemblyMaterialIssuesRoute: AssemblyMaterialIssuesRoute,
-  AssemblyMaterialRequestsRoute: AssemblyMaterialRequestsRoute,
-  AssemblyMaterialRequirementsRoute: AssemblyMaterialRequirementsRoute,
-  AssemblyMaterialReservationsRoute: AssemblyMaterialReservationsRoute,
-  AssemblyOrdersRoute: AssemblyOrdersRoute,
-  AssemblyProgressRoute: AssemblyProgressRoute,
-  AssemblyQualityInspectionRoute: AssemblyQualityInspectionRoute,
-  AssemblyReportsRoute: AssemblyReportsRoute,
-  AssemblyReworkRoute: AssemblyReworkRoute,
-  AssemblyScrapWastageRoute: AssemblyScrapWastageRoute,
-  AssemblyWorkOrdersRoute: AssemblyWorkOrdersRoute,
-  AssemblyWorkforceRoute: AssemblyWorkforceRoute,
   DamageClaimsRoute: DamageClaimsRoute,
   DispatchRoute: DispatchRoute,
   DispatchDriversRoute: DispatchDriversRoute,
@@ -1348,6 +1148,7 @@ const rootRouteChildren: RootRouteChildren = {
   ManagerDashboardRoute: ManagerDashboardRoute,
   MasterDataRoute: MasterDataRoute,
   MyStoreRoute: MyStoreRoute,
+  NewSupplierRoute: NewSupplierRoute,
   NotificationsRoute: NotificationsRoute,
   PutawayTasksRoute: PutawayTasksRoute,
   ReceivingRoute: ReceivingRoute,
@@ -1359,8 +1160,13 @@ const rootRouteChildren: RootRouteChildren = {
   VehicleQueueRoute: VehicleQueueRoute,
   WarehouseDashboardRoute: WarehouseDashboardRoute,
   AdminUsersRoute: AdminUsersRoute,
-  AssemblyFinishedGoodsRequestsRoute: AssemblyFinishedGoodsRequestsRoute,
+  AssemblyFinishedGoodsRoute: AssemblyFinishedGoodsRoute,
+  AssemblyMaterialRequestsRoute: AssemblyMaterialRequestsRoute,
+  AssemblyOrdersRoute: AssemblyOrdersRoute,
+  AssemblyProductionRoute: AssemblyProductionRoute,
+  AssemblyQualityRoute: AssemblyQualityRoute,
   AssemblyRequestsRoute: AssemblyRequestsRoute,
+  PoCodeRoute: PoCodeRoute,
   QCodeRoute: QCodeRoute,
   WarehouseAssemblyRequisitionsRoute: WarehouseAssemblyRequisitionsRoute,
   WarehouseDispatchTrackingRoute: WarehouseDispatchTrackingRoute,

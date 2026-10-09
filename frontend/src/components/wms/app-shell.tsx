@@ -64,7 +64,7 @@ function getUserInitials(user: UserInfo | null): string {
     .split(/[\s._-]+/)
     .filter(Boolean);
   if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
+    return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase();
   }
   return name.substring(0, 2).toUpperCase();
 }
@@ -117,10 +117,17 @@ function getUserRoleLabel(user: UserInfo | null): string {
   if (roles.includes("WAREHOUSE") || roles.includes("WAREHOUSE_MANAGER")) {
     return "Warehouse Manager";
   }
-  return roles[0].replace(/_/g, " ");
+  return roles[0]?.replace(/_/g, " ") ?? "User";
 }
 
-const grnNav = [
+type NavItem = {
+  label: string;
+  to: string;
+  icon: any;
+  count?: number;
+};
+
+const grnNav: NavItem[] = [
   { label: "Dashboard", to: "/grn?tab=dashboard", icon: LayoutDashboard },
   { label: "Create GRN", to: "/grn?tab=wizard", icon: PlusCircle },
   { label: "GRN History", to: "/grn?tab=records", icon: ClipboardList },
@@ -151,13 +158,10 @@ const storeManagerNav = [
 
 const assemblyNav = [
   { label: "Dashboard", to: "/assembly-dashboard", icon: LayoutDashboard },
-  { label: "Finished Goods Requests", to: "/assembly/finished-goods-requests", icon: PackageCheck },
-  { label: "Material Requests", to: "/assembly/requests", icon: ClipboardList },
-  { label: "Material/Pickup Status", to: "/assembly-material-issues", icon: PackageCheck },
-  { label: "Assembly Orders", to: "/assembly-orders", icon: Factory },
-  { label: "Production", to: "/assembly-progress", icon: ListOrdered },
-  { label: "Finished Goods", to: "/assembly-finished-goods", icon: Boxes },
-  { label: "Genealogy", to: "/assembly-genealogy", icon: GitFork },
+  { label: "Material Requests", to: "/assembly/material-requests", icon: Boxes },
+  { label: "Production", to: "/assembly/production", icon: Factory },
+  { label: "Quality Check", to: "/assembly/quality", icon: ShieldCheck },
+  { label: "Finished Goods", to: "/assembly/finished-goods", icon: PackageCheck },
 ];
 
 const warehouseNav = [
@@ -418,15 +422,7 @@ export function AppShell({
     (user?.roles?.includes("ASSEMBLY") ||
       user?.roles?.includes("ASSEMBLY_MANAGER") ||
       user?.roles?.includes("ASSEMBLY_OPERATOR"));
-  const isAssemblyRoute =
-    path === "/assembly-dashboard" ||
-    path === "/assembly-orders" ||
-    path.startsWith("/assembly/") ||
-    path === "/assembly-material-issues" ||
-    path === "/assembly-progress" ||
-    path === "/assembly-finished-goods" ||
-    path === "/assembly-genealogy" ||
-    path === "/assembly-reports";
+  const isAssemblyRoute = path === "/assembly-dashboard";
   const isStoreUser =
     mounted && (user?.roles?.includes("STORE_MANAGER") || user?.roles?.includes("STORE_KEEPER"));
   const isStoreRoute = path === "/my-store" || path.startsWith("/my-store");

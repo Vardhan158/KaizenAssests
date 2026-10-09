@@ -66,3 +66,5 @@ uploads/
 # Python caches and local tooling
 .ruff_cache/
 **/.env
+scratch/
+**/scratch/

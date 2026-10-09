@@ -1,7 +1,7 @@
 """
 FastAPI entrypoint for ams-wms-business-service.
 """
-# Reload triggered for seed-test-data endpoint registration - v5
+# Reload triggered for Notification router, Assembly, and seed-test-data registration
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +36,9 @@ from app.modules.storage.infrastructure.api.assembly_requisition_router import r
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.modules.store.infrastructure.api.router import router as store_router, zone_router, bin_router
 from app.modules.quarantine.infrastructure.api.router import router as quarantine_router
-from app.security.auth_router import router as auth_router
+from app.security.router import router as auth_router
+from app.security.auth_router import router as procurement_auth_router
+from app.modules.procurement.infrastructure.api.router import router as procurement_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -1623,6 +1625,9 @@ def create_app() -> FastAPI:
     app.include_router(damage_claims_router)
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
+    app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(procurement_auth_router)
+    app.include_router(procurement_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():
@@ -1636,7 +1641,6 @@ def create_app() -> FastAPI:
     app.include_router(inventory_router)
     app.include_router(storage_req_router)
     app.include_router(v1_inventory_router)
-    app.include_router(auth_router)
 
     from fastapi.staticfiles import StaticFiles
     import os
