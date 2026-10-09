@@ -141,8 +141,7 @@ function AssemblyMaterialRequestsPage() {
     product_code: "",
     description: "",
     components: [
-      { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
-      { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+      { material_code: "", material_name: "", quantity_per_unit: 1, uom: "PCS" },
     ],
   });
 
@@ -155,8 +154,7 @@ function AssemblyMaterialRequestsPage() {
       product_code: initialSku,
       description: "",
       components: [
-        { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
-        { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+        { material_code: "", material_name: "", quantity_per_unit: 1, uom: "PCS" },
       ],
     });
     setIsAddProductOpen(true);
@@ -287,10 +285,25 @@ function AssemblyMaterialRequestsPage() {
 
   const loadProducts = async () => {
     try {
-      const res = await api.getAssemblyProducts();
-      setProducts(res);
-      if (res.length > 0 && !formData.product_code) {
-        setFormData((prev) => ({ ...prev, product_code: res[0].product_code }));
+      const [productRows, materialRows] = await Promise.all([
+        api.getAssemblyProducts(),
+        api.getMaterialComponents(),
+      ]);
+      const existingCodes = new Set(productRows.map((p) => p.product_code.toUpperCase()));
+      const materialOptions: AssemblyProductOption[] = materialRows
+        .filter((m: any) => m.code && m.name && !existingCodes.has(String(m.code).toUpperCase()))
+        .map((m: any) => ({
+          id: `material-${m.code}`,
+          product_code: m.code,
+          product_name: m.name,
+          bom_number: "",
+          description: m.category || "Material",
+          uom: m.uom || "PCS",
+        }));
+      const allOptions = [...productRows, ...materialOptions];
+      setProducts(allOptions);
+      if (allOptions.length > 0 && !formData.product_code) {
+        setFormData((prev) => ({ ...prev, product_code: allOptions[0]?.product_code || "" }));
       }
     } catch (err: any) {
       console.error("Failed to load products master:", err);
@@ -350,9 +363,9 @@ function AssemblyMaterialRequestsPage() {
       toast.success(`Product '${created.product_name}' registered with BOM ${created.bom_number}!`);
       setIsAddProductOpen(false);
 
-      // Reload products list and auto-select newly created product
-      const updatedList = await api.getAssemblyProducts();
-      setProducts(updatedList);
+      // Reload the complete database-backed product/material list and
+      // auto-select the newly created product.
+      await loadProducts();
       setFormData((prev) => ({ ...prev, product_code: created.product_code }));
 
       // Reset new product form
@@ -361,8 +374,7 @@ function AssemblyMaterialRequestsPage() {
         product_code: "",
         description: "",
         components: [
-          { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
-          { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+          { material_code: "", material_name: "", quantity_per_unit: 1, uom: "PCS" },
         ],
       });
     } catch (err: any) {
@@ -928,7 +940,7 @@ function AssemblyMaterialRequestsPage() {
         {/* CREATE MATERIAL REQUEST MODAL */}
         {/* ========================================================================= */}
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogContent className="max-w-xl p-6 rounded-2xl">
+          <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl p-6 rounded-2xl">
             <DialogHeader className="border-b border-border/60 pb-3">
               <DialogTitle className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Boxes className="size-5 text-primary" />
@@ -946,16 +958,6 @@ function AssemblyMaterialRequestsPage() {
                   <label className="text-xs font-semibold text-foreground flex items-center gap-1">
                     Product to Manufacture <span className="text-destructive">*</span>
                   </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={openAddProductModal}
-                    className="h-6 px-2 text-xs font-semibold text-primary hover:text-primary hover:bg-primary/10 gap-1 rounded-lg"
-                  >
-                    <Plus className="size-3.5" />
-                    Add Product
-                  </Button>
                 </div>
                 <div className="flex items-center gap-2">
                   <select
@@ -1179,113 +1181,6 @@ function AssemblyMaterialRequestsPage() {
                       <Sparkles className="size-3.5 text-primary" />
                     </Button>
                   </div>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">Description (Optional)</label>
-                <Input
-                  type="text"
-                  placeholder="e.g. High-precision IoT environmental sensor controller"
-                  value={newProductData.description}
-                  onChange={(e) =>
-                    setNewProductData({ ...newProductData, description: e.target.value })
-                  }
-                  className="h-9 text-xs rounded-xl"
-                />
-              </div>
-
-              {/* Component Rows */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                    <Layers className="size-3.5 text-primary" />
-                    Bill of Materials Components ({newProductData.components.length})
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2 text-[11px] font-semibold text-primary hover:text-primary gap-1"
-                    onClick={() =>
-                      setNewProductData({
-                        ...newProductData,
-                        components: [
-                          ...newProductData.components,
-                          {
-                            material_code: `COMP-${newProductData.components.length + 1}`,
-                            material_name: `Component ${newProductData.components.length + 1}`,
-                            quantity_per_unit: 1,
-                            uom: "PCS",
-                          },
-                        ],
-                      })
-                    }
-                  >
-                    <Plus className="size-3" />
-                    Add Row
-                  </Button>
-                </div>
-
-                <div className="max-h-44 overflow-y-auto space-y-2 pr-1 rounded-xl border border-border/60 bg-muted/20 p-2.5">
-                  {newProductData.components.map((comp, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-card p-2 rounded-lg border border-border/50 text-xs">
-                      <div className="flex-1 space-y-1">
-                        <Input
-                          placeholder="Code (e.g. PCB-01)"
-                          value={comp.material_code}
-                          onChange={(e) => {
-                            const updated = [...newProductData.components];
-                            updated[idx].material_code = e.target.value.toUpperCase();
-                            setNewProductData({ ...newProductData, components: updated });
-                          }}
-                          required
-                          className="h-7 text-xs font-mono uppercase rounded-md"
-                        />
-                      </div>
-                      <div className="flex-[2] space-y-1">
-                        <Input
-                          placeholder="Description (e.g. Main Board)"
-                          value={comp.material_name}
-                          onChange={(e) => {
-                            const updated = [...newProductData.components];
-                            updated[idx].material_name = e.target.value;
-                            setNewProductData({ ...newProductData, components: updated });
-                          }}
-                          required
-                          className="h-7 text-xs rounded-md"
-                        />
-                      </div>
-                      <div className="w-16 space-y-1">
-                        <Input
-                          type="number"
-                          min="0.01"
-                          step="any"
-                          placeholder="Qty"
-                          value={comp.quantity_per_unit}
-                          onChange={(e) => {
-                            const updated = [...newProductData.components];
-                            updated[idx].quantity_per_unit = Number(e.target.value);
-                            setNewProductData({ ...newProductData, components: updated });
-                          }}
-                          required
-                          className="h-7 text-xs text-right font-mono rounded-md"
-                        />
-                      </div>
-                      {newProductData.components.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = newProductData.components.filter((_, i) => i !== idx);
-                            setNewProductData({ ...newProductData, components: updated });
-                          }}
-                          className="text-muted-foreground hover:text-destructive p-1"
-                        >
-                          <X className="size-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
                 </div>
               </div>
 

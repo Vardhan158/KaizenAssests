@@ -144,17 +144,34 @@ _custom_materials_store: list[dict] = []
 
 @preview_router.get("/materials")
 async def get_material_components(uow: UnitOfWork = Depends(get_uow)) -> list[dict]:
+    materials: list[dict] = []
     try:
         from app.common.persistence.models import MaterialModel
         res = await uow.session.execute(select(MaterialModel))
         db_mats = res.scalars().all()
-        if db_mats and len(db_mats) > 0:
-            db_list = [{"code": m.material_code, "name": m.material_name, "category": m.category, "uom": m.base_uom} for m in db_mats]
-            return db_list + _custom_materials_store
+        materials.extend(
+            {"code": m.material_code, "name": m.material_name, "category": m.category, "uom": m.base_uom}
+            for m in db_mats
+            if m.material_code and m.material_name
+        )
     except Exception:
         pass
 
-    return DEFAULT_MATERIAL_COMPONENTS + _custom_materials_store
+    # Keep the shared catalog visible even when the database already contains
+    # some materials. Database records remain authoritative for matching codes;
+    # catalog entries fill in items that have not been created in this database.
+    materials.extend(DEFAULT_MATERIAL_COMPONENTS)
+    materials.extend(_custom_materials_store)
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for material in materials:
+        key = str(material.get("code") or material.get("name") or "").strip().upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(material)
+    return merged
 
 
 @preview_router.post("/materials")
