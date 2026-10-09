@@ -1466,11 +1466,9 @@ export const api = {
 
   async getNextAsnNumber(): Promise<{ asnNumber: string }> {
     const pendingKey = "kaizen-pending-asn-number-v2";
-    if (typeof window !== "undefined") {
-      const pending = window.localStorage.getItem(pendingKey);
-      if (pending) return { asnNumber: pending };
-    }
     try {
+      // The database is authoritative. Do not reuse a cached pending number,
+      // because it can survive a backend data reset and skip the new sequence.
       const result = await request<any>(`${BUSINESS_API_URL}/api/v1/gate/asns/next-number`);
       if (typeof window !== "undefined" && result?.asnNumber) {
         window.localStorage.setItem(pendingKey, result.asnNumber);
