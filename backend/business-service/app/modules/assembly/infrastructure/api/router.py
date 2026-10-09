@@ -258,16 +258,25 @@ async def list_assembly_products(
     Get manufacturable products from Product Master / Bill of Materials in PostgreSQL.
     """
     async with uow:
+        # The request form must expose every product that has a BOM configured.
+        # Do not hide products merely because an older BOM row has a non-ACTIVE
+        # status; the BOM is still the source of truth for the components shown
+        # in the request preview.
         res = await uow.session.execute(
-            select(BillOfMaterialsModel).where(BillOfMaterialsModel.status == "ACTIVE").order_by(BillOfMaterialsModel.product_name)
+            select(BillOfMaterialsModel).order_by(BillOfMaterialsModel.product_name)
         )
         boms = res.scalars().all()
 
         products = []
+        seen_codes = set()
         for b in boms:
+            product_code = b.product_code or b.bom_number
+            if not product_code or product_code in seen_codes:
+                continue
+            seen_codes.add(product_code)
             products.append({
                 "id": str(b.id),
-                "product_code": b.product_code or b.bom_number,
+                "product_code": product_code,
                 "product_name": b.product_name,
                 "bom_number": b.bom_number,
                 "description": b.description or "",

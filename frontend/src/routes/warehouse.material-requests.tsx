@@ -7,7 +7,7 @@ export const Route = createFileRoute("/warehouse/material-requests")({
   component: MaterialRequestsPage,
 });
 
-export function MaterialRequestsPage(_props?: any) {
+function MaterialRequestsPage(_props?: any) {
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -26,4 +26,3 @@ export function MaterialRequestsPage(_props?: any) {
   );
 }
 
-export const WarehouseMaterialRequestsPage = MaterialRequestsPage;

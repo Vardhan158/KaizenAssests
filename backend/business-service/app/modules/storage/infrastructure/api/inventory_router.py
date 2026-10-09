@@ -814,7 +814,24 @@ async def get_warehouse_inventory_summary(
 
         bin_code_val = b_obj.bin_code if b_obj else (loc.bin if loc.bin and loc.bin != "DEFAULT" else "A03-02-04")
         loc_code_val = loc.location_code or bin_code_val
-        batch_num = bal.last_grn_number or f"BT-{m_code.replace('MAT-', '')}-101"
+        batch_details: list[dict[str, Any]] = []
+        try:
+            movement_rows = await uow.session.execute(
+                select(InventoryMovementHistoryModel.batch_lot, func.sum(InventoryMovementHistoryModel.quantity))
+                .where(
+                    InventoryMovementHistoryModel.movement_type == "PUTAWAY",
+                    InventoryMovementHistoryModel.material_code == m_code,
+                    InventoryMovementHistoryModel.to_bin_id == (loc.bin_id or (b_obj.id if b_obj else None)),
+                )
+                .group_by(InventoryMovementHistoryModel.batch_lot)
+            )
+            batch_details = [
+                {"batch_number": batch or "-", "quantity": float(quantity or 0), "uom": bal.uom}
+                for batch, quantity in movement_rows.all()
+            ]
+        except Exception:
+            batch_details = []
+        batch_num = (batch_details[0]["batch_number"] if batch_details else None) or bal.last_grn_number or f"BT-{m_code.replace('MAT-', '')}-101"
         supp_name = supplier_by_mat.get(m_code, "Precision Metal Supplies")
         grn_num = bal.last_grn_number or grn_by_mat.get(m_code, f"GRN-2026-{m_code[-3:]}")
 
@@ -843,6 +860,7 @@ async def get_warehouse_inventory_summary(
             "category": mat_obj.category if mat_obj else (stk_obj.category if stk_obj else "GENERAL"),
             "batch": batch_num,
             "batch_number": batch_num,
+            "batch_details": batch_details,
             "supplier": supp_name,
             "supplier_name": supp_name,
             "grn": grn_num,

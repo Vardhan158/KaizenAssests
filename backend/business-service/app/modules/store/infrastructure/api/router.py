@@ -1746,6 +1746,7 @@ async def create_zone_bin(
     store = await uow.session.get(StoreModel, zone.store_id)
     if not store:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent Store not found")
+    zone_code = zone.zone_code
 
     if not _is_warehouse_or_admin(user):
         raise HTTPException(
@@ -1774,7 +1775,7 @@ async def create_zone_bin(
         allowed_material_category=payload.allowed_material_category.strip() if payload.allowed_material_category else None,
         hazardous_material_permitted=payload.hazardous_material_permitted,
         temperature_requirement=payload.temperature_requirement.strip() if payload.temperature_requirement else None,
-        qr_identifier=f"LOC-{store.store_code}-{zone.zone_code}-{clean_code}",
+        qr_identifier=f"LOC-{store.store_code}-{zone_code}-{clean_code}",
         occupied_quantity=Decimal("0.0"),
         status=payload.status.strip().upper() if payload.status else "AVAILABLE",
         created_at=now,
@@ -1785,13 +1786,14 @@ async def create_zone_bin(
     try:
         await uow.session.flush()
         await uow.commit()
-        logger.info(f"Bin '{new_bin.bin_code}' created under Zone '{zone.zone_code}' by '{user.username}'")
+        await uow.session.refresh(new_bin)
+        logger.info(f"Bin '{new_bin.bin_code}' created under Zone '{zone_code}' by '{user.username}'")
         return _to_bin_response(new_bin)
     except IntegrityError:
         await uow.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Bin with code '{clean_code}' already exists in Zone '{zone.zone_code}'.",
+            detail=f"Bin with code '{clean_code}' already exists in Zone '{zone_code}'.",
         )
 
 
