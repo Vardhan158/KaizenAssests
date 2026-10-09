@@ -1107,6 +1107,13 @@ export const api = {
     const qs = params.toString() ? `?${params.toString()}` : "";
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions${qs}`);
   },
+  async getAssemblyMaterialRequests(search?: string, status?: string): Promise<any[]> {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (status) params.set("status", status);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests${qs}`);
+  },
   async getAssemblyRequisition(id: string): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}`,

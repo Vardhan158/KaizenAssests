@@ -22,11 +22,30 @@ function WarehouseAssemblyRequisitionsPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [requests, storeRows] = await Promise.all([
+      const [requests, materialRequests, storeRows] = await Promise.all([
         api.getAssemblyRequisitions("Assembly"),
+        api.getAssemblyMaterialRequests(),
         api.getStores(),
       ]);
-      setRows(Array.isArray(requests) ? requests : []);
+      const requisitionRows = Array.isArray(requests) ? requests : [];
+      const existingIds = new Set(requisitionRows.map((request: any) => String(request.id)));
+      const legacyRows = (Array.isArray(materialRequests) ? materialRequests : [])
+        .filter((request: any) => !existingIds.has(String(request.id)))
+        .map((request: any) => ({
+          ...request,
+          id: String(request.id),
+          requisition_number: request.request_number,
+          requested_by: request.requested_by || "Assembly",
+          priority: request.priority || "NORMAL",
+          items: (request.items || []).map((item: any) => ({
+            ...item,
+            requested_quantity: item.requested_quantity ?? item.quantity ?? 0,
+            available_quantity: item.available_quantity ?? 0,
+            reserved_quantity: item.reserved_quantity ?? 0,
+          })),
+          legacy_material_request: true,
+        }));
+      setRows([...requisitionRows, ...legacyRows]);
       setStores(Array.isArray(storeRows) ? storeRows.filter((store: any) => String(store.status).toUpperCase() === "ACTIVE") : []);
     } catch (error: any) {
       toast.error(error?.message || "Unable to load Assembly requisitions");
@@ -64,7 +83,7 @@ function WarehouseAssemblyRequisitionsPage() {
       ) : <div className="space-y-3">{rows.map((request) => {
         const id = String(request.id);
         const status = String(request.status || "").toUpperCase();
-        const canReview = ["PENDING", "SUBMITTED", "PARTIALLY_RESERVED"].includes(status);
+        const canReview = !request.legacy_material_request && ["PENDING", "SUBMITTED", "PARTIALLY_RESERVED"].includes(status);
         const hasReservation = (request.reservations || []).some((reservation: any) => Number(reservation.reserved_quantity) > 0);
         const selectedStore = storeChoice[id] || request.assigned_store_id || request.suggested_store_id || request.reservations?.find((r: any) => r.store_id)?.store_id || "";
         const isBusy = busyId === id;
