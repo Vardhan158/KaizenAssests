@@ -43,7 +43,7 @@ class AutoCreateAllocationRequest(BaseModel):
 class AllocateDockRequest(BaseModel):
     allocation_request_id: uuid.UUID
     dock_id: uuid.UUID
-    assigned_store_id: uuid.UUID
+    assigned_store_id: Optional[uuid.UUID] = None
     store_manager_id: Optional[str] = None
     store_manager_username: Optional[str] = None
     store_manager_name: Optional[str] = None

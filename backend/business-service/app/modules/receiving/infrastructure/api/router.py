@@ -317,6 +317,9 @@ async def create_grn_header(
                 status_code=422,
                 detail="PO Number is required for PO Receipt",
             )
+    elif request.receipt_type == "ASN_RECEIPT":
+        if not request.asn_number:
+            raise HTTPException(status_code=422, detail="ASN Number is required for ASN Receipt")
     elif request.receipt_type == "UNEXPECTED_DELIVERY":
         if not request.dock_number or not request.dock_number.strip():
             raise HTTPException(
@@ -341,6 +344,7 @@ async def create_grn_header(
         grn_id=request.grn_id,
         po_id=request.po_id if request.receipt_type == "PO_RECEIPT" else None,
         po_number=request.po_number if request.receipt_type == "PO_RECEIPT" else None,
+        asn_number=request.asn_number if request.receipt_type == "ASN_RECEIPT" else None,
         gate_entry_id=request.gate_entry_id,
         gate_entry_number=request.gate_entry_number,
         invoice_number=request.invoice_number,

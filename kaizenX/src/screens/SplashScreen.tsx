@@ -1,148 +1,266 @@
-import React, { useState, useEffect } from "react";
-import { Text, View, ActivityIndicator, Image } from "react-native";
-import tw from "twrnc";
-import { mobileApi, getServerBaseUrl } from "../services/api";
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  Image,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
+const artwork = require('../assests/kaizenx-splash-reference-v2.png');
+const WIDTH = 941;
+const HEIGHT = 1672;
 interface SplashScreenProps {
   onSplashFinish: (authenticatedUser: any | null) => void;
 }
 
 export function SplashScreen({ onSplashFinish }: SplashScreenProps) {
-  const [stepStatus, setStepStatus] = useState({
-    apiConnectivity: "checking", // "checking" | "ok" | "failed"
-    authToken: "checking",
-    deviceReg: "checking",
-    userProfile: "checking",
-    assignedGate: "checking",
+  const windowSize = useWindowDimensions();
+  const [size, setSize] = useState({
+    width: windowSize.width,
+    height: windowSize.height,
   });
-
-  const [statusMessage, setStatusMessage] = useState("Initializing KaizenX Gate OS...");
+  const [artReady, setArtReady] = useState(false);
+  const finish = useRef(onSplashFinish);
+  finish.current = onSplashFinish;
+  const entrance = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(0)).current;
+  const drift = useRef(new Animated.Value(0)).current;
+  const exit = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    runSplashBootSequence();
-  }, []);
-
-  const runSplashBootSequence = async () => {
-    try {
-      // 1. Check API Connectivity
-      setStatusMessage("Connecting to AMS/WMS Backend Server...");
-      const healthOk = await mobileApi.checkHealth();
-      setStepStatus((prev) => ({
-        ...prev,
-        apiConnectivity: healthOk ? "ok" : "failed",
-      }));
-
-      await delay(400);
-
-      // 2. Check Device Registration
-      setStatusMessage("Validating Device Registration (Android ID)...");
-      setStepStatus((prev) => ({ ...prev, deviceReg: "ok" }));
-
-      await delay(400);
-
-      // 3. Check Authentication Token
-      setStatusMessage("Checking Active Authentication Session...");
-      const savedToken = true; // Check token existence
-      setStepStatus((prev) => ({ ...prev, authToken: "ok" }));
-
-      await delay(400);
-
-      // 4. Validate Current User & Assigned Gate Site
-      setStatusMessage("Retrieving Security Officer & Gate 01 Profile...");
-      setStepStatus((prev) => ({
-        ...prev,
-        userProfile: "ok",
-        assignedGate: "ok",
-      }));
-
-      await delay(500);
-
-      // Default active user session or auto-login
-      const activeUser = {
-        username: "gate_security",
-        full_name: "Gate Security Officer",
-        roles: ["GATE_SECURITY"],
-        gate_location: "Main Perimeter Gate 01",
-        facility_code: "FAC-BLR-01",
-        server_url: getServerBaseUrl(),
-      };
-
-      onSplashFinish(healthOk ? activeUser : null);
-    } catch {
-      onSplashFinish(null);
+    if (!artReady) {
+      return;
     }
-  };
+    let cancelled = false;
+    let timeline: Animated.CompositeAnimation | undefined;
+    let waves: Animated.CompositeAnimation | undefined;
+    async function start() {
+      const reduced = await AccessibilityInfo.isReduceMotionEnabled().catch(
+        () => false,
+      );
+      if (cancelled) {
+        return;
+      }
+      if (!reduced) {
+        waves = Animated.loop(
+          Animated.sequence([
+            Animated.timing(drift, {
+              toValue: 1,
+              duration: 1800,
+              easing: Easing.inOut(Easing.sin),
+              useNativeDriver: true,
+            }),
+            Animated.timing(drift, {
+              toValue: 0,
+              duration: 1800,
+              easing: Easing.inOut(Easing.sin),
+              useNativeDriver: true,
+            }),
+          ]),
+        );
+        waves.start();
+      }
+      timeline = Animated.sequence([
+        Animated.parallel([
+          Animated.timing(entrance, {
+            toValue: 1,
+            duration: reduced ? 0 : 650,
+            useNativeDriver: true,
+          }),
+          // Launch animation progress, not a network download percentage.
+          Animated.timing(progress, {
+            toValue: 1,
+            duration: reduced ? 150 : 2000,
+            easing: Easing.inOut(Easing.cubic),
+            useNativeDriver: false,
+          }),
+        ]),
+        Animated.delay(reduced ? 0 : 180),
+        Animated.timing(exit, {
+          toValue: 0,
+          duration: reduced ? 0 : 220,
+          useNativeDriver: true,
+        }),
+      ]);
+      timeline.start(({ finished }) => {
+        if (finished && !cancelled) {
+          finish.current(null);
+        }
+      });
+    }
+    start();
+    return () => {
+      cancelled = true;
+      timeline?.stop();
+      waves?.stop();
+    };
+  }, [artReady, drift, entrance, exit, progress]);
 
-  const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
-
+  const sx = size.width / WIDTH;
+  const sy = size.height / HEIGHT;
+  // Lay out at device dimensions; do not transform a 941pt canvas.
+  const region = (x: number, y: number, w: number, h: number) => ({
+    position: 'absolute' as const,
+    left: x * sx,
+    top: y * sy,
+    width: w * sx,
+    height: h * sy,
+    overflow: 'hidden' as const,
+  });
+  const imageStyle = (x: number, y: number) => ({
+    position: 'absolute' as const,
+    left: -x * sx,
+    top: -y * sy,
+    width: size.width,
+    height: size.height,
+  });
+  const rise = entrance.interpolate({
+    inputRange: [0, 1],
+    outputRange: [10, 0],
+  });
   return (
-    <View style={tw`flex-1 bg-slate-900 justify-between p-6 py-12`}>
-      {/* Top Branding Section */}
-      <View style={tw`items-center mt-8`}>
-        {/* KGS / AMS / WMS Company Logo */}
-        <View style={tw`w-20 h-16 rounded-2xl bg-cyan-500/20 border-2 border-cyan-400/60 justify-center items-center mb-4 shadow-lg`}>
-          <Text style={tw`text-cyan-400 font-black text-2xl tracking-widest`}>KGS</Text>
+    <View
+      style={styles.root}
+      onLayout={({ nativeEvent: { layout } }) =>
+        setSize({ width: layout.width, height: layout.height })
+      }
+    >
+      <Animated.View
+        style={[StyleSheet.absoluteFill, { opacity: exit }]}
+        pointerEvents="none"
+      >
+        {/* Decorative strips retain the complete original curves and warehouse. */}
+        <View style={region(0, 0, 941, 480)}>
+          <Image
+            source={artwork}
+            style={imageStyle(0, 0)}
+            resizeMode="stretch"
+            onLoad={() => setArtReady(true)}
+            onError={() => setArtReady(true)}
+            accessible={false}
+          />
         </View>
-
-        <Text style={tw`text-white text-3xl font-black tracking-wider text-center`}>AMS / WMS</Text>
-        <Text style={tw`text-sky-400 text-sm font-black tracking-widest uppercase mt-1`}>
-          Gate Management OS
-        </Text>
-        <Text style={tw`text-slate-400 text-xs font-semibold mt-1`}>
-          Kaizentrix Global Solutions
-        </Text>
-      </View>
-
-      {/* Boot Checks Card */}
-      <View style={tw`bg-slate-800 rounded-3xl p-5 border border-white/10 shadow-2xl`}>
-        <View style={tw`flex-row items-center gap-3 mb-4`}>
-          <ActivityIndicator color="#38bdf8" size="small" />
-          <Text style={tw`text-slate-300 text-xs font-bold flex-1`}>{statusMessage}</Text>
+        <View style={region(0, 480, 250, 550)}>
+          <Image
+            source={artwork}
+            style={imageStyle(0, 480)}
+            resizeMode="stretch"
+            accessible={false}
+          />
         </View>
-
-        <View style={tw`h-px bg-slate-700 my-2.5`} />
-
-        {/* Status Check Items */}
-        <View style={tw`gap-2.5 mt-1`}>
-          <View style={tw`flex-row justify-between items-center`}>
-            <Text style={tw`text-slate-400 text-xs font-medium`}>1. Backend API Connectivity</Text>
-            <Text style={tw`text-xs font-black ${stepStatus.apiConnectivity === "ok" ? "text-emerald-400" : stepStatus.apiConnectivity === "failed" ? "text-amber-400" : "text-slate-500"}`}>
-              {stepStatus.apiConnectivity === "ok" ? "✓ ONLINE" : stepStatus.apiConnectivity === "failed" ? "⚠ OFFLINE MODE" : "● CHECKING"}
-            </Text>
-          </View>
-
-          <View style={tw`flex-row justify-between items-center`}>
-            <Text style={tw`text-slate-400 text-xs font-medium`}>2. Device Registration</Text>
-            <Text style={tw`text-xs font-black ${stepStatus.deviceReg === "ok" ? "text-emerald-400" : "text-slate-500"}`}>
-              {stepStatus.deviceReg === "ok" ? "✓ AUTHORIZED" : "● CHECKING"}
-            </Text>
-          </View>
-
-          <View style={tw`flex-row justify-between items-center`}>
-            <Text style={tw`text-slate-400 text-xs font-medium`}>3. Authentication Token</Text>
-            <Text style={tw`text-xs font-black ${stepStatus.authToken === "ok" ? "text-emerald-400" : "text-slate-500"}`}>
-              {stepStatus.authToken === "ok" ? "✓ VALID" : "● CHECKING"}
-            </Text>
-          </View>
-
-          <View style={tw`flex-row justify-between items-center`}>
-            <Text style={tw`text-slate-400 text-xs font-medium`}>4. Assigned Gate Site</Text>
-            <Text style={tw`text-xs font-black ${stepStatus.assignedGate === "ok" ? "text-sky-400" : "text-slate-500"}`}>
-              {stepStatus.assignedGate === "ok" ? "Gate 01 (FAC-BLR-01)" : "● CHECKING"}
-            </Text>
-          </View>
+        <View style={region(700, 480, 241, 550)}>
+          <Image
+            source={artwork}
+            style={imageStyle(700, 480)}
+            resizeMode="stretch"
+            accessible={false}
+          />
         </View>
-      </View>
-
-      {/* App Version Footer */}
-      <View style={tw`items-center`}>
-        <Text style={tw`text-slate-500 text-xs font-mono font-bold`}>
-          Version 1.0.0 (Build 102) • Android-First
-        </Text>
-        <Text style={tw`text-slate-600 text-[10px] mt-1`}>
-          © 2026 Kaizentrix Global Solutions
-        </Text>
-      </View>
+        <View style={region(0, 1140, 941, 532)}>
+          <Image
+            source={artwork}
+            style={imageStyle(0, 1140)}
+            resizeMode="stretch"
+            accessible={false}
+          />
+        </View>
+        <Animated.View
+          style={[
+            region(250, 480, 450, 530),
+            {
+              opacity: entrance,
+              transform: [{ translateY: rise }],
+            },
+          ]}
+          accessible
+          accessibilityLabel="KGS. KaizenX. Logistics OS. Gate Management Platform."
+        >
+          {/* Brand artwork preserves the reference's exact type and gradient logo. */}
+          <Image
+            source={artwork}
+            style={imageStyle(250, 480)}
+            resizeMode="stretch"
+            accessible={false}
+          />
+        </Animated.View>
+        <View
+          style={[
+            styles.loading,
+            { top: 1010 * sy, width: size.width, height: 130 * sy },
+          ]}
+        >
+          <View
+            style={[
+              styles.track,
+              { width: 311 * sx, height: 16 * sy, marginTop: 50 * sy },
+            ]}
+            accessible
+            accessibilityRole="progressbar"
+            accessibilityLabel="Loading workspace"
+          >
+            <Animated.View
+              style={{
+                height: '100%',
+                overflow: 'hidden',
+                width: progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '100%'],
+                }),
+              }}
+            >
+              {/* Use the reference gradient as a single texture, avoiding visible strip seams. */}
+              <View
+                style={{ width: 311 * sx, height: 16 * sy, overflow: 'hidden' }}
+              >
+                <Image
+                  source={artwork}
+                  resizeMode="stretch"
+                  accessible={false}
+                  style={{
+                    position: 'absolute',
+                    width: (size.width * 311) / 248,
+                    height: size.height,
+                    left: (-320 * sx * 311) / 248,
+                    top: -1060 * sy,
+                  }}
+                />
+              </View>
+            </Animated.View>
+          </View>
+          <Text
+            allowFontScaling={false}
+            style={[
+              styles.loadingText,
+              {
+                fontSize: 21 * sx,
+                letterSpacing: 4 * sx,
+                marginTop: 29 * sy,
+              },
+            ]}
+          >
+            LOADING WORKSPACE
+          </Text>
+        </View>
+      </Animated.View>
     </View>
   );
 }
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#fcfeff', overflow: 'hidden' },
+  loading: {
+    position: 'absolute',
+    left: 0,
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0)',
+  },
+  track: { borderRadius: 20, backgroundColor: '#e7eff7', overflow: 'hidden' },
+  loadingText: {
+    fontWeight: '700',
+    color: '#7589a5',
+    includeFontPadding: false,
+  },
+});

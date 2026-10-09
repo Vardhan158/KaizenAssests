@@ -393,6 +393,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
         *,
         po_id: str | None = None,
         po_number: str | None = None,
+        asn_number: str | None = None,
     ) -> Optional[AsnSnapshot]:
         """
         Return the newest ASN linked to the PO.
@@ -816,6 +817,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
         grn_id: str | None = None,
         po_id: str | None = None,
         po_number: str | None = None,
+        asn_number: str | None = None,
         gate_entry_id: str | None = None,
         gate_entry_number: str | None = None,
         invoice_number: str | None = None,
@@ -832,6 +834,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
         grn_uuid: uuid.UUID | None = _uuid_or_none(grn_id) if grn_id else None
         existing: GrnModel | None = None
         is_unexpected = receipt_type == "UNEXPECTED_DELIVERY"
+        asn_receipt = receipt_type == "ASN_RECEIPT"
 
         resolved_sup_name, resolved_sup_company = await _resolve_real_supplier_names(
             self._session,
@@ -880,14 +883,28 @@ class SqlAlchemyGrnRepository(GrnRepository):
         total_count = len(count_res.scalars().all()) + 1
         grn_num = f"GRN-{datestr}-{total_count:04d}"
 
-        po_uuid = None if is_unexpected else _uuid_or_none(po_id)
-        po_num_val = None if is_unexpected else po_number
+        po_uuid = None if is_unexpected or asn_receipt else _uuid_or_none(po_id)
+        po_num_val = None if is_unexpected or asn_receipt else po_number
         asn_id_val: uuid.UUID | None = None
-        asn_num_val: str | None = None
+        asn_num_val: str | None = asn_number if asn_receipt else None
         gate_id_val: uuid.UUID | None = _uuid_or_none(gate_entry_id) if gate_entry_id else None
         gate_num_val: str | None = gate_entry_number
 
-        if not is_unexpected and (po_uuid or po_number):
+        if asn_receipt and asn_number:
+            asn = (await self._session.execute(
+                select(AsnModel).where(AsnModel.asn_number == asn_number.strip()).order_by(AsnModel.created_at.desc())
+            )).scalars().first()
+            if asn:
+                asn_id_val = _uuid_or_none(asn.id)
+                asn_num_val = asn.asn_number
+                vehicle_number = vehicle_number or asn.vehicle_number
+                driver_name = driver_name or asn.driver_name
+                warehouse_id = warehouse_id or asn.warehouse_id
+                gate = await self.find_latest_gate_entry_for_asn(asn.id)
+                if gate:
+                    gate_id_val = _uuid_or_none(gate.id)
+                    gate_num_val = gate.gate_entry_number
+        if not is_unexpected and not asn_receipt and (po_uuid or po_number):
             asn = await self.find_latest_asn_for_po(po_id=po_id, po_number=po_number)
             if asn:
                 asn_id_val = _uuid_or_none(asn.id)

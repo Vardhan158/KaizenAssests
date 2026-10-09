@@ -97,6 +97,7 @@ export function SecureAssistant() {
     <>
       <button
         type="button"
+        suppressHydrationWarning
         aria-label="Open KaizenX assistant"
         title="KaizenX Assistant"
         onClick={() => setOpen(true)}

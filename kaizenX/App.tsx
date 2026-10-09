@@ -3,10 +3,10 @@
  * Kaizentrix Global Solutions
  */
 
-import React, { useState } from "react";
-import { StatusBar, View, Text, TouchableOpacity } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import tw from "twrnc";
+import React, { useState } from 'react';
+import { StatusBar, View, Text, TouchableOpacity } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import tw from 'twrnc';
 
 import { SplashScreen } from "./src/screens/SplashScreen";
 import { LoginScreen } from "./src/screens/auth/LoginScreen";
@@ -22,56 +22,58 @@ export type TabType = "HOME" | "SCAN" | "ASSEMBLY" | "VEHICLES" | "PROFILE";
 export default function App() {
   const [isBooting, setIsBooting] = useState(true);
   const [user, setUser] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<TabType>("HOME");
-  const [currentScreenOverride, setCurrentScreenOverride] = useState<"success" | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>('HOME');
+  const [currentScreenOverride, setCurrentScreenOverride] = useState<
+    'success' | null
+  >(null);
   const [lastEntryResult, setLastEntryResult] = useState<any | null>(null);
-  const [scannerPoQuery, setScannerPoQuery] = useState<string>("");
+  const [scannerPoQuery, setScannerPoQuery] = useState<string>('');
 
   const handleSplashFinish = (authenticatedUser: any | null) => {
     setUser(authenticatedUser);
     setIsBooting(false);
-    setActiveTab("HOME");
+    setActiveTab('HOME');
   };
 
   const handleLoginSuccess = (authenticatedUser: any) => {
     setUser(authenticatedUser);
-    setActiveTab("HOME");
+    setActiveTab('HOME');
     setCurrentScreenOverride(null);
   };
 
   const handleLogout = () => {
     setUser(null);
-    setActiveTab("HOME");
+    setActiveTab('HOME');
     setCurrentScreenOverride(null);
     setLastEntryResult(null);
-    setScannerPoQuery("");
+    setScannerPoQuery('');
   };
 
   const handleScanSuccess = (entryResult: any) => {
     setLastEntryResult(entryResult);
-    setCurrentScreenOverride("success");
+    setCurrentScreenOverride('success');
   };
 
   const handleNewScanFromSuccess = () => {
     setCurrentScreenOverride(null);
-    setScannerPoQuery("");
-    setActiveTab("SCAN");
+    setScannerPoQuery('');
+    setActiveTab('SCAN');
   };
 
   const handleStartEntryFromDashboard = (poOrAsnQuery: string) => {
     setScannerPoQuery(poOrAsnQuery);
     setCurrentScreenOverride(null);
-    setActiveTab("SCAN");
+    setActiveTab('SCAN');
   };
 
   const handleViewHistoryFromSuccess = () => {
     setCurrentScreenOverride(null);
-    setActiveTab("VEHICLES");
+    setActiveTab('VEHICLES');
   };
 
   const handleTabPress = (tab: TabType) => {
-    if (tab !== "SCAN") {
-      setScannerPoQuery("");
+    if (tab !== 'SCAN') {
+      setScannerPoQuery('');
     }
     setCurrentScreenOverride(null);
     setActiveTab(tab);
@@ -79,8 +81,13 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
-      <SafeAreaView style={tw`flex-1 bg-slate-900`}>
+      <StatusBar barStyle={isBooting ? 'dark-content' : 'light-content'} />
+      <SafeAreaView
+        style={[
+          tw`flex-1`,
+          { backgroundColor: isBooting ? '#fcfeff' : '#0f172a' },
+        ]}
+      >
         {isBooting ? (
           <SplashScreen onSplashFinish={handleSplashFinish} />
         ) : !user ? (
@@ -89,20 +96,20 @@ export default function App() {
           <View style={tw`flex-1`}>
             {/* Screen Content Container */}
             <View style={tw`flex-1`}>
-              {currentScreenOverride === "success" ? (
+              {currentScreenOverride === 'success' ? (
                 <GateEntrySuccessScreen
                   entryResult={lastEntryResult}
                   onNewScan={handleNewScanFromSuccess}
                   onViewHistory={handleViewHistoryFromSuccess}
                 />
-              ) : activeTab === "HOME" ? (
+              ) : activeTab === 'HOME' ? (
                 <HomeScreen
                   user={user}
-                  onNewEntry={() => handleTabPress("SCAN")}
-                  onViewVehicles={() => handleTabPress("VEHICLES")}
+                  onNewEntry={() => handleTabPress('SCAN')}
+                  onViewVehicles={() => handleTabPress('VEHICLES')}
                   onStartEntry={handleStartEntryFromDashboard}
                 />
-              ) : activeTab === "SCAN" ? (
+              ) : activeTab === 'SCAN' ? (
                 <GateEntryScannerScreen
                   onSuccess={handleScanSuccess}
                   onLogout={handleLogout}
@@ -112,28 +119,41 @@ export default function App() {
                 <AssemblyScreen />
               ) : activeTab === "VEHICLES" ? (
                 <RecentEntriesScreen
-                  onBackToScan={() => handleTabPress("SCAN")}
+                  onBackToScan={() => handleTabPress('SCAN')}
                 />
               ) : (
-                <ProfileScreen
-                  user={user}
-                  onLogout={handleLogout}
-                />
+                <ProfileScreen user={user} onLogout={handleLogout} />
               )}
             </View>
 
             {/* Bottom Tab Navigation Bar */}
-            <View style={tw`flex-row bg-slate-800 border-t border-slate-700 py-2 px-2.5 justify-around items-center`}>
+            <View
+              style={tw`flex-row bg-white border-t border-slate-100 rounded-t-3xl py-3 px-2.5 justify-around items-center shadow-lg`}
+            >
               <TouchableOpacity
                 style={tw`items-center justify-center py-1 px-3 rounded-lg ${
-                  activeTab === "HOME" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                  activeTab === 'HOME' && !currentScreenOverride
+                    ? 'bg-sky-100 rounded-2xl'
+                    : ''
                 }`}
-                onPress={() => handleTabPress("HOME")}
+                onPress={() => handleTabPress('HOME')}
               >
-                <Text style={tw`text-lg mb-0.5 ${activeTab === "HOME" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
+                <Text
+                  style={tw`text-lg mb-0.5 ${
+                    activeTab === 'HOME' && !currentScreenOverride
+                      ? 'opacity-100'
+                      : 'opacity-60'
+                  }`}
+                >
                   🏠
                 </Text>
-                <Text style={tw`text-[10px] tracking-wider ${activeTab === "HOME" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
+                <Text
+                  style={tw`text-[10px] tracking-wider ${
+                    activeTab === 'HOME' && !currentScreenOverride
+                      ? 'text-sky-400 font-black'
+                      : 'text-slate-400 font-extrabold'
+                  }`}
+                >
                   HOME
                 </Text>
               </TouchableOpacity>
@@ -154,42 +174,84 @@ export default function App() {
 
               <TouchableOpacity
                 style={tw`items-center justify-center py-1 px-3 rounded-lg ${
-                  activeTab === "SCAN" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                  activeTab === 'SCAN' && !currentScreenOverride
+                    ? 'bg-sky-100 rounded-2xl'
+                    : ''
                 }`}
-                onPress={() => handleTabPress("SCAN")}
+                onPress={() => handleTabPress('SCAN')}
               >
-                <Text style={tw`text-lg mb-0.5 ${activeTab === "SCAN" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
+                <Text
+                  style={tw`text-lg mb-0.5 ${
+                    activeTab === 'SCAN' && !currentScreenOverride
+                      ? 'opacity-100'
+                      : 'opacity-60'
+                  }`}
+                >
                   📷
                 </Text>
-                <Text style={tw`text-[10px] tracking-wider ${activeTab === "SCAN" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
+                <Text
+                  style={tw`text-[10px] tracking-wider ${
+                    activeTab === 'SCAN' && !currentScreenOverride
+                      ? 'text-sky-400 font-black'
+                      : 'text-slate-400 font-extrabold'
+                  }`}
+                >
                   SCAN
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={tw`items-center justify-center py-1 px-3 rounded-lg ${
-                  activeTab === "VEHICLES" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                  activeTab === 'VEHICLES' && !currentScreenOverride
+                    ? 'bg-sky-100 rounded-2xl'
+                    : ''
                 }`}
-                onPress={() => handleTabPress("VEHICLES")}
+                onPress={() => handleTabPress('VEHICLES')}
               >
-                <Text style={tw`text-lg mb-0.5 ${activeTab === "VEHICLES" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
+                <Text
+                  style={tw`text-lg mb-0.5 ${
+                    activeTab === 'VEHICLES' && !currentScreenOverride
+                      ? 'opacity-100'
+                      : 'opacity-60'
+                  }`}
+                >
                   🚛
                 </Text>
-                <Text style={tw`text-[10px] tracking-wider ${activeTab === "VEHICLES" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
+                <Text
+                  style={tw`text-[10px] tracking-wider ${
+                    activeTab === 'VEHICLES' && !currentScreenOverride
+                      ? 'text-sky-400 font-black'
+                      : 'text-slate-400 font-extrabold'
+                  }`}
+                >
                   VEHICLES
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={tw`items-center justify-center py-1 px-3 rounded-lg ${
-                  activeTab === "PROFILE" && !currentScreenOverride ? "bg-sky-500/15" : ""
+                  activeTab === 'PROFILE' && !currentScreenOverride
+                    ? 'bg-sky-100 rounded-2xl'
+                    : ''
                 }`}
-                onPress={() => handleTabPress("PROFILE")}
+                onPress={() => handleTabPress('PROFILE')}
               >
-                <Text style={tw`text-lg mb-0.5 ${activeTab === "PROFILE" && !currentScreenOverride ? "opacity-100" : "opacity-60"}`}>
+                <Text
+                  style={tw`text-lg mb-0.5 ${
+                    activeTab === 'PROFILE' && !currentScreenOverride
+                      ? 'opacity-100'
+                      : 'opacity-60'
+                  }`}
+                >
                   👤
                 </Text>
-                <Text style={tw`text-[10px] tracking-wider ${activeTab === "PROFILE" && !currentScreenOverride ? "text-sky-400 font-black" : "text-slate-400 font-extrabold"}`}>
+                <Text
+                  style={tw`text-[10px] tracking-wider ${
+                    activeTab === 'PROFILE' && !currentScreenOverride
+                      ? 'text-sky-400 font-black'
+                      : 'text-slate-400 font-extrabold'
+                  }`}
+                >
                   PROFILE
                 </Text>
               </TouchableOpacity>

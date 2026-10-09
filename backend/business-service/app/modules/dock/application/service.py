@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
+import json
 import uuid
 
 from fastapi import HTTPException, status
@@ -66,47 +67,27 @@ class DockAllocationService:
 
     @staticmethod
     async def sync_pending_gate_entries(session: AsyncSession) -> None:
-        """Auto-syncs any active Gate Entries that do not yet have a DockAllocationRequestModel."""
-        try:
-            from app.modules.gate.infrastructure.persistence.models import GateEntryModel
-            gate_entries_res = await session.execute(
-                select(GateEntryModel).where(
-                    GateEntryModel.assigned_dock_id == None,
-                    GateEntryModel.status.notin_(["REJECTED", "GATE_EXIT_COMPLETED", "EXIT_APPROVED", "DOCK_ASSIGNED", "OCCUPIED", "RELEASED"])
-                )
+        """Backfill only explicitly approved persisted gate entries through the normal notification path."""
+        from app.modules.gate.infrastructure.persistence.models import GateEntryModel
+        entries = (await session.execute(
+            select(GateEntryModel).where(
+                GateEntryModel.assigned_dock_id.is_(None),
+                GateEntryModel.status.in_(["PO_VERIFIED", "APPROVED", "GATE_ENTRY_APPROVED", "AWAITING_DOCK"]),
             )
-            entries = gate_entries_res.scalars().all()
-            for ge in entries:
-                ge_num = ge.gate_entry_number or str(ge.id)
-                veh_plate = getattr(ge, "vehicle_number", None) or getattr(ge, "vehicle_plate", None)
-                if not veh_plate:
-                    continue
-                supplier = ge.ocr_supplier_name or getattr(ge, "supplier_name", None)
-                mat_name = ge.ocr_product_material or getattr(ge, "material_description", None)
-                qty = Decimal(str(ge.ocr_quantity)) if ge.ocr_quantity is not None else (Decimal(str(ge.total_quantity)) if getattr(ge, "total_quantity", None) is not None else None)
-                
-                check_stmt = select(DockAllocationRequestModel).where(
-                    (DockAllocationRequestModel.existing_gate_pass_id == ge_num) |
-                    (DockAllocationRequestModel.existing_gate_pass_id == str(ge.id))
-                )
-                found = (await session.execute(check_stmt)).scalars().first()
-                if not found:
-                    req_model = DockAllocationRequestModel(
-                        existing_gate_pass_id=ge_num,
-                        vehicle_number=veh_plate,
-                        vendor_reference=supplier,
-                        material_reference=mat_name,
-                        material_description=mat_name,
-                        quantity=qty,
-                        security_approved_at=ge.created_at or datetime.now(timezone.utc),
-                        priority="NORMAL",
-                        status="AWAITING_DOCK",
-                    )
-                    session.add(req_model)
-                    await session.flush()
-            await session.flush()
-        except Exception:
-            pass
+        )).scalars().all()
+        for entry in entries:
+            if not entry.vehicle_number:
+                continue
+            await DockAllocationService.auto_create_allocation_request(
+                session=session,
+                gate_pass_id=entry.gate_entry_number or str(entry.id),
+                vehicle_number=entry.vehicle_number,
+                vendor_reference=entry.ocr_supplier_name,
+                material_reference=entry.ocr_product_material,
+                material_description=entry.ocr_product_material,
+                quantity=entry.ocr_quantity if entry.ocr_quantity is not None else 0,
+            )
+        await session.flush()
 
     @staticmethod
     async def get_overview_metrics(session: AsyncSession) -> dict:
@@ -214,6 +195,14 @@ class DockAllocationService:
             remarks=f"Automatic request triggered upon Security approval of Gate Pass {gate_pass_id}",
         )
         session.add(hist)
+        session.add(NotificationModel(
+            user_role="WAREHOUSE",
+            title="Truck waiting for dock",
+            message=f"Approved gate entry {gate_pass_id} for vehicle {vehicle_number} is waiting for dock allocation.",
+            link=f"/inventory?tab=locations&gateEntry={gate_pass_id}",
+            notification_type="GATE_DOCK_REQUEST",
+            payload_json=json.dumps({"gate_pass_id": gate_pass_id, "vehicle_number": vehicle_number}),
+        ))
         await session.flush()
         return request_model
 
@@ -278,8 +267,8 @@ class DockAllocationService:
         session: AsyncSession,
         allocation_request_id: uuid.UUID,
         dock_id: uuid.UUID,
-        assigned_store_id: uuid.UUID,
         allocated_by: str,
+        assigned_store_id: Optional[uuid.UUID] = None,
         store_manager_id: Optional[str] = None,
         store_manager_username: Optional[str] = None,
         store_manager_name: Optional[str] = None,
@@ -306,10 +295,14 @@ class DockAllocationService:
             )
 
         from app.modules.store.infrastructure.persistence.models import StoreModel
-        assigned_store = await session.get(StoreModel, assigned_store_id)
-        if not assigned_store or (assigned_store.status or "").upper() != "ACTIVE":
+        # Store assignment is optional. If the dock is already tied to a
+        # warehouse store, use that relationship; otherwise allocate the dock
+        # without requiring a store or store manager from the UI.
+        effective_store_id = assigned_store_id or dock.store_id
+        assigned_store = await session.get(StoreModel, effective_store_id) if effective_store_id else None
+        if assigned_store and (assigned_store.status or "").upper() != "ACTIVE":
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected store is not active or available")
-        if dock.store_id and dock.store_id != assigned_store.id:
+        if dock.store_id and assigned_store and dock.store_id != assigned_store.id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Selected dock is permanently assigned to another store")
 
         # 2. Lock Allocation Request
@@ -337,9 +330,9 @@ class DockAllocationService:
         req.assigned_at = datetime.now(timezone.utc)
         req.status = "DOCK_ASSIGNED"
 
-        req.assigned_store_id = assigned_store.id
-        req.assigned_store_code = assigned_store.store_code
-        req.assigned_store_name = assigned_store.store_name
+        req.assigned_store_id = assigned_store.id if assigned_store else None
+        req.assigned_store_code = assigned_store.store_code if assigned_store else None
+        req.assigned_store_name = assigned_store.store_name if assigned_store else None
 
         # Resolve and assign Store Manager
         if store_manager_id or store_manager_username or store_manager_name:
@@ -392,9 +385,74 @@ class DockAllocationService:
         await DockAllocationService._sync_warehouse_dock_status(session, dock.dock_code, "OCCUPIED")
 
         # Update GateEntryModel and DockAssignmentModel
-        await DockAllocationService._sync_gate_entry_status(
-            session, req.existing_gate_pass_id, req.vehicle_number, "DOCK_ASSIGNED", dock.dock_code
-        )
+        from app.modules.gate.infrastructure.persistence.models import GateEntryModel, DockAssignmentModel, DockModel
+        gate_entry = None
+        try:
+            gate_entry = await session.get(GateEntryModel, uuid.UUID(req.existing_gate_pass_id), with_for_update=True)
+        except (ValueError, TypeError):
+            pass
+        if gate_entry is None:
+            gate_entry = (await session.execute(
+                select(GateEntryModel).where(GateEntryModel.gate_entry_number == req.existing_gate_pass_id).with_for_update()
+            )).scalar_one_or_none()
+        if gate_entry is None:
+            # Security can request a dock before the gate-entry record is
+            # persisted. Keep the warehouse allocation as a reservation and
+            # let the later gate-entry flow link it to the vehicle.
+            dock.status = DockStatus.RESERVED.value
+            await DockAllocationService._sync_warehouse_dock_status(
+                session, dock.dock_code, DockStatus.RESERVED.value
+            )
+            return req
+        if gate_entry.vehicle_number != req.vehicle_number:
+            raise HTTPException(status_code=409, detail="Gate entry vehicle does not match the dock request")
+        gate_entry.status = "DOCK_ASSIGNED"
+        gate_entry.assigned_dock_id = dock.dock_code
+
+        gate_dock = (await session.execute(
+            select(DockModel).where(DockModel.dock_number == dock.dock_code).with_for_update()
+        )).scalar_one_or_none()
+        if gate_dock is None:
+            # Older store rows may not have a warehouse value, and some docks
+            # are intentionally not tied to a store. Keep gate receiving
+            # functional by using the application's default warehouse.
+            warehouse_id = (
+                getattr(assigned_store, "warehouse_id", None)
+                or getattr(dock, "warehouse_id", None)
+                or "Main Warehouse"
+            )
+            gate_dock = DockModel(
+                dock_number=dock.dock_code,
+                warehouse_id=warehouse_id,
+                dock_type=dock.dock_type,
+                capacity=1,
+                status=DockStatus.OCCUPIED.value,
+            )
+            session.add(gate_dock)
+            await session.flush()
+        elif gate_dock.status != DockStatus.AVAILABLE.value:
+            raise HTTPException(status_code=409, detail=f"Gate receiving dock {dock.dock_code} is not available")
+        gate_dock.status = DockStatus.OCCUPIED.value
+        existing_assignment = (await session.execute(
+            select(DockAssignmentModel).where(DockAssignmentModel.gate_entry_id == gate_entry.id).with_for_update()
+        )).scalar_one_or_none()
+        if existing_assignment:
+            raise HTTPException(status_code=409, detail="A dock assignment already exists for this gate entry")
+        session.add(DockAssignmentModel(
+            gate_entry_id=gate_entry.id,
+            asn_id=gate_entry.asn_id,
+            po_id=gate_entry.po_id,
+            vehicle_number=gate_entry.vehicle_number,
+            dock_number=dock.dock_code,
+            assigned_store_id=assigned_store.id if assigned_store else None,
+            assigned_store_code=assigned_store.store_code if assigned_store else None,
+            assigned_store_name=assigned_store.store_name if assigned_store else None,
+            assigned_store_manager_id=req.assigned_store_manager_id,
+            assigned_store_manager_username=req.assigned_store_manager_username,
+            assigned_store_manager_name=req.assigned_store_manager_name,
+            assigned_by=allocated_by,
+            assigned_at=req.assigned_at,
+        ))
 
         # History logs
         hist = DockAllocationHistoryModel(
@@ -412,7 +470,7 @@ class DockAllocationService:
         dock_hist = DockStatusHistoryModel(
             dock_id=dock_id,
             previous_status=previous_dock_status,
-            new_status=DockStatus.RESERVED.value,
+            new_status=DockStatus.OCCUPIED.value,
             reason=f"Allocated to Gate Pass {req.existing_gate_pass_id} (DOCK_ASSIGNED)",
             changed_by=allocated_by,
             changed_at=datetime.now(timezone.utc),
@@ -495,6 +553,15 @@ class DockAllocationService:
             )
         )
 
+        session.add(
+            NotificationModel(
+                user_role="GATE_SECURITY",
+                title="Dock available for vehicle",
+                message=f"Dock {dock.dock_code} is allocated to vehicle {req.vehicle_number} (Gate Pass {req.existing_gate_pass_id}). Send the vehicle to the assigned dock.",
+                link="/vehicle-queue",
+            )
+        )
+
         # Mandatory Notification to Quality Inspector
         session.add(
             NotificationModel(
@@ -525,28 +592,19 @@ class DockAllocationService:
 
         alloc_time = req.assigned_at or datetime.now(timezone.utc)
         alloc_time_str = alloc_time.strftime("%d-%b-%Y %I:%M %p")
-        location_str = dock.location or "Receiving Bay - A"
-        warehouse_str = "Main Warehouse"
+        location_str = dock.location
+        warehouse_str = req.assigned_store_name
 
-        notif_msg = (
-            f"DOCK ALLOCATION CONFIRMED\n\n"
-            f"Vehicle Details:\n"
-            f"Gate Pass: {req.existing_gate_pass_id}\n"
-            f"Vehicle: {req.vehicle_number}\n"
-            f"Driver: {driver_name or 'N/A'}\n"
-            f"Driver Phone: {driver_phone or 'N/A'}\n"
-            f"ASN: {asn_number or 'N/A'}\n"
-            f"PO: {po_number or 'N/A'}\n\n"
-            f"Allocated Dock Details:\n"
-            f"Dock Code: {dock.dock_code}\n"
-            f"Dock Name: {dock.dock_name}\n"
-            f"Location: {location_str}\n"
-            f"Dock Type: {dock.dock_type}\n"
-            f"Warehouse: {warehouse_str}\n"
-            f"Allocated At: {alloc_time_str}\n\n"
-            f"Instruction:\n"
-            f"Proceed directly to Dock {dock.dock_code}."
-        )
+        details = [
+            f"Gate Pass: {req.existing_gate_pass_id}", f"Vehicle: {req.vehicle_number}",
+            f"Dock Code: {dock.dock_code}", f"Dock Name: {dock.dock_name}",
+            f"Dock Type: {dock.dock_type}", f"Allocated At: {alloc_time_str}",
+        ]
+        details.extend(f"{label}: {value}" for label, value in (
+            ("Driver", driver_name), ("Driver Phone", driver_phone), ("ASN", asn_number),
+            ("PO", po_number), ("Location", location_str), ("Assigned Store", warehouse_str),
+        ) if value)
+        notif_msg = "DOCK ALLOCATION CONFIRMED\n" + "\n".join(details) + f"\nProceed to Dock {dock.dock_code}."
 
         try:
             for role in ["WAREHOUSE", "STORE_MANAGER", "QUALITY_INSPECTOR"]:
@@ -784,10 +842,12 @@ class DockAllocationService:
         session: AsyncSession, allocation_request_id: uuid.UUID, performed_by: str
     ) -> DockAllocationRequestModel:
         req = (
-            await session.execute(select(DockAllocationRequestModel).where(DockAllocationRequestModel.id == allocation_request_id))
+            await session.execute(select(DockAllocationRequestModel).where(DockAllocationRequestModel.id == allocation_request_id).with_for_update())
         ).scalar_one_or_none()
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
+        if req.status != "DOCK_ASSIGNED":
+            raise HTTPException(status_code=409, detail=f"Receiving cannot start while allocation is {req.status}")
 
         previous_status = req.status
         req.status = "OCCUPIED"
@@ -813,10 +873,12 @@ class DockAllocationService:
         session: AsyncSession, allocation_request_id: uuid.UUID, performed_by: str
     ) -> DockAllocationRequestModel:
         req = (
-            await session.execute(select(DockAllocationRequestModel).where(DockAllocationRequestModel.id == allocation_request_id))
+            await session.execute(select(DockAllocationRequestModel).where(DockAllocationRequestModel.id == allocation_request_id).with_for_update())
         ).scalar_one_or_none()
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
+        if req.status != "OCCUPIED":
+            raise HTTPException(status_code=409, detail=f"Receiving cannot complete while allocation is {req.status}")
 
         previous_status = req.status
         req.status = AllocationStatus.COMPLETED.value
@@ -845,97 +907,51 @@ class DockAllocationService:
         from sqlalchemy import desc
         req_query = await session.execute(
             select(DockAllocationRequestModel)
-            .where(
-                (DockAllocationRequestModel.id == allocation_request_id) |
-                (DockAllocationRequestModel.assigned_dock_id == allocation_request_id)
-            )
+            .where(DockAllocationRequestModel.id == allocation_request_id)
             .order_by(desc(DockAllocationRequestModel.created_at))
             .with_for_update()
         )
         req = req_query.scalars().first()
 
         if not req:
-            # Check if allocation_request_id corresponds directly to a DockMasterModel ID
-            dock_direct = (
-                await session.execute(
-                    select(DockMasterModel).where(DockMasterModel.id == allocation_request_id).with_for_update()
-                )
-            ).scalar_one_or_none()
-            if dock_direct:
-                old_dock_st = dock_direct.status
-                dock_direct.status = DockStatus.AVAILABLE.value
-                session.add(
-                    DockStatusHistoryModel(
-                        dock_id=dock_direct.id,
-                        previous_status=old_dock_st,
-                        new_status=DockStatus.AVAILABLE.value,
-                        reason="Direct dock release back to operational service",
-                        changed_by=performed_by,
-                        changed_at=datetime.now(timezone.utc),
-                    )
-                )
-                await session.commit()
-                # Return dummy allocation request response representing the released state
-                return DockAllocationRequestModel(
-                    existing_gate_pass_id="N/A",
-                    vehicle_number="N/A",
-                    security_approved_at=datetime.now(timezone.utc),
-                    priority="NORMAL",
-                    status=AllocationStatus.RELEASED.value,
-                    assigned_dock_id=dock_direct.id,
-                    released_at=datetime.now(timezone.utc),
-                )
             raise HTTPException(status_code=404, detail="Allocation request or dock not found")
 
-        # Verify receiving/unloading completion if gate pass is attached
-        if req.existing_gate_pass_id and req.existing_gate_pass_id != "N/A":
-            try:
-                from app.modules.gate.infrastructure.persistence.models import GateEntryModel
-                ge_res = await session.execute(
-                    select(GateEntryModel).where(
-                        (GateEntryModel.gate_entry_number == req.existing_gate_pass_id) |
-                        (GateEntryModel.vehicle_number == req.vehicle_number)
-                    )
-                )
-                ge_obj = ge_res.scalars().first()
-                # Store release is authorized only for the assigned store user.
-                # Receiving/putaway completion is tracked by the GRN workflow,
-                # while the gate status can remain stale after that workflow.
-                # Do not block a valid store release from a stale gate status.
-                pass
-            except HTTPException:
-                raise
-            except Exception:
-                pass
+        if req.status != AllocationStatus.COMPLETED.value:
+            raise HTTPException(status_code=409, detail="Receiving must be completed before the dock can be released")
 
-        dock_code = "N/A"
-        if req.assigned_dock_id:
-            dock_query = await session.execute(
+        if not req.assigned_dock_id:
+            raise HTTPException(status_code=409, detail="Allocation has no dock to release")
+        dock_query = await session.execute(
                 select(DockMasterModel).where(DockMasterModel.id == req.assigned_dock_id).with_for_update()
             )
-            dock = dock_query.scalar_one_or_none()
-            if dock:
-                if dock.status != DockStatus.OCCUPIED.value:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Dock can only be released when it is OCCUPIED",
-                    )
+        dock = dock_query.scalar_one_or_none()
+        if not dock:
+            raise HTTPException(status_code=409, detail="Assigned dock no longer exists")
+        if dock.status != DockStatus.OCCUPIED.value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dock is not occupied")
 
-                old_dock_st = dock.status
-                dock.status = DockStatus.AVAILABLE.value
-                dock_code = dock.dock_code
+        old_dock_st = dock.status
+        dock.status = DockStatus.AVAILABLE.value
+        dock_code = dock.dock_code
 
-                session.add(
-                    DockStatusHistoryModel(
-                        dock_id=dock.id,
-                        previous_status=old_dock_st,
-                        new_status=DockStatus.AVAILABLE.value,
-                        reason=f"Released from Gate Pass {req.existing_gate_pass_id}",
-                        changed_by=performed_by,
-                        changed_at=datetime.now(timezone.utc),
-                    )
-                )
-                await DockAllocationService._sync_warehouse_dock_status(session, dock.dock_code, "AVAILABLE")
+        session.add(
+            DockStatusHistoryModel(
+                dock_id=dock.id,
+                previous_status=old_dock_st,
+                new_status=DockStatus.AVAILABLE.value,
+                reason=f"Released from Gate Pass {req.existing_gate_pass_id}",
+                changed_by=performed_by,
+                changed_at=datetime.now(timezone.utc),
+            )
+        )
+        from app.modules.gate.infrastructure.persistence.models import DockModel
+        gate_dock = (await session.execute(select(DockModel).where(
+            DockModel.dock_number == dock.dock_code
+        ).with_for_update())).scalar_one_or_none()
+        if not gate_dock:
+            raise HTTPException(status_code=409, detail="Gate receiving dock record is missing")
+        gate_dock.status = DockStatus.AVAILABLE.value
+        gate_dock.updated_at = datetime.now(timezone.utc)
 
         previous_status = req.status
         req.status = AllocationStatus.RELEASED.value
@@ -943,30 +959,21 @@ class DockAllocationService:
         if not req.completed_at:
             req.completed_at = datetime.now(timezone.utc)
 
-        await DockAllocationService._sync_gate_entry_status(
-            session, req.existing_gate_pass_id, req.vehicle_number, "RELEASED"
-        )
-
-        try:
-            from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel, GateEntryModel
-            if req.existing_gate_pass_id:
-                ge_res = await session.execute(
-                    select(GateEntryModel).where(
-                        (GateEntryModel.gate_entry_number == req.existing_gate_pass_id) |
-                        (GateEntryModel.vehicle_number == req.vehicle_number)
-                    )
-                )
-                ge_obj = ge_res.scalars().first()
-                if ge_obj:
-                    da_res = await session.execute(
-                        select(DockAssignmentModel).where(DockAssignmentModel.gate_entry_id == ge_obj.id)
-                    )
-                    da = da_res.scalar_one_or_none()
-                    if da:
-                        da.dock_released_by = performed_by
-                        da.dock_released_at = datetime.now(timezone.utc)
-        except Exception:
-            pass
+        from app.modules.gate.infrastructure.persistence.models import GateEntryModel
+        gate_entry = (await session.execute(select(GateEntryModel).where(
+            GateEntryModel.gate_entry_number == req.existing_gate_pass_id
+        ).with_for_update())).scalar_one_or_none()
+        if not gate_entry:
+            raise HTTPException(status_code=409, detail="Linked Gate Entry is missing; dock release was not recorded")
+        gate_entry.status = "RELEASED"
+        from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel
+        assignment = (await session.execute(select(DockAssignmentModel).where(
+            DockAssignmentModel.gate_entry_id == gate_entry.id
+        ).with_for_update())).scalar_one_or_none()
+        if not assignment:
+            raise HTTPException(status_code=409, detail="Linked Gate Entry dock assignment is missing")
+        assignment.dock_released_by = performed_by
+        assignment.dock_released_at = datetime.now(timezone.utc)
 
         session.add(
             DockAllocationHistoryModel(
@@ -978,6 +985,17 @@ class DockAllocationService:
                 performed_by=performed_by,
                 performed_at=datetime.now(timezone.utc),
                 remarks=f"Dock {dock_code} released back to AVAILABLE",
+            )
+        )
+        session.add(
+            NotificationModel(
+                user_role="GATE_SECURITY",
+                title="Dock is empty",
+                message=f"Dock {dock_code} is now available after vehicle {req.vehicle_number} left. Another vehicle can enter.",
+                link=f"/vehicle-queue?gateEntry={req.existing_gate_pass_id}",
+                notification_type="GATE_DOCK_RELEASED",
+                payload_json=json.dumps({"allocation_request_id": str(req.id), "gate_pass_id": req.existing_gate_pass_id,
+                                         "vehicle_number": req.vehicle_number, "dock_code": dock_code}),
             )
         )
         await session.commit()

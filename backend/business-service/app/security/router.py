@@ -32,7 +32,6 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-MAGIC_LINK_SECRET = "nexus-wms-procurement-magic-link-secret-key-2026"
 MAGIC_LINK_DEFAULT_VALIDITY_SECONDS = 24 * 60 * 60  # 24 hours
 _SHORT_CODE_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -82,6 +81,12 @@ class MagicLoginResponse(BaseModel):
 
 # --- Magic Token Helpers ---
 
+def _magic_link_secret() -> str:
+    secret = get_settings().magic_link_secret.strip()
+    if not secret:
+        raise RuntimeError("MAGIC_LINK_SECRET must be configured")
+    return secret
+
 def verify_quotation_magic_token(token: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
     if not token or "." not in token:
         return False, None, "Invalid token format."
@@ -92,7 +97,7 @@ def verify_quotation_magic_token(token: str) -> Tuple[bool, Optional[Dict[str, A
 
     payload_b64, signature = parts
     expected_sig = hmac.new(
-        MAGIC_LINK_SECRET.encode("utf-8"),
+        _magic_link_secret().encode("utf-8"),
         payload_b64.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -213,10 +218,7 @@ async def dev_login(
             )
 
         expected_hash = hashlib.sha256(req_password.encode()).hexdigest()
-        is_password_valid = (
-            account.password_hash == expected_hash
-            or req_password in ("Store@123", "password", "Admin@123", "warehouse123", "manager123")
-        )
+        is_password_valid = account.password_hash == expected_hash
         if not is_password_valid:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -275,25 +277,25 @@ async def dev_login(
     grn_uname = getattr(settings, "grn_username", "grn").lower()
     disp_uname = getattr(settings, "dispatch_username", "dispatch").lower()
 
-    if normalized_username == admin_uname and req_password in (getattr(settings, "admin_password", "admin123"), "admin123", "password", "Admin@123"):
+    if normalized_username == admin_uname and settings.admin_password and req_password == settings.admin_password:
         return {
             "token": "mock-jwt-admin-token",
             "username": getattr(settings, "admin_username", "admin"),
             "roles": ["ADMIN"],
         }
-    elif normalized_username == proc_uname and req_password in (getattr(settings, "procurement_password", "procur123"), "procur123", "password"):
+    elif normalized_username == proc_uname and settings.procurement_password and req_password == settings.procurement_password:
         return {
             "token": "mock-jwt-procurement-token",
             "username": getattr(settings, "procurement_username", "procurement"),
             "roles": ["PROCUREMENT"],
         }
-    elif normalized_username == fin_uname and req_password in (getattr(settings, "finance_password", "finance123"), "finance123", "password"):
+    elif normalized_username == fin_uname and settings.finance_password and req_password == settings.finance_password:
         return {
             "token": "mock-jwt-finance-token",
             "username": getattr(settings, "finance_username", "finance"),
             "roles": ["FINANCE"],
         }
-    elif normalized_username == wh_uname and req_password in (getattr(settings, "warehouse_password", "warehouse123"), "warehouse123", "password"):
+    elif normalized_username == wh_uname and settings.warehouse_password and req_password == settings.warehouse_password:
         return {
             "token": "mock-jwt-warehouse-token",
             "username": getattr(settings, "warehouse_username", "warehouse"),
@@ -301,7 +303,7 @@ async def dev_login(
         }
     elif (
         normalized_username in (gate_sec_uname, gate_ent_uname, "gate_entry", "gate_security", "gate")
-        and req_password in (getattr(settings, "gate_security_password", "gate123"), getattr(settings, "gate_entry_password", "gate123"), "gate123", "password")
+        and req_password in (settings.gate_security_password, settings.gate_entry_password)
     ):
         return {
             "token": "mock-jwt-gate-entry-token",
@@ -310,14 +312,15 @@ async def dev_login(
         }
     elif (
         normalized_username in (asm_uname, "assembly", "assembly_manager")
-        and req_password in (getattr(settings, "assembly_manager_password", "assembly123"), "assembly123", "password")
+        and settings.assembly_manager_password
+        and req_password == settings.assembly_manager_password
     ):
         return {
             "token": "mock-jwt-assembly-manager-token",
             "username": getattr(settings, "assembly_manager_username", req_username),
             "roles": ["ASSEMBLY_MANAGER"],
         }
-    elif normalized_username == sup_uname and req_password in (getattr(settings, "supplier_password", "supplier123"), "supplier123", "password"):
+    elif normalized_username == sup_uname and settings.supplier_password and req_password == settings.supplier_password:
         return {
             "token": "mock-jwt-supplier-token",
             "username": getattr(settings, "supplier_username", "supplier"),
@@ -325,7 +328,8 @@ async def dev_login(
         }
     elif (
         normalized_username in (grn_uname, "grn", "grn_manager", "operations_manager")
-        and req_password in (getattr(settings, "grn_password", "123456"), "123456", "password", "grn123")
+        and settings.grn_password
+        and req_password == settings.grn_password
     ):
         return {
             "token": "mock-jwt-grn-token",
@@ -334,7 +338,8 @@ async def dev_login(
         }
     elif (
         normalized_username in (mgr_uname, "manager", "mgr", "procurement_manager")
-        and req_password in (getattr(settings, "manager_password", "manager123"), "manager123", "Manager@123", "password", "Admin@123")
+        and settings.manager_password
+        and req_password == settings.manager_password
     ):
         return {
             "token": "mock-jwt-manager-token",
@@ -343,7 +348,8 @@ async def dev_login(
         }
     elif (
         normalized_username in (disp_uname, "dispatch", "dispatch_manager")
-        and req_password in (getattr(settings, "dispatch_password", "dispatch123"), "dispatch123", "password")
+        and settings.dispatch_password
+        and req_password == settings.dispatch_password
     ):
         return {
             "token": "mock-jwt-dispatch-token",
@@ -372,11 +378,7 @@ async def supplier_login(
 
     if not user:
         settings = get_settings()
-        if request.username == getattr(settings, "supplier_username", "supplier") and request.password in (
-            getattr(settings, "supplier_password", "supplier123"),
-            "supplier123",
-            "password",
-        ):
+        if request.username == getattr(settings, "supplier_username", "supplier") and settings.supplier_password and request.password == settings.supplier_password:
             return SupplierLoginResponse(
                 token="mock-jwt-supplier-token",
                 supplier_id="default-supplier-id",

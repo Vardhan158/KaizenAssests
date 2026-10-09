@@ -1,7 +1,7 @@
 """
 FastAPI entrypoint for ams-wms-business-service.
 """
-# Reload triggered for Notification router and Assembly
+# Reload triggered for Notification router, Assembly, and seed-test-data registration
 from __future__ import annotations
 
 import asyncio
@@ -33,10 +33,11 @@ from app.modules.assembly.infrastructure.api.router import router as assembly_ro
 from app.modules.dispatch.infrastructure.api.router import router as dispatch_router
 from app.modules.storage.infrastructure.api.pickup_router import pickup_router
 from app.modules.storage.infrastructure.api.assembly_requisition_router import router as assembly_requisition_router
-from app.modules.storage.infrastructure.api.inventory_router import inventory_router
+from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.modules.store.infrastructure.api.router import router as store_router, zone_router, bin_router
 from app.modules.quarantine.infrastructure.api.router import router as quarantine_router
 from app.security.router import router as auth_router
+from app.security.auth_router import router as procurement_auth_router
 from app.modules.procurement.infrastructure.api.router import router as procurement_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI):
         from app.modules.receiving.infrastructure.persistence import models as receiving_models  # noqa: F401
         from app.modules.returns.infrastructure.persistence import models as returns_models  # noqa: F401
         from app.modules.storage.infrastructure.persistence import models as storage_models  # noqa: F401
+        from app.modules.store.infrastructure.persistence import models as store_models  # noqa: F401
         from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
         from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
 
@@ -87,13 +89,37 @@ async def lifespan(app: FastAPI):
     # transaction is aborted and every later migration statement would fail.
     try:
         from sqlalchemy import text
-        from app.database.session import session_scope
+        from app.database.session import AsyncSessionFactory
+
+        # Reuse one connection for the compatibility pass. Opening a fresh
+        # NullPool connection for every ALTER/CREATE statement makes startup
+        # extremely slow when the database is remote.
+        migration_session = AsyncSessionFactory()
 
         # Helper to run DDL in its own transaction
         async def run_ddl(ddl_query: str):
-            async with session_scope() as session:
-                await session.execute(text(ddl_query))
-                await session.commit()
+            try:
+                await migration_session.execute(text(ddl_query))
+                await migration_session.commit()
+            except Exception:
+                await migration_session.rollback()
+                raise
+
+        # Warehouse location master additions. These are deliberately additive
+        # so existing Store → Zone → Bin records remain valid during rollout.
+        for column, column_type in [
+            ("position", "VARCHAR(64)"),
+            ("storage_type", "VARCHAR(64) NOT NULL DEFAULT 'GENERAL'"),
+            ("maximum_weight", "NUMERIC(18, 4)"),
+            ("maximum_volume", "NUMERIC(18, 4)"),
+            ("allowed_material_category", "VARCHAR(128)"),
+            ("hazardous_material_permitted", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("temperature_requirement", "VARCHAR(128)"),
+            ("qr_identifier", "VARCHAR(128)"),
+        ]:
+            await run_ddl(f"ALTER TABLE store_bin ADD COLUMN IF NOT EXISTS {column} {column_type}")
+        await run_ddl("CREATE UNIQUE INDEX IF NOT EXISTS ix_store_bin_qr_identifier ON store_bin (qr_identifier)")
+        await run_ddl("ALTER TABLE assembly_stock_reservation ADD COLUMN IF NOT EXISTS allocations JSON NOT NULL DEFAULT '[]'")
 
         # Upgrade legacy Material Data columns to the canonical Warehouse
         # Material Master shape. create_all() intentionally does not alter an
@@ -152,6 +178,20 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Ensured canonical Material Master columns and legacy data mapping")
 
+        for column, column_type in [
+            ("location_id", "VARCHAR(64)"),
+            ("warehouse_id", "VARCHAR(64) DEFAULT 'Main Warehouse'"),
+            ("on_hand_quantity", "NUMERIC(18, 4) DEFAULT 0.0"),
+            ("allocated_quantity", "NUMERIC(18, 4) DEFAULT 0.0"),
+            ("available_quantity", "NUMERIC(18, 4) DEFAULT 0.0"),
+            ("uom", "VARCHAR(32) DEFAULT 'PCS'"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"),
+        ]:
+            try:
+                await run_ddl(f"ALTER TABLE material_stock ADD COLUMN IF NOT EXISTS {column} {column_type}")
+            except Exception:
+                pass
+
         # Allow nullable PO columns in inventory_receipt_posting for Unexpected Delivery
         try:
             await run_ddl("ALTER TABLE inventory_receipt_posting ALTER COLUMN po_id DROP NOT NULL")
@@ -197,6 +237,7 @@ async def lifespan(app: FastAPI):
             ("shipment_type", "VARCHAR(32) DEFAULT 'STANDARD'"),
             ("replacement_request_id", "UUID"),
             ("original_asn_id", "UUID"),
+            ("logistics", "JSONB"),
         ]:
             try:
                 await run_ddl(f"ALTER TABLE asn ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}")
@@ -1481,6 +1522,7 @@ async def lifespan(app: FastAPI):
             logger.info("Ensured table 'assembly_stock_reservation' exists")
         except Exception as exc:
             logger.debug(f"Store / Zone / Manager / Reservation table DDL note: {exc}")
+        await migration_session.close()
     except Exception as e:
         logger.warning(f"Auto-migration failed: {e}", exc_info=True)
 
@@ -1584,6 +1626,7 @@ def create_app() -> FastAPI:
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(procurement_auth_router)
     app.include_router(procurement_router)
 
     @app.get("/api/debug-assembly")
@@ -1596,6 +1639,8 @@ def create_app() -> FastAPI:
     app.include_router(pickup_router)
     app.include_router(assembly_requisition_router)
     app.include_router(inventory_router)
+    app.include_router(storage_req_router)
+    app.include_router(v1_inventory_router)
 
     from fastapi.staticfiles import StaticFiles
     import os

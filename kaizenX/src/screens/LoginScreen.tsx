@@ -135,7 +135,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </Text>
               <TextInput
                 style={tw`bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs font-mono`}
-                placeholder="http://192.168.1.175:8000"
+                placeholder="http://192.168.88.37:8000"
                 placeholderTextColor="#94a3b8"
                 value={serverIp}
                 onChangeText={setServerIp}

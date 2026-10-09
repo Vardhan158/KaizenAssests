@@ -297,24 +297,8 @@ async def create_dock(
     uow: UnitOfWork = Depends(get_uow),
 ):
     dock_code = req.dock_code.strip().upper()
-    import re
-    
-    match = re.match(r"^([A-Z]+)-?(\d+)$", dock_code)
-    prefix = ""
-    num = 0
-    if match:
-        prefix = match.group(1)
-        num = int(match.group(2))
-        
-    while True:
-        existing = await uow.session.scalar(select(DockMasterModel).where(DockMasterModel.dock_code == dock_code))
-        if not existing:
-            break
-        if prefix:
-            num += 1
-            dock_code = f"{prefix}-{num:02d}"
-        else:
-            raise HTTPException(status_code=409, detail=f"Dock code '{dock_code}' already exists")
+    if await uow.session.scalar(select(DockMasterModel.id).where(DockMasterModel.dock_code == dock_code)):
+        raise HTTPException(status_code=409, detail=f"Dock code '{dock_code}' already exists")
     dock = DockMasterModel(
         dock_code=dock_code,
         dock_name=req.dock_name.strip(),
@@ -468,7 +452,7 @@ async def update_dock(
     except IntegrityError as exc:
         await uow.session.rollback()
         raise HTTPException(status_code=409, detail="Dock code already exists") from exc
-    return await get_dock_by_id(dock.id, uow)
+    return await get_dock_by_id(dock.id, uow=uow)
 
 
 @router.patch("/docks/{dock_id}/status", response_model=DockMasterResponse)
@@ -493,7 +477,7 @@ async def update_dock_status(
         )
     )
     await uow.session.commit()
-    return await get_dock_by_id(dock_id, uow)
+    return await get_dock_by_id(dock_id, uow=uow)
 
 
 @router.get("/dock-allocation-requests", response_model=List[AllocationRequestResponse])

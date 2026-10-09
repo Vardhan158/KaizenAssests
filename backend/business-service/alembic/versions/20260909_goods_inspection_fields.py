@@ -9,11 +9,17 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("receiving_line", sa.Column("physical_condition_ok", sa.Boolean(), nullable=True))
-    op.add_column("receiving_line", sa.Column("packaging_ok", sa.Boolean(), nullable=True))
-    op.add_column("receiving_line", sa.Column("specifications_ok", sa.Boolean(), nullable=True))
-    op.add_column("receiving_line", sa.Column("serial_batch_number", sa.String(128), nullable=True))
-    op.add_column("receiving_line", sa.Column("serial_batch_verified", sa.Boolean(), nullable=False, server_default=sa.false()))
+    existing = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("receiving_line")}
+    columns = [
+        ("physical_condition_ok", sa.Boolean(), True, None),
+        ("packaging_ok", sa.Boolean(), True, None),
+        ("specifications_ok", sa.Boolean(), True, None),
+        ("serial_batch_number", sa.String(128), True, None),
+        ("serial_batch_verified", sa.Boolean(), False, sa.false()),
+    ]
+    for name, column_type, nullable, default in columns:
+        if name not in existing:
+            op.add_column("receiving_line", sa.Column(name, column_type, nullable=nullable, server_default=default))
 
 
 def downgrade() -> None:

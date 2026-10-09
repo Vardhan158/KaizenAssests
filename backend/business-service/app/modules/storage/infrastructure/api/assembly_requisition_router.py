@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -24,6 +25,7 @@ from app.modules.storage.infrastructure.persistence.models import (
     AssemblyRequisitionItemModel,
     AssemblyRequisitionModel,
     AssemblyStockReservationModel,
+    InventoryIssueTransactionModel,
     InventoryLocationBalanceModel,
     PickupTaskModel,
     StorageLocationModel,
@@ -55,6 +57,7 @@ class AssemblyStockReservationSchema(ApiModel):
     zone_code: Optional[str] = None
     bin_code: Optional[str] = None
     location_code: Optional[str] = None
+    allocations: List[dict] = Field(default_factory=list)
     reserved_by: str
     reserved_at: datetime
 
@@ -87,13 +90,13 @@ class CreateAssemblyRequisitionItem(BaseModel):
     variant_code: Optional[str] = None
     material_name: Optional[str] = None
     quantity: Decimal
-    uom: str = "PCS"
+    uom: str
     is_custom: Optional[bool] = False
     custom_material_name: Optional[str] = None
 
 
 class CreateAssemblyRequisitionRequest(BaseModel):
-    warehouse_id: str = "Main Warehouse"
+    warehouse_id: str
     department: str = "Assembly"
     requested_by: str
     priority: str = "MEDIUM"
@@ -104,6 +107,10 @@ class CreateAssemblyRequisitionRequest(BaseModel):
 
 class AssignStoreToRequisitionRequest(BaseModel):
     store_id: Optional[str] = None
+
+
+class RejectAssemblyRequisitionRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=1000)
 
 
 class CreateMaterialForRequisitionItemRequest(BaseModel):
@@ -369,6 +376,7 @@ async def _build_requisition_responses_with_availability(
                     zone_code=res_obj.zone_code,
                     bin_code=res_obj.bin_code,
                     location_code=res_obj.location_code,
+                    allocations=res_obj.allocations or [],
                     reserved_by=res_obj.reserved_by,
                     reserved_at=res_obj.reserved_at,
                 )
@@ -609,6 +617,9 @@ async def list_assembly_requisitions(
     uow: UnitOfWork = Depends(get_uow),
     user: CurrentUser = Depends(get_current_user),
 ):
+    roles = {role.upper() for role in (user.roles or [])}
+    if not roles.intersection({"ASSEMBLY", "ASSEMBLY_MANAGER", "ASSEMBLY_OPERATOR", "WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"}):
+        raise HTTPException(status_code=403, detail="Assembly requisition access is not allowed for this role")
     stmt = select(AssemblyRequisitionModel).options(selectinload(AssemblyRequisitionModel.items))
     roles = [r.upper() for r in (user.roles or [])]
 
@@ -627,12 +638,62 @@ async def list_assembly_requisitions(
     return await _build_requisition_responses_with_availability(records, uow.session)
 
 
+@router.post("/{id}/reject")
+async def reject_assembly_requisition(
+    id: str,
+    payload: RejectAssemblyRequisitionRequest,
+    uow: UnitOfWork = Depends(get_uow),
+    user: CurrentUser = Depends(get_current_user),
+):
+    roles = {role.upper() for role in (user.roles or [])}
+    if not roles.intersection({"WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"}):
+        raise HTTPException(status_code=403, detail="Only Warehouse personnel may reject an Assembly requisition")
+    try:
+        req_id = uuid.UUID(id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid requisition UUID")
+    req = (await uow.session.execute(
+        select(AssemblyRequisitionModel).where(AssemblyRequisitionModel.id == req_id).with_for_update()
+    )).scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Assembly requisition not found")
+    if req.status not in {"PENDING", "SUBMITTED"}:
+        raise HTTPException(status_code=409, detail=f"Requisition cannot be rejected while in {req.status}")
+    active_reservation = await uow.session.scalar(select(AssemblyStockReservationModel.id).where(
+        AssemblyStockReservationModel.requisition_id == req.id,
+        AssemblyStockReservationModel.status == "RESERVED FOR ASSEMBLY",
+    ).limit(1))
+    if active_reservation:
+        raise HTTPException(status_code=409, detail="Release the stock reservation before rejecting this requisition")
+    now = datetime.now(timezone.utc)
+    req.status = "REJECTED"
+    req.remarks = f"{req.remarks}\nRejected by {user.username} at {now.isoformat()}: {payload.reason}" if req.remarks else f"Rejected by {user.username} at {now.isoformat()}: {payload.reason}"
+    req.updated_at = now
+    uow.session.add(NotificationModel(
+        user_role="ASSEMBLY", title=f"Requisition rejected: {req.requisition_number}",
+        message=f"Warehouse rejected Assembly requisition {req.requisition_number}: {payload.reason}",
+        link=f"/assembly/requests?requisition={req.id}", notification_type="ASSEMBLY_REQUISITION_REJECTED",
+        payload_json=json.dumps({"requisition_id": str(req.id), "requisition_number": req.requisition_number,
+                                 "reviewed_by": user.username, "reviewed_at": now.isoformat(), "reason": payload.reason}),
+    ))
+    await uow.commit()
+    return {"id": str(req.id), "requisition_number": req.requisition_number, "status": req.status,
+            "reviewed_by": user.username, "reviewed_at": now.isoformat(), "reason": payload.reason}
+
+
 @router.post("", response_model=AssemblyRequisitionResponse, status_code=status.HTTP_201_CREATED)
 async def create_assembly_requisition(
     payload: CreateAssemblyRequisitionRequest,
     uow: UnitOfWork = Depends(get_uow),
     user: CurrentUser = Depends(get_current_user),
 ):
+    roles = {role.upper() for role in (user.roles or [])}
+    if not roles.intersection({"ASSEMBLY", "ASSEMBLY_MANAGER", "ASSEMBLY_OPERATOR", "ADMIN", "SUPERUSER"}):
+        raise HTTPException(status_code=403, detail="Only Assembly personnel may create a material requisition")
+    if not payload.warehouse_id.strip():
+        raise HTTPException(status_code=422, detail="Warehouse is required")
+    if not user.username:
+        raise HTTPException(status_code=422, detail="Authenticated requester identity is required")
     if not payload.items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -655,7 +716,7 @@ async def create_assembly_requisition(
         requisition_number=req_number,
         warehouse_id=payload.warehouse_id,
         department=payload.department or "Assembly",
-        requested_by=payload.requested_by or user.username or "Assembly Operator",
+        requested_by=user.username,
         priority=payload.priority.upper() if payload.priority else "MEDIUM",
         required_date=payload.required_date,
         status="PENDING",
@@ -693,7 +754,7 @@ async def create_assembly_requisition(
                 custom_material_name=custom_name,
                 requested_quantity=Decimal(str(it.quantity)),
                 issued_quantity=Decimal("0.0"),
-                uom=it.uom.strip().upper() if it.uom else "PCS",
+                uom=it.uom.strip().upper(),
                 is_custom=True,
             )
         else:
@@ -712,7 +773,7 @@ async def create_assembly_requisition(
             material_code = (it.material_code or "").strip()
             material_name = (it.material_name or "").strip()
             variant_code = it.variant_code.strip() if it.variant_code else None
-            uom = it.uom.strip().upper() if it.uom else "PCS"
+            uom = it.uom.strip().upper()
 
             if mat_uuid:
                 mat_res = await uow.session.execute(
@@ -722,7 +783,7 @@ async def create_assembly_requisition(
                 if mat_obj:
                     material_code = mat_obj.material_code
                     material_name = material_name or mat_obj.material_name
-                    uom = uom or mat_obj.base_uom or "PCS"
+                    uom = uom or mat_obj.base_uom
                     if var_uuid:
                         var_obj = next((v for v in (mat_obj.variants or []) if v.id == var_uuid), None)
                         if var_obj:
@@ -742,7 +803,7 @@ async def create_assembly_requisition(
                 if mat_obj:
                     mat_uuid = mat_obj.id
                     material_name = material_name or mat_obj.material_name
-                    uom = uom or mat_obj.base_uom or "PCS"
+                    uom = uom or mat_obj.base_uom
                     if var_uuid:
                         var_obj = next((v for v in (mat_obj.variants or []) if v.id == var_uuid), None)
                         if var_obj:
@@ -764,14 +825,18 @@ async def create_assembly_requisition(
                         variant_code = picked_v.variant_code
                         uom = picked_v.uom or uom
 
+            if not mat_uuid or not material_code or not material_name:
+                raise HTTPException(status_code=422, detail=f"Item '{material_code or material_name or 'unknown'}' is not linked to a persisted material")
+            if not uom:
+                raise HTTPException(status_code=422, detail=f"A unit is required for material {material_code}")
             item_model = AssemblyRequisitionItemModel(
                 id=uuid.uuid4(),
                 requisition_id=req.id,
                 material_id=mat_uuid,
                 material_variant_id=var_uuid,
-                material_code=material_code or "MAT-REQ",
+                material_code=material_code,
                 variant_code=variant_code,
-                material_name=material_name or "Material",
+                material_name=material_name,
                 custom_material_name=None,
                 requested_quantity=Decimal(str(it.quantity)),
                 issued_quantity=Decimal("0.0"),
@@ -810,6 +875,9 @@ async def get_assembly_requisition(
     uow: UnitOfWork = Depends(get_uow),
     user: CurrentUser = Depends(get_current_user),
 ):
+    roles = {role.upper() for role in (user.roles or [])}
+    if not roles.intersection({"ASSEMBLY", "ASSEMBLY_MANAGER", "ASSEMBLY_OPERATOR", "WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"}):
+        raise HTTPException(status_code=403, detail="Assembly requisition access is not allowed for this role")
     try:
         req_uuid = uuid.UUID(id)
     except ValueError:
@@ -822,9 +890,61 @@ async def get_assembly_requisition(
     req = res.scalar_one_or_none()
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assembly Requisition not found")
-
     responses = await _build_requisition_responses_with_availability([req], uow.session)
     return responses[0]
+
+
+@router.post("/{id}/confirm-receipt")
+async def confirm_assembly_receipt(
+    id: str,
+    uow: UnitOfWork = Depends(get_uow),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Record Assembly's handover confirmation against the persisted issued transactions."""
+    roles = {role.upper() for role in (user.roles or [])}
+    if not roles.intersection({"ASSEMBLY", "ASSEMBLY_MANAGER", "ASSEMBLY_OPERATOR", "ADMIN", "SUPERUSER"}):
+        raise HTTPException(status_code=403, detail="Assembly personnel must confirm material receipt")
+    try:
+        requisition_id = uuid.UUID(id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid requisition UUID")
+    req = (await uow.session.execute(
+        select(AssemblyRequisitionModel).where(AssemblyRequisitionModel.id == requisition_id).with_for_update()
+    )).scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Assembly requisition not found")
+    if req.status == "ASSEMBLY_RECEIVED":
+        raise HTTPException(status_code=409, detail="Assembly receipt was already confirmed")
+    tasks = (await uow.session.execute(
+        select(PickupTaskModel).where(PickupTaskModel.requisition_id == req.id).with_for_update()
+    )).scalars().all()
+    if not tasks or any(task.status.upper() != "COMPLETED" or task.picked_quantity < task.requested_quantity for task in tasks):
+        raise HTTPException(status_code=409, detail="All requested material must be picked and issued before Assembly can confirm receipt")
+    issues = (await uow.session.execute(
+        select(InventoryIssueTransactionModel).where(InventoryIssueTransactionModel.requisition_id == req.id)
+    )).scalars().all()
+    if not issues:
+        raise HTTPException(status_code=409, detail="No persisted issue transactions are linked to this requisition")
+    received_at = datetime.now(timezone.utc)
+    receipt_items = [{
+        "issue_id": str(issue.id), "issue_number": issue.issue_number,
+        "material_code": issue.material_code, "quantity": str(issue.quantity), "uom": issue.uom,
+        "pickup_task_id": str(issue.pickup_task_id) if issue.pickup_task_id else None,
+    } for issue in issues]
+    req.status = "ASSEMBLY_RECEIVED"
+    req.updated_at = received_at
+    uow.session.add(NotificationModel(
+        user_role="WAREHOUSE", title=f"Assembly receipt confirmed — {req.requisition_number}",
+        message=f"Assembly confirmed receipt of issued materials for requisition {req.requisition_number}.",
+        link=f"/assembly/requests?requisition={req.id}", notification_type="ASSEMBLY_RECEIPT_CONFIRMED",
+        payload_json=json.dumps({"requisition_id": str(req.id), "requisition_number": req.requisition_number,
+                                 "confirmed_by": user.username, "confirmed_at": received_at.isoformat(),
+                                 "items": receipt_items}),
+    ))
+    await uow.commit()
+    return {"requisition_id": str(req.id), "requisition_number": req.requisition_number,
+            "status": req.status, "confirmed_by": user.username,
+            "confirmed_at": received_at.isoformat(), "items": receipt_items}
 
 
 @router.post("/{id}/items/{item_id}/create-material", response_model=AssemblyRequisitionResponse)
@@ -1052,6 +1172,7 @@ async def link_material_for_assembly_requisition_item(
     return responses[0]
 
 
+@router.post("/{id}/approve", response_model=AssemblyRequisitionResponse)
 @router.post("/{id}/reserve-stock", response_model=AssemblyRequisitionResponse)
 async def reserve_assembly_requisition_stock(
     id: str,
@@ -1080,11 +1201,15 @@ async def reserve_assembly_requisition_stock(
 
     stmt = select(AssemblyRequisitionModel).options(selectinload(AssemblyRequisitionModel.items)).where(
         AssemblyRequisitionModel.id == req_uuid
-    )
+    ).with_for_update()
     res = await uow.session.execute(stmt)
     req = res.scalar_one_or_none()
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assembly Requisition not found")
+    if req.status not in {"PENDING", "SUBMITTED", "APPROVED", "PARTIALLY_RESERVED"}:
+        raise HTTPException(status_code=409, detail=f"Requisition cannot be approved while in {req.status}")
+    if not user.username:
+        raise HTTPException(status_code=422, detail="Authenticated reviewer identity is required")
 
     now_utc = datetime.now(timezone.utc)
 
@@ -1098,7 +1223,7 @@ async def reserve_assembly_requisition_stock(
 
         # Check warehouse stock & location balances
         stk_res = await uow.session.execute(
-            select(MaterialStockModel).where(MaterialStockModel.material_code == it.material_code)
+            select(MaterialStockModel).where(MaterialStockModel.material_code == it.material_code).with_for_update()
         )
         stk_obj = stk_res.scalar_one_or_none()
         stk_avail = Decimal(str(stk_obj.available or 0)) if stk_obj else Decimal("0.0")
@@ -1112,24 +1237,17 @@ async def reserve_assembly_requisition_stock(
         quar_qty = Decimal(str(quar_res.scalar() or 0))
 
         # Location balance
-        loc_bal_stmt = select(func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0.0"))).where(
+        loc_lock_stmt = select(InventoryLocationBalanceModel).where(
             InventoryLocationBalanceModel.material_code == it.material_code
-        )
-        loc_bal_res = await uow.session.execute(loc_bal_stmt)
-        loc_avail = Decimal(str(loc_bal_res.scalar() or 0))
+        ).with_for_update()
+        loc_balances = (await uow.session.execute(loc_lock_stmt)).scalars().all()
+        loc_avail = sum((Decimal(str(row.available_quantity or 0)) for row in loc_balances), Decimal("0"))
 
-        effective_avail = max(max(Decimal("0.0"), stk_avail - quar_qty), loc_avail)
+        effective_avail = min(max(Decimal("0.0"), stk_avail - quar_qty), loc_avail)
 
         # Active reservations by other requisitions
-        other_res_stmt = select(func.coalesce(func.sum(AssemblyStockReservationModel.reserved_quantity), Decimal("0.0"))).where(
-            AssemblyStockReservationModel.material_code == it.material_code,
-            AssemblyStockReservationModel.status == "RESERVED FOR ASSEMBLY",
-            AssemblyStockReservationModel.requisition_id != req.id,
-        )
-        other_res = Decimal(str((await uow.session.execute(other_res_stmt)).scalar() or 0))
-
-        # Available to reserve for this line = effective_avail - other_res
-        avail_to_reserve = max(Decimal("0.0"), effective_avail - other_res)
+        # MaterialStock.available is decremented atomically for earlier reservations.
+        avail_to_reserve = max(Decimal("0.0"), effective_avail)
 
         # Max we can reserve for this line (existing reservation + additional available stock)
         max_can_reserve = min(req_qty, cur_reserved + avail_to_reserve)
@@ -1161,7 +1279,8 @@ async def reserve_assembly_requisition_stock(
             )
             .order_by(InventoryLocationBalanceModel.available_quantity.desc())
         )
-        loc_row = (await uow.session.execute(loc_stmt)).first()
+        loc_rows = (await uow.session.execute(loc_stmt)).all()
+        loc_row = loc_rows[0] if loc_rows else None
 
         store_id = None
         store_code = None
@@ -1170,6 +1289,31 @@ async def reserve_assembly_requisition_stock(
         bin_code = None
         location_code = None
         storage_loc_id = None
+        allocations: list[dict] = []
+
+        # Allocate across oldest updated location balances first (FIFO). The
+        # balance's GRN is retained as the batch reference so consumers can
+        # present a batch-aware pick sequence; expiry-controlled materials can
+        # be ordered by an explicit FEFO location policy in a later extension.
+        remaining_to_allocate = new_reserved
+        for row in loc_rows:
+            storage_loc, store_obj, available_qty = row
+            if remaining_to_allocate <= 0:
+                break
+            allocated_qty = min(remaining_to_allocate, Decimal(str(available_qty or 0)))
+            if allocated_qty <= 0:
+                continue
+            allocations.append({
+                "quantity": float(allocated_qty),
+                "uom": it.uom,
+                "location_code": storage_loc.location_code,
+                "zone_code": storage_loc.zone,
+                "rack": storage_loc.rack,
+                "bin_code": storage_loc.bin,
+                "batch": None,
+                "strategy": "FIFO",
+            })
+            remaining_to_allocate -= allocated_qty
 
         if loc_row:
             storage_loc, store_obj, _ = loc_row
@@ -1181,19 +1325,8 @@ async def reserve_assembly_requisition_stock(
                 store_id = store_obj.id
                 store_code = store_obj.store_code
                 store_name = store_obj.store_name
-        else:
-            # Fallback to active Raw Material store for this warehouse
-            store_res = await uow.session.execute(
-                select(StoreModel).where(
-                    StoreModel.status == "ACTIVE",
-                    StoreModel.store_type == "RAW_MATERIAL",
-                ).order_by(StoreModel.created_at.asc())
-            )
-            store_obj = store_res.scalars().first()
-            if store_obj:
-                store_id = store_obj.id
-                store_code = store_obj.store_code
-                store_name = store_obj.store_name
+        elif new_reserved > 0:
+            raise HTTPException(status_code=409, detail=f"Reserved stock for {it.material_code} has no persisted storage location")
 
         # Check existing reservation record for this requisition item
         res_stmt = select(AssemblyStockReservationModel).where(
@@ -1215,7 +1348,8 @@ async def reserve_assembly_requisition_stock(
                     res_row.bin_code = bin_code
                     res_row.location_code = location_code
                     res_row.storage_location_id = storage_loc_id
-                res_row.reserved_by = user.username or "warehouse"
+                res_row.allocations = allocations
+                res_row.reserved_by = user.username
                 res_row.reserved_at = now_utc
             else:
                 new_res_record = AssemblyStockReservationModel(
@@ -1227,7 +1361,7 @@ async def reserve_assembly_requisition_stock(
                     material_name=it.material_name,
                     required_quantity=req_qty,
                     reserved_quantity=new_reserved,
-                    uom=it.uom or "PCS",
+                    uom=it.uom,
                     status="RESERVED FOR ASSEMBLY",
                     store_id=store_id,
                     store_code=store_code,
@@ -1236,7 +1370,8 @@ async def reserve_assembly_requisition_stock(
                     bin_code=bin_code,
                     location_code=location_code,
                     storage_location_id=storage_loc_id,
-                    reserved_by=user.username or "warehouse",
+                    allocations=allocations,
+                    reserved_by=user.username,
                     reserved_at=now_utc,
                 )
                 uow.session.add(new_res_record)
@@ -1257,7 +1392,16 @@ async def reserve_assembly_requisition_stock(
             res_row.reserved_quantity = Decimal("0.0")
             res_row.status = "CANCELLED"
 
+    req.status = "APPROVED" if all(Decimal(str(it.reserved_quantity or 0)) >= Decimal(str(it.requested_quantity)) for it in (req.items or [])) else "PARTIALLY_RESERVED"
     req.updated_at = now_utc
+    uow.session.add(NotificationModel(
+        user_role="ASSEMBLY",
+        title=f"Requisition {req.status.lower().replace('_', ' ')}: {req.requisition_number}",
+        message=f"Warehouse reviewed requisition {req.requisition_number}. Reservation status: {req.status}.",
+        link=f"/assembly/requests?requisition={req.id}", notification_type="ASSEMBLY_REQUISITION_REVIEWED",
+        payload_json=json.dumps({"requisition_id": str(req.id), "requisition_number": req.requisition_number,
+                                 "status": req.status, "reviewed_by": user.username, "reviewed_at": now_utc.isoformat()}),
+    ))
     await uow.commit()
 
     # Re-fetch updated response
@@ -1488,6 +1632,7 @@ async def list_all_assembly_reservations(
             zone_code=r.zone_code,
             bin_code=r.bin_code,
             location_code=r.location_code,
+            allocations=r.allocations or [],
             reserved_by=r.reserved_by,
             reserved_at=r.reserved_at,
         )
@@ -1535,6 +1680,7 @@ async def list_store_assembly_reservations(
             zone_code=r.zone_code,
             bin_code=r.bin_code,
             location_code=r.location_code,
+            allocations=r.allocations or [],
             reserved_by=r.reserved_by,
             reserved_at=r.reserved_at,
         )
@@ -1619,11 +1765,6 @@ async def assign_store_to_assembly_requisition(
                 if loc_store_row:
                     store_uuid = loc_store_row[0]
 
-        if not store_uuid:
-            # Fallback to the first active Store
-            first_store_stmt = select(StoreModel.id).where(func.upper(StoreModel.status) == "ACTIVE").limit(1)
-            store_uuid = (await uow.session.execute(first_store_stmt)).scalar_one_or_none()
-
     if not store_uuid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1664,7 +1805,7 @@ async def assign_store_to_assembly_requisition(
         loc_avail = loc_bal_res.scalar() or Decimal("0.0")
 
         stk_avail = max(Decimal("0.0"), (stock.available if stock else Decimal("0.0")) - quarantined_qty)
-        effective_avail = max(stk_avail, loc_avail)
+        effective_avail = min(stk_avail, loc_avail)
 
         other_res_stmt = select(func.coalesce(func.sum(AssemblyStockReservationModel.reserved_quantity), Decimal("0.0"))).where(
             AssemblyStockReservationModel.material_code == item.material_code,

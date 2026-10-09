@@ -207,20 +207,20 @@ function parseGrnNotificationDetails(n: any) {
 
   return {
     title,
-    grnNumber: payloadData.grnNumber,
-    poNumber: payloadData.poNumber,
-    supplierName: payloadData.supplierName,
-    vehicleNumber: payloadData.vehicleNumber,
-    dockCode: payloadData.dockCode,
-    warehouseName: payloadData.warehouseName,
-    poStatus: payloadData.poStatus,
-    totals: payloadData.totals,
-    items: payloadData.items,
+    grnNumber: payloadData?.grnNumber,
+    poNumber: payloadData?.poNumber,
+    supplierName: payloadData?.supplierName,
+    vehicleNumber: payloadData?.vehicleNumber,
+    dockCode: payloadData?.dockCode,
+    warehouseName: payloadData?.warehouseName,
+    poStatus: payloadData?.poStatus,
+    totals: payloadData?.totals,
+    items: payloadData?.items,
     statusText,
     created_at: n.created_at || n.createdAt,
     message: msg,
     link: n.link,
-    hasPayloadJson: payloadData.hasPayloadJson,
+    hasPayloadJson: payloadData?.hasPayloadJson,
   };
 }
 
@@ -250,8 +250,12 @@ function Notifications() {
       ? "SUPPLIER"
       : roles.includes("FINANCE")
         ? "FINANCE"
-        : roles.includes("PROCUREMENT")
-          ? "PROCUREMENT"
+          : roles.includes("PROCUREMENT")
+            ? "PROCUREMENT"
+          : roles.includes("GATE_SECURITY")
+            ? "GATE_SECURITY"
+          : roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_MANAGER") || roles.includes("ASSEMBLY_OPERATOR")
+            ? "ASSEMBLY_MANAGER"
           : roles.includes("DISPATCH") ||
               roles.includes("DISPATCH_MANAGER") ||
               username === "dispatch" ||
@@ -268,12 +272,12 @@ function Notifications() {
               : "WAREHOUSE";
     setUserRole(role);
     void fetchData(role, false);
-    const timer = window.setInterval(() => void fetchData(role, true), 2000);
+    const unsubscribe = api.subscribeNotifications(role, () => void fetchData(role, true));
     const refresh = () => void fetchData(role, true);
     window.addEventListener("focus", refresh);
     window.addEventListener("notifications:refresh", refresh);
     return () => {
-      window.clearInterval(timer);
+      unsubscribe();
       window.removeEventListener("focus", refresh);
       window.removeEventListener("notifications:refresh", refresh);
     };

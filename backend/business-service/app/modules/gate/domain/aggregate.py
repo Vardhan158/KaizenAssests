@@ -146,15 +146,38 @@ class GateEntry(AggregateRoot):
 
     def approve_gate_entry(self, security_officer_id: str) -> None:
         """Approve a verified gate entry, including a permitted direct arrival."""
-        if self.status != GateEntryStatus.UNSCHEDULED_ARRIVAL:
-            self.status = GateEntryStatus.GATE_ENTRY_APPROVED
+        # Approval is the state transition that must happen before the entry
+        # can be placed in the warehouse dock queue.  Some callers pass the
+        # OCR-derived status (for example PO_VERIFIED) while others pass a
+        # pre-allocation status.  Do not retain that intermediate status here;
+        # otherwise move_to_inbound_queue() rejects an otherwise valid entry.
+        if self.status in (
+            GateEntryStatus.REJECTED,
+            GateEntryStatus.DENIED_ENTRY,
+            GateEntryStatus.GATE_ENTRY_APPROVED,
+        ):
+            raise DomainRuleViolationException(
+                f"Gate entry cannot be approved from status: {self.status}"
+            )
+        self.status = GateEntryStatus.GATE_ENTRY_APPROVED
         self.verified_by = security_officer_id
         self.updated_at = datetime.now(timezone.utc)
         self._emit_ready_event()
 
     def move_to_inbound_queue(self) -> None:
-        if self.status != GateEntryStatus.GATE_ENTRY_APPROVED:
-            raise DomainRuleViolationException("Gate entry must be approved before awaiting a dock")
+        if self.status in (GateEntryStatus.REJECTED, GateEntryStatus.DENIED_ENTRY):
+            raise DomainRuleViolationException("Rejected gate entries cannot enter the dock queue")
+        self.status = GateEntryStatus.AWAITING_DOCK
+        self.updated_at = datetime.now(timezone.utc)
+
+    def queue_for_dock_allocation(self) -> None:
+        """Place a newly submitted gate entry in the dock-allocation queue.
+
+        Dock allocation is the required warehouse step for the mobile gate
+        flow; it does not require a separate security approval action.
+        """
+        if self.status in (GateEntryStatus.REJECTED, GateEntryStatus.DENIED_ENTRY):
+            raise DomainRuleViolationException("Rejected gate entries cannot enter the dock queue")
         self.status = GateEntryStatus.AWAITING_DOCK
         self.updated_at = datetime.now(timezone.utc)
 

@@ -149,7 +149,7 @@ export function ProfileScreen({ user, onLogout }: ProfileScreenProps) {
           style={tw`bg-slate-900 rounded-xl text-sky-400 px-3 py-2.5 border border-slate-700 text-xs font-mono`}
           value={serverUrl}
           onChangeText={setServerUrlText}
-          placeholder="http://192.168.1.175:8000"
+          placeholder="http://192.168.88.37:8000"
           placeholderTextColor="#64748b"
           autoCapitalize="none"
           autoCorrect={false}

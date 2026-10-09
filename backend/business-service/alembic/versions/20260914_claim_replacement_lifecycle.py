@@ -7,12 +7,18 @@ branch_labels = None
 depends_on = None
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    existing = {column["name"] for column in sa.inspect(bind).get_columns("supplier_damage_claim")}
     for column in (
         sa.Column("supplier_response", sa.String(32)), sa.Column("resolution", sa.String(32)),
         sa.Column("supplier_remarks", sa.Text()), sa.Column("return_required", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("responded_at", sa.DateTime(timezone=True)), sa.Column("closed_by", sa.String(128)), sa.Column("closed_at", sa.DateTime(timezone=True)),
-    ): op.add_column("supplier_damage_claim", column)
-    op.create_table("replacement_shipment",
+    ):
+        if column.name not in existing:
+            op.add_column("supplier_damage_claim", column)
+    tables = set(sa.inspect(bind).get_table_names())
+    if "replacement_shipment" not in tables:
+        op.create_table("replacement_shipment",
         sa.Column("id", sa.Uuid(), primary_key=True), sa.Column("shipment_number", sa.String(32), nullable=False, unique=True),
         sa.Column("claim_id", sa.Uuid(), sa.ForeignKey("supplier_damage_claim.id", ondelete="RESTRICT"), nullable=False, unique=True),
         sa.Column("expected_quantity", sa.Numeric(18,4), nullable=False), sa.Column("vehicle_number", sa.String(32), nullable=False),
@@ -24,14 +30,15 @@ def upgrade() -> None:
         sa.Column("inspected_by", sa.String(128)), sa.Column("inspected_at", sa.DateTime(timezone=True)),
         sa.Column("putaway_location", sa.String(128)), sa.Column("putaway_by", sa.String(128)), sa.Column("putaway_at", sa.DateTime(timezone=True)),
         sa.Column("inventory_posted_at", sa.DateTime(timezone=True)))
-    for c in ("shipment_number","claim_id","status"): op.create_index(f"ix_replacement_shipment_{c}", "replacement_shipment", [c])
-    op.create_table("supplier_return",
+        for c in ("shipment_number","claim_id","status"): op.create_index(f"ix_replacement_shipment_{c}", "replacement_shipment", [c])
+    if "supplier_return" not in tables:
+        op.create_table("supplier_return",
         sa.Column("id", sa.Uuid(), primary_key=True), sa.Column("return_number", sa.String(32), nullable=False, unique=True),
         sa.Column("claim_id", sa.Uuid(), sa.ForeignKey("supplier_damage_claim.id", ondelete="RESTRICT"), nullable=False, unique=True),
         sa.Column("quantity", sa.Numeric(18,4), nullable=False), sa.Column("status", sa.String(32), nullable=False),
         sa.Column("vehicle_number", sa.String(32), nullable=False), sa.Column("created_by", sa.String(128), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False), sa.Column("gate_exit_by", sa.String(128)), sa.Column("gate_exit_at", sa.DateTime(timezone=True)))
-    for c in ("return_number","claim_id","status"): op.create_index(f"ix_supplier_return_{c}", "supplier_return", [c])
+        for c in ("return_number","claim_id","status"): op.create_index(f"ix_supplier_return_{c}", "supplier_return", [c])
 
 def downgrade() -> None:
     op.drop_table("supplier_return"); op.drop_table("replacement_shipment")

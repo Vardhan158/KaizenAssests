@@ -40,6 +40,7 @@ import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SupplierDashboardRouteImport } from './routes/supplier-dashboard'
 import { Route as UnscheduledArrivalsRouteImport } from './routes/unscheduled-arrivals'
 import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
@@ -50,6 +51,7 @@ import { Route as AssemblyMaterialRequestsRouteImport } from './routes/assembly.
 import { Route as AssemblyOrdersRouteImport } from './routes/assembly.orders'
 import { Route as AssemblyProductionRouteImport } from './routes/assembly.production'
 import { Route as AssemblyQualityRouteImport } from './routes/assembly.quality'
+import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
 import { Route as PoCodeRouteImport } from './routes/po.$code'
 import { Route as QCodeRouteImport } from './routes/q.$code'
 import { Route as WarehouseAssemblyRequisitionsRouteImport } from './routes/warehouse.assembly-requisitions'
@@ -218,6 +220,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SupplierDashboardRoute = SupplierDashboardRouteImport.update({
+  id: '/supplier-dashboard',
+  path: '/supplier-dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UnscheduledArrivalsRoute = UnscheduledArrivalsRouteImport.update({
   id: '/unscheduled-arrivals',
   path: '/unscheduled-arrivals',
@@ -267,6 +274,11 @@ const AssemblyProductionRoute = AssemblyProductionRouteImport.update({
 const AssemblyQualityRoute = AssemblyQualityRouteImport.update({
   id: '/assembly/quality',
   path: '/assembly/quality',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssemblyRequestsRoute = AssemblyRequestsRouteImport.update({
+  id: '/assembly/requests',
+  path: '/assembly/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PoCodeRoute = PoCodeRouteImport.update({
@@ -362,6 +374,7 @@ export interface FileRoutesByFullPath {
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/supplier-dashboard': typeof SupplierDashboardRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -372,6 +385,7 @@ export interface FileRoutesByFullPath {
   '/assembly/orders': typeof AssemblyOrdersRoute
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
+  '/assembly/requests': typeof AssemblyRequestsRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
@@ -416,6 +430,7 @@ export interface FileRoutesByTo {
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/supplier-dashboard': typeof SupplierDashboardRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -426,6 +441,7 @@ export interface FileRoutesByTo {
   '/assembly/orders': typeof AssemblyOrdersRoute
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
+  '/assembly/requests': typeof AssemblyRequestsRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
@@ -471,6 +487,7 @@ export interface FileRoutesById {
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/supplier-dashboard': typeof SupplierDashboardRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -481,6 +498,7 @@ export interface FileRoutesById {
   '/assembly/orders': typeof AssemblyOrdersRoute
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
+  '/assembly/requests': typeof AssemblyRequestsRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
@@ -527,6 +545,7 @@ export interface FileRouteTypes {
     | '/receiving'
     | '/reports'
     | '/settings'
+    | '/supplier-dashboard'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -537,6 +556,7 @@ export interface FileRouteTypes {
     | '/assembly/orders'
     | '/assembly/production'
     | '/assembly/quality'
+    | '/assembly/requests'
     | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
@@ -581,6 +601,7 @@ export interface FileRouteTypes {
     | '/receiving'
     | '/reports'
     | '/settings'
+    | '/supplier-dashboard'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -591,6 +612,7 @@ export interface FileRouteTypes {
     | '/assembly/orders'
     | '/assembly/production'
     | '/assembly/quality'
+    | '/assembly/requests'
     | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
@@ -635,6 +657,7 @@ export interface FileRouteTypes {
     | '/receiving'
     | '/reports'
     | '/settings'
+    | '/supplier-dashboard'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -645,6 +668,7 @@ export interface FileRouteTypes {
     | '/assembly/orders'
     | '/assembly/production'
     | '/assembly/quality'
+    | '/assembly/requests'
     | '/po/$code'
     | '/q/$code'
     | '/warehouse/assembly-requisitions'
@@ -690,6 +714,7 @@ export interface RootRouteChildren {
   ReceivingRoute: typeof ReceivingRoute
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
+  SupplierDashboardRoute: typeof SupplierDashboardRoute
   UnscheduledArrivalsRoute: typeof UnscheduledArrivalsRoute
   VehicleExitRoute: typeof VehicleExitRoute
   VehicleQueueRoute: typeof VehicleQueueRoute
@@ -700,6 +725,7 @@ export interface RootRouteChildren {
   AssemblyOrdersRoute: typeof AssemblyOrdersRoute
   AssemblyProductionRoute: typeof AssemblyProductionRoute
   AssemblyQualityRoute: typeof AssemblyQualityRoute
+  AssemblyRequestsRoute: typeof AssemblyRequestsRoute
   PoCodeRoute: typeof PoCodeRoute
   QCodeRoute: typeof QCodeRoute
   WarehouseAssemblyRequisitionsRoute: typeof WarehouseAssemblyRequisitionsRoute
@@ -932,6 +958,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/supplier-dashboard': {
+      id: '/supplier-dashboard'
+      path: '/supplier-dashboard'
+      fullPath: '/supplier-dashboard'
+      preLoaderRoute: typeof SupplierDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/unscheduled-arrivals': {
       id: '/unscheduled-arrivals'
       path: '/unscheduled-arrivals'
@@ -1000,6 +1033,13 @@ declare module '@tanstack/react-router' {
       path: '/assembly/quality'
       fullPath: '/assembly/quality'
       preLoaderRoute: typeof AssemblyQualityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assembly/requests': {
+      id: '/assembly/requests'
+      path: '/assembly/requests'
+      fullPath: '/assembly/requests'
+      preLoaderRoute: typeof AssemblyRequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/po/$code': {
@@ -1114,6 +1154,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReceivingRoute: ReceivingRoute,
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
+  SupplierDashboardRoute: SupplierDashboardRoute,
   UnscheduledArrivalsRoute: UnscheduledArrivalsRoute,
   VehicleExitRoute: VehicleExitRoute,
   VehicleQueueRoute: VehicleQueueRoute,
@@ -1124,6 +1165,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssemblyOrdersRoute: AssemblyOrdersRoute,
   AssemblyProductionRoute: AssemblyProductionRoute,
   AssemblyQualityRoute: AssemblyQualityRoute,
+  AssemblyRequestsRoute: AssemblyRequestsRoute,
   PoCodeRoute: PoCodeRoute,
   QCodeRoute: QCodeRoute,
   WarehouseAssemblyRequisitionsRoute: WarehouseAssemblyRequisitionsRoute,

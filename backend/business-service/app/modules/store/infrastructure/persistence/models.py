@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, GUID
@@ -120,9 +120,18 @@ class StoreBinModel(Base):
     bin_name: Mapped[str] = mapped_column(String(128), nullable=False)
     rack: Mapped[str | None] = mapped_column(String(64), nullable=True)
     shelf: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # shelf is retained for backwards compatibility; level is the canonical WMS term.
+    position: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    storage_type: Mapped[str] = mapped_column(String(64), nullable=False, default="GENERAL")
     capacity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("1000.0"))
+    maximum_weight: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    maximum_volume: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    allowed_material_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    hazardous_material_permitted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    temperature_requirement: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    qr_identifier: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True, index=True)
     occupied_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="AVAILABLE", index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

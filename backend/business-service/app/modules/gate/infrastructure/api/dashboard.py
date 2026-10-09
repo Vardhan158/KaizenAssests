@@ -31,7 +31,8 @@ async def get_dashboard_stats(
     gate_res = await uow.session.execute(
         select(GateEntryModel).order_by(GateEntryModel.created_at.desc())
     )
-    models = result.scalars().all()
+    gate_models = gate_res.scalars().all()
+    models = gate_models
 
     total_arrivals = len(models)
 
@@ -45,7 +46,7 @@ async def get_dashboard_stats(
     for m in models:
         status_upper = (m.status or "").upper()
 
-        if status_upper == "VEHICLE_EXITED" or m.exited_at is not None:
+        if status_upper == "VEHICLE_EXITED" or m.exited_at:
             vehicles_exited += 1
 
         if "REJECT" in status_upper:
@@ -64,6 +65,11 @@ async def get_dashboard_stats(
 
     # Fetch real docks and active allocations from PostgreSQL
     from app.modules.dock.infrastructure.persistence.models import DockMasterModel, DockAllocationRequestModel
+
+    dock_requests_res = await uow.session.execute(
+        select(DockAllocationRequestModel).options(selectinload(DockAllocationRequestModel.assigned_dock))
+    )
+    dock_requests = dock_requests_res.scalars().all()
 
     # 3. Fetch real docks from PostgreSQL
     dock_res = await uow.session.execute(
@@ -196,7 +202,7 @@ async def get_dashboard_stats(
             "vehicle_number": req.vehicle_number,
             "gate_entry_no": req.existing_gate_pass_id,
             "driver_name": "Driver",
-            "po_number": req.material_reference or "PO-2026-0001",
+            "po_number": req.material_reference or "",
             "arrival_time": (req.arrived_at or req.created_at).strftime("%H:%M") if (req.arrived_at or req.created_at) else "09:00",
             "dock_number": dock_code,
             "status": req.status or "AWAITING_DOCK",
@@ -266,8 +272,15 @@ async def get_dashboard_stats(
         po_num = entry["po_number"]
         gp_no = entry["gate_entry_no"]
         vendor = entry["vendor"]
+        # Activity rows are dictionaries, not ORM models.
+        m = type("ActivityEntry", (), {
+            "exited_at": entry.get("exited_at"),
+            "vehicle_number": v_num,
+            "gate_entry_number": gp_no,
+            "exited_by": entry.get("exited_by"),
+        })()
 
-        if status_upper == "VEHICLE_EXITED" or m.exited_at is not None:
+        if status_upper == "VEHICLE_EXITED" or entry.get("exited_at"):
             activity.append({
                 "time": time_str,
                 "title": "Vehicle exited facility",
