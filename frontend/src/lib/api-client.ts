@@ -2886,6 +2886,22 @@ export const api = {
       cache: "no-store",
     });
   },
+  async createAssemblyProduct(payload: {
+    product_name: string;
+    product_code: string;
+    description?: string;
+    components?: Array<{
+      material_code: string;
+      material_name: string;
+      quantity_per_unit: number;
+      uom?: string;
+    }>;
+  }): Promise<AssemblyProductOption> {
+    return request<AssemblyProductOption>(`${BUSINESS_API_URL}/api/v1/assembly/products`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   async getAssemblyLines(): Promise<AssemblyLineOption[]> {
     return request<AssemblyLineOption[]>(`${BUSINESS_API_URL}/api/v1/assembly/lines`, {
       cache: "no-store",

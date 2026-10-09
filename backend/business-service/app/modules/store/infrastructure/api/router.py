@@ -11,7 +11,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select, delete
@@ -1418,10 +1418,10 @@ async def create_store_zone(
     if not store:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Store '{id_or_code}' not found")
 
-    if not _is_warehouse_or_admin(user):
+    if not await _is_store_authorized(uow.session, store, user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: Only Warehouse or Admin users can create zones.",
+            detail="Access denied: You are only authorized to create zones in your assigned store.",
         )
 
     store_code = store.store_code

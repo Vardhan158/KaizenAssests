@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
 import {
@@ -16,12 +16,16 @@ import {
   Factory,
   Filter,
   Layers,
+  LayoutDashboard,
   Package,
+  PackageCheck,
   Play,
+  PlusCircle,
   RefreshCw,
   Search,
   ShieldCheck,
   User,
+  Warehouse,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +41,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/production")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER"]),
@@ -48,53 +53,56 @@ function getStatusBadge(status: string) {
   const s = (status || "").toUpperCase();
   if (s === "IN_PRODUCTION" || s === "IN-PROGRESS" || s === "RUNNING") {
     return (
-      <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-300 animate-pulse">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block mr-1.5"></span>
-        IN PRODUCTION
-      </Badge>
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
+        <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+        In Production
+      </span>
     );
   }
-  if (s === "MATERIAL_READY") {
+  if (s === "MATERIAL_READY" || s === "READY_TO_START") {
     return (
-      <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-300">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block mr-1.5"></span>
-        READY TO START
-      </Badge>
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
+        <span className="size-1.5 rounded-full bg-emerald-500" />
+        Ready to Start
+      </span>
     );
   }
   if (s === "QC_PENDING") {
     return (
-      <Badge className="bg-blue-500/15 text-blue-700 border-blue-500/30 dark:text-blue-300">
-        <ShieldCheck className="w-3 h-3 inline-block mr-1" />
-        QC PENDING
-      </Badge>
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/25">
+        <span className="size-1.5 rounded-full bg-purple-500" />
+        QC Pending
+      </span>
     );
   }
   if (s === "COMPLETED" || s === "CLOSED") {
     return (
-      <Badge className="bg-teal-500/15 text-teal-700 border-teal-500/30 dark:text-teal-300">
-        <CheckCircle2 className="w-3 h-3 inline-block mr-1" />
-        COMPLETED
-      </Badge>
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/25">
+        <span className="size-1.5 rounded-full bg-teal-500" />
+        Completed
+      </span>
     );
   }
-  if (s === "MATERIAL_ISSUED") {
+  if (s === "MATERIAL_PENDING" || s === "PLANNED") {
     return (
-      <Badge className="bg-indigo-500/15 text-indigo-700 border-indigo-500/30 dark:text-indigo-300">
-        WH ISSUED (RECEIPT REQ.)
-      </Badge>
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
+        <span className="size-1.5 rounded-full bg-amber-500" />
+        Material Pending
+      </span>
     );
   }
   return (
-    <Badge variant="outline" className="text-muted-foreground">
-      {status || "AWAITING MATERIALS"}
+    <Badge variant="outline" className="text-xs font-medium">
+      {status ? status.replace(/_/g, " ") : "Pending"}
     </Badge>
   );
 }
 
 function AssemblyProductionPage() {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<AssemblyProductionOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
 
@@ -107,9 +115,10 @@ function AssemblyProductionPage() {
   // Start Production Confirmation State
   const [startingOrderId, setStartingOrderId] = useState<string | null>(null);
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    else setLoading(true);
     try {
-      setLoading(true);
       const res = await api.getAssemblyProductionOrders({
         search: search || undefined,
         status: statusFilter !== "ALL" ? statusFilter : undefined,
@@ -119,17 +128,13 @@ function AssemblyProductionPage() {
       toast.error("Failed to load production orders: " + (err.message || "Unknown error"));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
     fetchOrders();
   }, [statusFilter]);
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    fetchOrders();
-  };
 
   const handleStartProduction = async (order: AssemblyProductionOrder) => {
     if (!order.can_start) {
@@ -182,193 +187,452 @@ function AssemblyProductionPage() {
   const readyToStart = orders.filter((o) => o.can_start).length;
   const inProduction = orders.filter((o) => o.can_complete).length;
   const qcPending = orders.filter((o) => o.status === "QC_PENDING").length;
+  const completedCount = orders.filter((o) => o.status === "COMPLETED" || o.status === "CLOSED").length;
+
+  // Local text search
+  const filteredOrders = useMemo(() => {
+    if (!search.trim()) return orders;
+    const q = search.toLowerCase().trim();
+    return orders.filter(
+      (o) =>
+        o.order_number?.toLowerCase().includes(q) ||
+        o.product_name?.toLowerCase().includes(q) ||
+        o.product_code?.toLowerCase().includes(q) ||
+        o.material_request_number?.toLowerCase().includes(q)
+    );
+  }, [orders, search]);
+
+  // Workflow Quick Link Cards
+  const workflowShortcuts = [
+    {
+      title: "Assembly Dashboard",
+      subtitle: "Floor monitoring & KPI metrics",
+      icon: LayoutDashboard,
+      to: "/assembly-dashboard",
+      tone: "blue",
+    },
+    {
+      title: "Work Orders",
+      subtitle: "Manufacturing orders & BOM lines",
+      icon: Layers,
+      to: "/assembly/orders",
+      tone: "amber",
+    },
+    {
+      title: "Material Requests",
+      subtitle: "Warehouse component requisition",
+      icon: Boxes,
+      to: "/assembly/material-requests",
+      tone: "cyan",
+    },
+    {
+      title: "Quality Inspections",
+      subtitle: "Batch testing & QC pass signs",
+      icon: ShieldCheck,
+      to: "/assembly/quality",
+      tone: "purple",
+    },
+  ];
 
   return (
     <AppShell
       title="Production"
       subtitle="Assembly work center operations, step execution, and production recording"
+      actions={
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card border border-border/80 shadow-2xs text-xs font-medium text-muted-foreground">
+            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            Lines Active & Synced
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate({ to: "/assembly-dashboard" as any })}
+            className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80 font-medium"
+          >
+            <LayoutDashboard className="size-3.5 text-primary" />
+            Dashboard
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate({ to: "/assembly/material-requests" as any })}
+            className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80 font-medium"
+          >
+            <Boxes className="size-3.5 text-amber-500" />
+            Material Requests
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchOrders(true)}
+            disabled={refreshing}
+            className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80"
+          >
+            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} />
+            Refresh
+          </Button>
+        </div>
+      }
     >
       <div className="space-y-6">
-        {/* Stat Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
+        {/* 5 Top KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
+          {/* Card 1: Total Orders */}
+          <div className="group relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-blue-500/35 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">Total Orders</span>
-              <Factory className="h-4 w-4 text-primary" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Total Orders
+              </span>
+              <div className="grid size-9 place-items-center rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20 shadow-2xs">
+                <Factory className="size-4" />
+              </div>
             </div>
-            <div className="mt-2 text-2xl font-bold tracking-tight text-foreground">{totalOrders}</div>
-            <p className="mt-1 text-xs text-muted-foreground">Tracked in Assembly</p>
+            <div className="mt-3">
+              <div className="text-3xl font-black tracking-tight text-foreground tabular-nums">
+                {loading ? "..." : totalOrders}
+              </div>
+              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Tracked in Assembly</span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                  Total
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
+          {/* Card 2: Ready to Start */}
+          <div className="group relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-emerald-500/35 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">Ready to Start</span>
-              <Boxes className="h-4 w-4 text-emerald-500" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Ready to Start
+              </span>
+              <div className="grid size-9 place-items-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-2xs">
+                <Play className="size-4" />
+              </div>
             </div>
-            <div className="mt-2 text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
-              {readyToStart}
+            <div className="mt-3">
+              <div className="text-3xl font-black tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums">
+                {loading ? "..." : readyToStart}
+              </div>
+              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Materials confirmed</span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                  Ready
+                </span>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">Materials confirmed received</p>
           </div>
 
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
+          {/* Card 3: In Production */}
+          <div className="group relative overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-amber-500/35 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">In Production</span>
-              <Clock className="h-4 w-4 text-amber-500" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                In Production
+              </span>
+              <div className="grid size-9 place-items-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shadow-2xs">
+                <Clock className="size-4" />
+              </div>
             </div>
-            <div className="mt-2 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
-              {inProduction}
+            <div className="mt-3">
+              <div className="text-3xl font-black tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
+                {loading ? "..." : inProduction}
+              </div>
+              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Active bench runs</span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                  Active
+                </span>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">Currently being assembled</p>
           </div>
 
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
+          {/* Card 4: QC Pending */}
+          <div className="group relative overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-purple-500/35 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">QC Pending</span>
-              <ShieldCheck className="h-4 w-4 text-blue-500" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                QC Pending
+              </span>
+              <div className="grid size-9 place-items-center rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20 shadow-2xs">
+                <ShieldCheck className="size-4" />
+              </div>
             </div>
-            <div className="mt-2 text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400">
-              {qcPending}
+            <div className="mt-3">
+              <div className="text-3xl font-black tracking-tight text-purple-600 dark:text-purple-400 tabular-nums">
+                {loading ? "..." : qcPending}
+              </div>
+              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Awaiting inspection</span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-300">
+                  Audit
+                </span>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">Awaiting final inspection</p>
+          </div>
+
+          {/* Card 5: Completed */}
+          <div className="group relative overflow-hidden rounded-2xl border border-teal-500/20 bg-gradient-to-br from-teal-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-teal-500/35 flex flex-col justify-between col-span-2 md:col-span-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Completed
+              </span>
+              <div className="grid size-9 place-items-center rounded-xl bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20 shadow-2xs">
+                <CheckCircle2 className="size-4" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <div className="text-3xl font-black tracking-tight text-teal-600 dark:text-teal-400 tabular-nums">
+                {loading ? "..." : completedCount}
+              </div>
+              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Finished & ready</span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-teal-500/10 text-teal-700 dark:text-teal-300">
+                  Done
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Filter Controls & Search */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto p-1 bg-muted/50 rounded-lg border border-border/40">
-            {[
-              { id: "ALL", label: "All Orders" },
-              { id: "READY", label: "Ready to Start" },
-              { id: "IN_PRODUCTION", label: "In Production" },
-              { id: "COMPLETED", label: "QC / Completed" },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setStatusFilter(tab.id)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap ${
-                  statusFilter === tab.id
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+        {/* Workflow Quick Links */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {workflowShortcuts.map((sc) => {
+            const Icon = sc.icon;
+            return (
+              <Link
+                key={sc.to}
+                to={sc.to as any}
+                className="group relative flex items-center justify-between p-3.5 rounded-xl border border-border/80 bg-card hover:border-primary/40 hover:bg-muted/40 transition-all duration-200 shadow-2xs"
               >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-64">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search order or product..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 h-9 text-xs"
-              />
-            </div>
-            <Button type="submit" variant="outline" size="sm" className="h-9 px-3">
-              Search
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setSearch("");
-                setStatusFilter("ALL");
-                fetchOrders();
-              }}
-              className="h-9 px-2"
-              title="Refresh"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </form>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={cn(
+                      "grid size-9 shrink-0 place-items-center rounded-lg border",
+                      sc.tone === "blue" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
+                      sc.tone === "amber" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
+                      sc.tone === "cyan" && "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
+                      sc.tone === "purple" && "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20"
+                    )}
+                  >
+                    <Icon className="size-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">
+                      {sc.title}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground truncate">{sc.subtitle}</div>
+                  </div>
+                </div>
+                <ArrowRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary shrink-0 pl-1" />
+              </Link>
+            );
+          })}
         </div>
 
-        {/* Orders Table */}
-        <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-muted/40 text-muted-foreground font-medium border-b border-border/60">
-                <tr>
-                  <th className="py-3 px-4">Order Number</th>
-                  <th className="py-3 px-4">Product Details</th>
-                  <th className="py-3 px-4">Target Qty</th>
-                  <th className="py-3 px-4">Produced Qty</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Line & Operator</th>
-                  <th className="py-3 px-4 text-right">Production Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {loading ? (
-                  <tr>
-                    <td colSpan={7} className="py-12 text-center text-muted-foreground">
-                      <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-primary" />
-                      Loading production orders...
-                    </td>
-                  </tr>
-                ) : orders.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-12 text-center text-muted-foreground">
-                      <Factory className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                      <p className="font-medium text-foreground">No production orders found.</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Create a Material Request and confirm receipt to start production.
-                      </p>
-                    </td>
-                  </tr>
+        {/* Main Work Center Table Card */}
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+          {/* Header & Controls */}
+          <div className="space-y-4 pb-4 border-b border-border/60">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-foreground flex items-center gap-2">
+                  <Factory className="size-4 text-primary" />
+                  Active Line Execution Center
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Control bench operations, execute manufacturing steps, and record finished batch outputs
+                </p>
+              </div>
+              <div className="text-xs text-muted-foreground self-start sm:self-auto font-medium">
+                Showing <strong className="text-foreground">{filteredOrders.length}</strong> of{" "}
+                <strong className="text-foreground">{orders.length}</strong> line runs
+              </div>
+            </div>
+
+            {/* Filter & Search Toolbar */}
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-1">
+              {/* Status Filter Tabs */}
+              <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/60">
+                {[
+                  { key: "ALL", label: `All Orders (${totalOrders})` },
+                  { key: "READY", label: `Ready to Start (${readyToStart})` },
+                  { key: "IN_PRODUCTION", label: `In Production (${inProduction})` },
+                  { key: "COMPLETED", label: `QC / Completed (${qcPending + completedCount})` },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setStatusFilter(tab.key)}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-semibold rounded-lg transition-all",
+                      statusFilter === tab.key
+                        ? "bg-card text-foreground shadow-xs border border-border/50"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search input */}
+              <div className="relative min-w-[240px]">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search order or product..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-8 w-full rounded-lg border border-border bg-card pl-8 pr-7 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Table Content */}
+          {loading ? (
+            <div className="py-16 text-center space-y-3">
+              <RefreshCw className="size-6 animate-spin text-primary mx-auto opacity-70" />
+              <p className="text-xs text-muted-foreground">Loading production runs from database...</p>
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="py-14 text-center">
+              <div className="grid size-12 place-items-center rounded-2xl bg-muted mx-auto mb-3 text-muted-foreground">
+                <Factory className="size-6 opacity-60" />
+              </div>
+              <p className="text-sm font-semibold text-foreground">
+                {search || statusFilter !== "ALL"
+                  ? "No production runs match the selected filter"
+                  : "No production orders currently in execution"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                {search || statusFilter !== "ALL"
+                  ? "Try resetting your search query or switching to 'All Orders' status filter."
+                  : "Staged orders with confirmed raw materials appear here ready for bench assembly."}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                {search || statusFilter !== "ALL" ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-xl text-xs gap-1.5"
+                    onClick={() => {
+                      setSearch("");
+                      setStatusFilter("ALL");
+                    }}
+                  >
+                    Reset Filters
+                  </Button>
                 ) : (
-                  orders.map((order) => {
+                  <Button
+                    size="sm"
+                    className="rounded-xl text-xs gap-1.5 font-semibold"
+                    onClick={() => navigate({ to: "/assembly/material-requests" as any })}
+                  >
+                    <Boxes className="size-3.5" />
+                    View Material Requests
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto -mx-5 px-5">
+              <table className="w-full text-left text-sm mt-1">
+                <thead>
+                  <tr className="border-b border-border/60 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                    <th className="py-3 px-3">Order Number</th>
+                    <th className="py-3 px-3">Product Details</th>
+                    <th className="py-3 px-3">Target Qty</th>
+                    <th className="py-3 px-3 min-w-[140px]">Progress</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3">Line & Operator</th>
+                    <th className="py-3 px-3 text-right">Production Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {filteredOrders.map((order) => {
                     const percent =
                       order.target_quantity > 0
                         ? Math.min(100, Math.round((order.produced_quantity / order.target_quantity) * 100))
                         : 0;
+                    const isDone = percent >= 100 || order.status === "COMPLETED";
 
                     return (
-                      <tr key={order.id} className="hover:bg-muted/30 transition-colors">
-                        {/* Order Number & Date */}
-                        <td className="py-3.5 px-4 font-mono font-semibold text-foreground">
-                          <div className="flex flex-col">
-                            <span>{order.order_number}</span>
-                            <span className="text-[10px] text-muted-foreground font-sans mt-0.5">
-                              Req: {order.material_request_number || "—"}
-                            </span>
+                      <tr key={order.id} className="group hover:bg-muted/40 transition-colors">
+                        {/* Order Number */}
+                        <td className="py-3.5 px-3">
+                          <div className="font-bold text-foreground text-xs font-mono group-hover:text-primary transition-colors">
+                            {order.order_number}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            {order.material_request_number ? (
+                              <Link
+                                to="/assembly/material-requests"
+                                className="hover:underline hover:text-primary font-mono inline-flex items-center gap-1"
+                              >
+                                Req: {order.material_request_number}
+                              </Link>
+                            ) : (
+                              "Direct Work Run"
+                            )}
                           </div>
                         </td>
 
-                        {/* Product Code & Name */}
-                        <td className="py-3.5 px-4">
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-foreground">{order.product_name}</span>
-                            <span className="font-mono text-[11px] text-muted-foreground mt-0.5">
-                              {order.product_code}
-                            </span>
+                        {/* Product Details */}
+                        <td className="py-3.5 px-3">
+                          <div className="font-semibold text-foreground text-xs">{order.product_name}</div>
+                          <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                            {order.product_code}
                           </div>
                         </td>
 
                         {/* Target Qty */}
-                        <td className="py-3.5 px-4">
-                          <span className="font-medium text-foreground">
-                            {order.target_quantity} {order.uom}
+                        <td className="py-3.5 px-3 whitespace-nowrap">
+                          <span className="font-bold text-foreground text-xs tabular-nums">
+                            {order.target_quantity}
+                          </span>{" "}
+                          <span className="text-[11px] text-muted-foreground font-medium">
+                            {order.uom}
                           </span>
                         </td>
 
                         {/* Produced Qty & Progress */}
-                        <td className="py-3.5 px-4">
-                          <div className="flex flex-col gap-1 w-28">
-                            <div className="flex justify-between text-[11px] font-medium">
-                              <span className={order.produced_quantity > 0 ? "text-emerald-600 font-bold" : "text-muted-foreground"}>
+                        <td className="py-3.5 px-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-semibold text-foreground tabular-nums">
                                 {order.produced_quantity} {order.uom}
                               </span>
-                              <span className="text-muted-foreground">{percent}%</span>
+                              <span
+                                className={cn(
+                                  "text-[10px] font-semibold tabular-nums",
+                                  isDone
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : percent > 0
+                                    ? "text-amber-600 dark:text-amber-400"
+                                    : "text-muted-foreground"
+                                )}
+                              >
+                                {percent}%
+                              </span>
                             </div>
-                            <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                            <div className="w-full bg-muted/80 rounded-full h-2 overflow-hidden border border-border/30">
                               <div
-                                className="bg-emerald-500 h-1.5 rounded-full transition-all"
+                                className={cn(
+                                  "h-full rounded-full transition-all duration-300",
+                                  isDone
+                                    ? "bg-emerald-500"
+                                    : percent > 0
+                                    ? "bg-amber-500"
+                                    : "bg-muted-foreground/30"
+                                )}
                                 style={{ width: `${percent}%` }}
                               />
                             </div>
@@ -376,20 +640,23 @@ function AssemblyProductionPage() {
                         </td>
 
                         {/* Status */}
-                        <td className="py-3.5 px-4">
-                          {getStatusBadge(order.status)}
-                        </td>
+                        <td className="py-3.5 px-3 whitespace-nowrap">{getStatusBadge(order.status)}</td>
 
                         {/* Line & Operator */}
-                        <td className="py-3.5 px-4 text-muted-foreground">
+                        <td className="py-3.5 px-3 whitespace-nowrap">
                           <div className="flex flex-col text-[11px]">
-                            <span className="font-medium text-foreground">{order.assigned_line || "Line 1"}</span>
-                            <span>{order.assigned_operator || "Unassigned"}</span>
+                            <span className="font-semibold text-foreground">
+                              {order.assigned_line || "LINE-01"}
+                            </span>
+                            <span className="text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <User className="size-3 text-muted-foreground/60" />
+                              {order.assigned_operator || "Unassigned"}
+                            </span>
                           </div>
                         </td>
 
-                        {/* Actions */}
-                        <td className="py-3.5 px-4 text-right">
+                        {/* Production Actions */}
+                        <td className="py-3.5 px-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
                             {/* Action: Start Production */}
                             {order.can_start && (
@@ -397,9 +664,9 @@ function AssemblyProductionPage() {
                                 size="sm"
                                 onClick={() => handleStartProduction(order)}
                                 disabled={startingOrderId === order.id}
-                                className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                                className="h-7 px-3 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 rounded-lg shadow-sm"
                               >
-                                <Play className="h-3.5 w-3.5 fill-current" />
+                                <Play className="size-3 fill-current" />
                                 {startingOrderId === order.id ? "Starting..." : "Start Production"}
                               </Button>
                             )}
@@ -409,65 +676,81 @@ function AssemblyProductionPage() {
                               <Button
                                 size="sm"
                                 onClick={() => handleOpenCompleteModal(order)}
-                                className="h-8 gap-1.5 bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
+                                className="h-7 px-3 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white gap-1.5 rounded-lg shadow-sm"
                               >
-                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <CheckCircle2 className="size-3.5" />
                                 Complete Production
                               </Button>
                             )}
 
-                            {/* Completed / QC Pending Badge info */}
+                            {/* QC Pending Action */}
                             {order.status === "QC_PENDING" && (
-                              <span className="text-xs text-blue-600 dark:text-blue-400 font-medium inline-flex items-center gap-1">
-                                <ShieldCheck className="h-3.5 w-3.5" />
+                              <Link
+                                to="/assembly/quality"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-purple-700 bg-purple-500/10 border border-purple-500/25 hover:bg-purple-500/20 transition-colors"
+                              >
+                                <ShieldCheck className="size-3.5 text-purple-600" />
                                 Ready for QC
-                              </span>
+                                <ArrowRight className="size-3 ml-0.5" />
+                              </Link>
                             )}
 
+                            {/* Completed Status */}
                             {order.status === "COMPLETED" && (
-                              <span className="text-xs text-teal-600 dark:text-teal-400 font-medium inline-flex items-center gap-1">
-                                <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-teal-700 dark:text-teal-300 bg-teal-500/10 border border-teal-500/25">
+                                <CheckCircle2 className="size-3.5" />
                                 Completed
                               </span>
                             )}
 
-                            {/* Material Pending fallback notice */}
-                            {!order.can_start && !order.can_complete && order.status !== "QC_PENDING" && order.status !== "COMPLETED" && (
-                              <span className="text-[11px] text-muted-foreground italic">
-                                Awaiting material receipt
-                              </span>
-                            )}
+                            {/* Material Pending fallback action */}
+                            {!order.can_start &&
+                              !order.can_complete &&
+                              order.status !== "QC_PENDING" &&
+                              order.status !== "COMPLETED" && (
+                                <Link
+                                  to="/assembly/material-requests"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/25 hover:bg-amber-500/20 transition-colors"
+                                  title="View or request required raw materials from warehouse"
+                                >
+                                  <Boxes className="size-3.5 text-amber-600" />
+                                  Awaiting Materials
+                                  <ArrowRight className="size-3 ml-0.5" />
+                                </Link>
+                              )}
                           </div>
                         </td>
                       </tr>
                     );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        {/* Complete Production Modal */}
+        {/* ========================================================================= */}
+        {/* COMPLETE PRODUCTION MODAL */}
+        {/* ========================================================================= */}
         <Dialog open={!!completeOrder} onOpenChange={(open) => !open && setCompleteOrder(null)}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-foreground">
-                <Factory className="h-5 w-5 text-amber-500" />
+          <DialogContent className="max-w-md p-6 rounded-2xl">
+            <DialogHeader className="border-b border-border/60 pb-3">
+              <DialogTitle className="flex items-center gap-2 text-foreground text-lg font-bold">
+                <Factory className="size-5 text-amber-500" />
                 Complete Production & Record Output
               </DialogTitle>
-              <DialogDescription>
-                Record the actual assembled quantity for order{" "}
+              <DialogDescription className="text-xs text-muted-foreground mt-1">
+                Record actual assembled quantity for order{" "}
                 <span className="font-mono font-semibold text-foreground">
                   {completeOrder?.order_number}
                 </span>
-                . The order will be routed to Quality Check (QC).
+                . The completed batch will be routed to Quality Check (QC).
               </DialogDescription>
             </DialogHeader>
 
             {completeOrder && (
-              <div className="space-y-4 py-2">
-                <div className="rounded-lg bg-muted/50 p-3 text-xs space-y-1.5 border border-border/40">
+              <div className="space-y-4 pt-3">
+                <div className="rounded-xl bg-muted/40 p-3.5 text-xs space-y-2 border border-border/60">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Product:</span>
                     <span className="font-semibold text-foreground">{completeOrder.product_name}</span>
@@ -480,13 +763,15 @@ function AssemblyProductionPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Assigned Line:</span>
-                    <span className="text-foreground">{completeOrder.assigned_line || "Line 1"}</span>
+                    <span className="text-foreground font-medium">
+                      {completeOrder.assigned_line || "Line 1"}
+                    </span>
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-foreground">
-                    Actual Produced Quantity ({completeOrder.uom}) <span className="text-red-500">*</span>
+                  <label className="text-xs font-semibold text-foreground">
+                    Actual Produced Quantity ({completeOrder.uom}) *
                   </label>
                   <Input
                     type="number"
@@ -494,32 +779,33 @@ function AssemblyProductionPage() {
                     max={completeOrder.target_quantity * 2}
                     value={producedQuantity}
                     onChange={(e) => setProducedQuantity(Number(e.target.value))}
-                    className="h-9 text-sm font-mono font-semibold"
+                    className="h-9 text-sm font-mono font-bold rounded-xl"
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    Pre-filled with target quantity. Adjust if any units were rejected on the bench.
+                    Pre-filled with target quantity. Adjust if any units were rejected or scrapped during bench work.
                   </p>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-foreground">
+                  <label className="text-xs font-semibold text-foreground">
                     Production Notes / Serial Range (Optional)
                   </label>
                   <Textarea
-                    placeholder="e.g. Assembled according to SOP Rev 2. Serial batch SN-2026-081 through 100."
+                    placeholder="e.g. Assembled per SOP-04 Rev 2. Serial batch SN-2026-001 through 010 verified."
                     value={productionNotes}
                     onChange={(e) => setProductionNotes(e.target.value)}
                     rows={3}
-                    className="text-xs"
+                    className="text-xs resize-none rounded-xl"
                   />
                 </div>
               </div>
             )}
 
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="pt-2">
               <Button
                 variant="outline"
                 size="sm"
+                className="rounded-xl"
                 onClick={() => setCompleteOrder(null)}
                 disabled={completing}
               >
@@ -529,10 +815,14 @@ function AssemblyProductionPage() {
                 size="sm"
                 onClick={handleCompleteSubmit}
                 disabled={completing || producedQuantity <= 0}
-                className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+                className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white gap-1.5 font-semibold shadow-soft"
               >
-                <CheckCircle2 className="h-4 w-4" />
-                {completing ? "Completing..." : "Complete & Route to QC"}
+                {completing ? (
+                  <RefreshCw className="size-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="size-3.5" />
+                )}
+                Complete & Route to QC
               </Button>
             </DialogFooter>
           </DialogContent>

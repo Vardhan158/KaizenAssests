@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import logging
+import re
 from typing import Any, Dict, List, Optional
 import uuid
 
@@ -273,6 +274,129 @@ async def list_assembly_products(
                 "uom": "PCS",
             })
         return products
+
+
+class CreateBOMComponentPayload(BaseModel):
+    material_code: str
+    material_name: str
+    quantity_per_unit: float = 1.0
+    uom: str = "PCS"
+
+
+class CreateProductPayload(BaseModel):
+    product_name: str
+    product_code: Optional[str] = None
+    description: Optional[str] = None
+    components: Optional[List[CreateBOMComponentPayload]] = None
+
+
+@router.post("/products", status_code=status.HTTP_201_CREATED)
+async def create_assembly_product(
+    payload: CreateProductPayload,
+    uow: UnitOfWork = Depends(get_uow),
+    current_user: Optional[CurrentUser] = Depends(get_current_user),
+):
+    """
+    Register a new manufacturable product and its Bill of Materials (BOM) in PostgreSQL.
+    """
+    async with uow:
+        clean_name = payload.product_name.strip()
+        if not clean_name:
+            raise HTTPException(status_code=400, detail="Product name is required.")
+
+        clean_code = (payload.product_code or "").strip().upper()
+        if not clean_code or clean_code == "AUTO":
+            words = [w for w in re.split(r'[\s_\-]+', clean_name) if w]
+            if len(words) >= 2:
+                prefix = "".join(w[0].upper() for w in words[:3])
+            elif words:
+                prefix = words[0][:4].upper()
+            else:
+                prefix = "PRD"
+            prefix = re.sub(r'[^A-Z0-9]', '', prefix) or "PRD"
+
+            for s in range(1, 1000):
+                candidate = f"FG-{prefix}-{s:03d}"
+                exists_check = await uow.session.execute(
+                    select(BillOfMaterialsModel.id).where(BillOfMaterialsModel.product_code == candidate)
+                )
+                if not exists_check.scalars().first():
+                    clean_code = candidate
+                    break
+            if not clean_code or clean_code == "AUTO":
+                clean_code = f"FG-{prefix}-{uuid.uuid4().hex[:4].upper()}"
+
+        existing = await uow.session.execute(
+            select(BillOfMaterialsModel).where(
+                or_(
+                    BillOfMaterialsModel.product_code == clean_code,
+                    BillOfMaterialsModel.product_name == clean_name,
+                )
+            )
+        )
+        if existing.scalars().first():
+            raise HTTPException(
+                status_code=400,
+                detail=f"A product with code '{clean_code}' or name '{clean_name}' already exists."
+            )
+
+        date_str = datetime.now().strftime("%Y%m%d")
+        seq_res = await uow.session.execute(
+            select(func.count(BillOfMaterialsModel.id)).where(
+                BillOfMaterialsModel.bom_number.like(f"BOM-{date_str}-%")
+            )
+        )
+        count_seq = (seq_res.scalar() or 0) + 1
+        bom_number = f"BOM-{date_str}-{count_seq:04d}"
+
+        user_name = current_user.username if current_user and current_user.username else "Assembly Planner"
+
+        bom = BillOfMaterialsModel(
+            id=uuid.uuid4(),
+            bom_number=bom_number,
+            product_code=clean_code,
+            product_name=clean_name,
+            description=payload.description or f"BOM for {clean_name}",
+            status="ACTIVE",
+            created_by=user_name,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        uow.session.add(bom)
+
+        items_to_add = payload.components or [
+            CreateBOMComponentPayload(
+                material_code=f"COMP-{clean_code[:8].upper()}-01",
+                material_name=f"{clean_name} Core Component",
+                quantity_per_unit=1.0,
+                uom="PCS"
+            )
+        ]
+
+        for itm in items_to_add:
+            bom_item = BillOfMaterialsItemModel(
+                id=uuid.uuid4(),
+                bom_id=bom.id,
+                material_code=itm.material_code.strip(),
+                material_name=itm.material_name.strip(),
+                quantity_per_unit=Decimal(str(itm.quantity_per_unit)),
+                uom=itm.uom or "PCS",
+                created_at=datetime.now(),
+            )
+            uow.session.add(bom_item)
+
+        await uow.commit()
+
+        return {
+            "id": str(bom.id),
+            "product_code": bom.product_code,
+            "product_name": bom.product_name,
+            "bom_number": bom.bom_number,
+            "description": bom.description,
+            "uom": "PCS",
+            "message": f"Product '{bom.product_name}' registered successfully with BOM {bom.bom_number}."
+        }
+
 
 
 @router.get("/lines")

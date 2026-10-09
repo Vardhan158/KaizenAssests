@@ -22,12 +22,16 @@ import {
   FileText,
   Filter,
   Layers,
+  LayoutDashboard,
   Package,
+  Plus,
   PlusCircle,
   RefreshCw,
   Search,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +48,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { cn, generateProductSKU } from "@/lib/utils";
 
 interface SearchParams {
   view?: string;
@@ -111,6 +116,63 @@ function AssemblyOrdersPage() {
     priority: "NORMAL",
     notes: "",
   });
+
+  // Add Product & BOM dialog state
+  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
+  const [addingProduct, setAddingProduct] = useState(false);
+  const [skuManuallyEdited, setSkuManuallyEdited] = useState(false);
+  const [newProductData, setNewProductData] = useState({
+    product_name: "",
+    product_code: "",
+    description: "",
+    components: [
+      { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
+      { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+    ],
+  });
+
+  const openAddProductModal = () => {
+    const existingCodes = products.map((p) => p.product_code);
+    const initialSku = generateProductSKU("", existingCodes);
+    setSkuManuallyEdited(false);
+    setNewProductData({
+      product_name: "",
+      product_code: initialSku,
+      description: "",
+      components: [
+        { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
+        { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+      ],
+    });
+    setIsAddProductOpen(true);
+  };
+
+  const handleProductNameChange = (name: string) => {
+    const existingCodes = products.map((p) => p.product_code);
+    if (!skuManuallyEdited) {
+      const generated = generateProductSKU(name, existingCodes);
+      setNewProductData((prev) => ({
+        ...prev,
+        product_name: name,
+        product_code: generated,
+      }));
+    } else {
+      setNewProductData((prev) => ({
+        ...prev,
+        product_name: name,
+      }));
+    }
+  };
+
+  const handleRegenerateSKU = () => {
+    const existingCodes = products.map((p) => p.product_code);
+    const generated = generateProductSKU(newProductData.product_name, existingCodes);
+    setNewProductData((prev) => ({
+      ...prev,
+      product_code: generated,
+    }));
+    setSkuManuallyEdited(false);
+  };
 
   // Order Detail Drawer/Modal state
   const [selectedOrder, setSelectedOrder] = useState<AssemblyOrder | null>(null);
@@ -192,11 +254,13 @@ function AssemblyOrdersPage() {
       ]);
       setProducts(prodsRes);
       setLines(linesRes);
-      if (prodsRes.length > 0 && !formData.product_code) {
-        setFormData((prev) => ({ ...prev, product_code: prodsRes[0].product_code }));
+      const firstProd = prodsRes[0];
+      if (firstProd && !formData.product_code) {
+        setFormData((prev) => ({ ...prev, product_code: firstProd.product_code }));
       }
-      if (linesRes.length > 0 && !formData.assembly_line) {
-        setFormData((prev) => ({ ...prev, assembly_line: linesRes[0].code }));
+      const firstLine = linesRes[0];
+      if (firstLine && !formData.assembly_line) {
+        setFormData((prev) => ({ ...prev, assembly_line: firstLine.code }));
       }
     } catch (err: any) {
       console.error("Failed to load master data:", err);
@@ -277,40 +341,92 @@ function AssemblyOrdersPage() {
     }
   };
 
+  const handleCreateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProductData.product_name.trim()) {
+      toast.error("Product name is required.");
+      return;
+    }
+
+    const existingCodes = products.map((p) => p.product_code);
+    const finalCode = (
+      newProductData.product_code.trim() ||
+      generateProductSKU(newProductData.product_name, existingCodes)
+    ).toUpperCase();
+
+    try {
+      setAddingProduct(true);
+      const created = await api.createAssemblyProduct({
+        product_name: newProductData.product_name.trim(),
+        product_code: finalCode,
+        description: newProductData.description.trim() || undefined,
+        components: newProductData.components.filter((c) => c.material_code && c.material_name),
+      });
+
+      toast.success(`Product '${created.product_name}' registered with BOM ${created.bom_number}!`);
+      setIsAddProductOpen(false);
+
+      // Reload products list and auto-select newly created product
+      const updatedList = await api.getAssemblyProducts();
+      setProducts(updatedList);
+      setFormData((prev) => ({ ...prev, product_code: created.product_code }));
+
+      // Reset new product form
+      setNewProductData({
+        product_name: "",
+        product_code: "",
+        description: "",
+        components: [
+          { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
+          { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+        ],
+      });
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to create product.");
+    } finally {
+      setAddingProduct(false);
+    }
+  };
+
   const selectedProduct = products.find((p) => p.product_code === formData.product_code);
 
   return (
     <AppShell
       title="Assembly Orders"
       subtitle="Production work orders, BOM allocations & execution tracking"
+      actions={
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate({ to: "/assembly-dashboard" as any })}
+            className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80 font-medium"
+          >
+            <LayoutDashboard className="size-3.5 text-primary" />
+            Dashboard
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => loadOrders()}
+            disabled={loading}
+            className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80"
+          >
+            <RefreshCw className={cn("size-3.5", loading && "animate-spin text-primary")} />
+            Refresh
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setIsCreateOpen(true)}
+            className="rounded-xl text-xs gap-1.5 font-semibold shadow-soft bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <PlusCircle className="size-3.5" />
+            Create Assembly Order
+          </Button>
+        </div>
+      }
     >
       <div className="space-y-6">
-        {/* Header & Controls */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Assembly Orders</h1>
-            <p className="text-sm text-muted-foreground">Manage and track manufacturing work orders across production lines.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => loadOrders()}
-              className="gap-2"
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => setIsCreateOpen(true)}
-              className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              <PlusCircle className="h-4 w-4" />
-              + CREATE ASSEMBLY ORDER
-            </Button>
-          </div>
-        </div>
 
         {/* Filters Bar */}
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
@@ -489,27 +605,52 @@ function AssemblyOrdersPage() {
               <div className="space-y-4 py-4 text-sm">
                 {/* Product Select */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground flex items-center justify-between">
-                    <span>Product *</span>
-                    {selectedProduct && (
-                      <span className="text-[11px] font-normal text-muted-foreground">
-                        BOM: {selectedProduct.bom_number}
-                      </span>
-                    )}
-                  </label>
-                  <select
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={formData.product_code}
-                    onChange={(e) => setFormData({ ...formData, product_code: e.target.value })}
-                    required
-                  >
-                    <option value="" disabled>Select a manufacturable product...</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.product_code}>
-                        {p.product_name} ({p.product_code})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <span>Product to Manufacture <span className="text-destructive">*</span></span>
+                      {selectedProduct && (
+                        <span className="text-[11px] font-normal text-muted-foreground">
+                          (BOM: {selectedProduct.bom_number})
+                        </span>
+                      )}
+                    </label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={openAddProductModal}
+                      className="h-6 px-2 text-xs font-semibold text-primary hover:text-primary hover:bg-primary/10 gap-1 rounded-lg"
+                    >
+                      <Plus className="size-3.5" />
+                      Add Product
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={formData.product_code}
+                      onChange={(e) => setFormData({ ...formData, product_code: e.target.value })}
+                      required
+                    >
+                      <option value="" disabled>Select a manufacturable product...</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.product_code}>
+                          {p.product_name} ({p.product_code})
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={openAddProductModal}
+                      className="h-9 px-3 rounded-md text-xs gap-1 font-semibold border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+                      title="Add new manufacturable product & BOM"
+                    >
+                      <Plus className="size-3.5" />
+                      Add
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Target Quantity & Required Date */}
@@ -1182,6 +1323,202 @@ function AssemblyOrdersPage() {
             </DialogContent>
           </Dialog>
         )}
+
+        {/* ========================================================================= */}
+        {/* ADD MANUFACTURABLE PRODUCT & BOM MODAL */}
+        {/* ========================================================================= */}
+        <Dialog open={isAddProductOpen} onOpenChange={setIsAddProductOpen}>
+          <DialogContent className="max-w-lg p-6 rounded-2xl">
+            <DialogHeader className="border-b border-border/60 pb-3">
+              <DialogTitle className="text-lg font-bold text-foreground flex items-center gap-2">
+                <PlusCircle className="size-5 text-primary" />
+                Add Manufacturable Product & BOM
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground mt-1">
+                Register a new finished good item and define its Bill of Materials components for assembly.
+              </DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={handleCreateProduct} className="space-y-4 pt-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">Product Name *</label>
+                  <Input
+                    type="text"
+                    placeholder="e.g. Smart Sensor Hub"
+                    value={newProductData.product_name}
+                    onChange={(e) => handleProductNameChange(e.target.value)}
+                    required
+                    className="h-9 text-xs rounded-xl"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-foreground flex items-center gap-1">
+                      Product Code / SKU <span className="text-destructive">*</span>
+                    </label>
+                    <span className="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5">
+                      <Sparkles className="size-2.5" />
+                      Auto-generated
+                    </span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <Input
+                      type="text"
+                      placeholder="e.g. FG-SSH-001"
+                      value={newProductData.product_code}
+                      onChange={(e) => {
+                        setSkuManuallyEdited(true);
+                        setNewProductData({ ...newProductData, product_code: e.target.value.toUpperCase() });
+                      }}
+                      required
+                      className="h-9 pr-9 text-xs font-mono font-semibold rounded-xl uppercase tracking-wider bg-muted/30 focus:bg-background"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleRegenerateSKU}
+                      className="absolute right-1 size-7 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
+                      title="Re-generate SKU"
+                    >
+                      <Sparkles className="size-3.5 text-primary" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">Description (Optional)</label>
+                <Input
+                  type="text"
+                  placeholder="e.g. High-precision IoT environmental sensor controller"
+                  value={newProductData.description}
+                  onChange={(e) =>
+                    setNewProductData({ ...newProductData, description: e.target.value })
+                  }
+                  className="h-9 text-xs rounded-xl"
+                />
+              </div>
+
+              {/* Component Rows */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Layers className="size-3.5 text-primary" />
+                    Bill of Materials Components ({newProductData.components.length})
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-[11px] font-semibold text-primary hover:text-primary gap-1"
+                    onClick={() =>
+                      setNewProductData({
+                        ...newProductData,
+                        components: [
+                          ...newProductData.components,
+                          {
+                            material_code: `COMP-${newProductData.components.length + 1}`,
+                            material_name: `Component ${newProductData.components.length + 1}`,
+                            quantity_per_unit: 1,
+                            uom: "PCS",
+                          },
+                        ],
+                      })
+                    }
+                  >
+                    <Plus className="size-3" />
+                    Add Row
+                  </Button>
+                </div>
+
+                <div className="max-h-44 overflow-y-auto space-y-2 pr-1 rounded-xl border border-border/60 bg-muted/20 p-2.5">
+                  {newProductData.components.map((comp, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-card p-2 rounded-lg border border-border/50 text-xs">
+                      <div className="flex-1 space-y-1">
+                        <Input
+                          placeholder="Code (e.g. PCB-01)"
+                          value={comp.material_code}
+                          onChange={(e) => {
+                            const updated = [...newProductData.components];
+                            updated[idx].material_code = e.target.value.toUpperCase();
+                            setNewProductData({ ...newProductData, components: updated });
+                          }}
+                          required
+                          className="h-7 text-xs font-mono uppercase rounded-md"
+                        />
+                      </div>
+                      <div className="flex-[2] space-y-1">
+                        <Input
+                          placeholder="Description (e.g. Main Board)"
+                          value={comp.material_name}
+                          onChange={(e) => {
+                            const updated = [...newProductData.components];
+                            updated[idx].material_name = e.target.value;
+                            setNewProductData({ ...newProductData, components: updated });
+                          }}
+                          required
+                          className="h-7 text-xs rounded-md"
+                        />
+                      </div>
+                      <div className="w-16 space-y-1">
+                        <Input
+                          type="number"
+                          min="0.01"
+                          step="any"
+                          placeholder="Qty"
+                          value={comp.quantity_per_unit}
+                          onChange={(e) => {
+                            const updated = [...newProductData.components];
+                            updated[idx].quantity_per_unit = Number(e.target.value);
+                            setNewProductData({ ...newProductData, components: updated });
+                          }}
+                          required
+                          className="h-7 text-xs text-right font-mono rounded-md"
+                        />
+                      </div>
+                      {newProductData.components.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = newProductData.components.filter((_, i) => i !== idx);
+                            setNewProductData({ ...newProductData, components: updated });
+                          }}
+                          className="text-muted-foreground hover:text-destructive p-1"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={() => setIsAddProductOpen(false)}
+                  disabled={addingProduct}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={addingProduct}
+                  className="rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-soft"
+                >
+                  {addingProduct && <RefreshCw className="size-3.5 animate-spin" />}
+                  Create & Select Product
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppShell>
   );
