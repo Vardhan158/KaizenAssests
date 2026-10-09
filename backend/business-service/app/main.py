@@ -87,13 +87,21 @@ async def lifespan(app: FastAPI):
     # transaction is aborted and every later migration statement would fail.
     try:
         from sqlalchemy import text
-        from app.database.session import session_scope
+        from app.database.session import AsyncSessionFactory
+
+        # Reuse one connection for the compatibility pass. Opening a fresh
+        # NullPool connection for every ALTER/CREATE statement makes startup
+        # extremely slow when the database is remote.
+        migration_session = AsyncSessionFactory()
 
         # Helper to run DDL in its own transaction
         async def run_ddl(ddl_query: str):
-            async with session_scope() as session:
-                await session.execute(text(ddl_query))
-                await session.commit()
+            try:
+                await migration_session.execute(text(ddl_query))
+                await migration_session.commit()
+            except Exception:
+                await migration_session.rollback()
+                raise
 
         # Warehouse location master additions. These are deliberately additive
         # so existing Store → Zone → Bin records remain valid during rollout.
@@ -1512,6 +1520,7 @@ async def lifespan(app: FastAPI):
             logger.info("Ensured table 'assembly_stock_reservation' exists")
         except Exception as exc:
             logger.debug(f"Store / Zone / Manager / Reservation table DDL note: {exc}")
+        await migration_session.close()
     except Exception as e:
         logger.warning(f"Auto-migration failed: {e}", exc_info=True)
 

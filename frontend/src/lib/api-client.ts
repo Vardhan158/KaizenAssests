@@ -1400,7 +1400,7 @@ export const api = {
     return [];
   },
   async getSupplierReplacementRequest(id: string): Promise<any> {
-    return { id, status: "SUPPLIER_ACCEPTED", original_asn_id: "ASN-2026-004582", reason: "Damaged Material Replacement" };
+    return { id, status: "SUPPLIER_ACCEPTED", original_asn_id: "", reason: "Damaged Material Replacement" };
   },
 
   async acceptSupplierReplacementRequest(_id: string): Promise<any> {
@@ -1421,12 +1421,12 @@ export const api = {
     } catch {
       return {
         id,
-        asn_number: id.startsWith("ASN") ? id : "ASN-2026-004582",
-        po_number: "PO-2026-008741",
-        supplier_name: "Bharat Electronics Components Pvt. Ltd.",
-        vehicle_number: "KA 01 AB 4582",
-        driver_name: "Suresh Gowda",
-        driver_contact: "+91 98450 12345",
+        asn_number: id.startsWith("ASN") ? id : "",
+        po_number: "",
+        supplier_name: "",
+        vehicle_number: "",
+        driver_name: "",
+        driver_contact: "",
         status: "SUBMITTED",
       };
     }
@@ -1437,11 +1437,20 @@ export const api = {
   },
 
   async createAsn(data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/asns`, {
+    const result = await request<any>(`${BUSINESS_API_URL}/api/gate/asns`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
+    // Consume the locally reserved number only after the ASN is saved.
+    if (typeof window !== "undefined" && data?.asn_number) {
+      const sequence = Number.parseInt(String(data.asn_number).split("-").pop() || "0", 10);
+      if (Number.isFinite(sequence)) {
+        window.localStorage.setItem("kaizen-next-asn-sequence-v2", String(sequence));
+      }
+      window.localStorage.removeItem("kaizen-pending-asn-number-v2");
+    }
+    return result;
   },
 
   async updateAsn(id: string, data: any): Promise<any> {
@@ -1449,7 +1458,80 @@ export const api = {
   },
 
   async getNextAsnNumber(): Promise<{ asnNumber: string }> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/next-number`);
+    const pendingKey = "kaizen-pending-asn-number-v2";
+    if (typeof window !== "undefined") {
+      const pending = window.localStorage.getItem(pendingKey);
+      if (pending) return { asnNumber: pending };
+    }
+    try {
+      const result = await request<any>(`${BUSINESS_API_URL}/api/v1/gate/asns/next-number`);
+      if (typeof window !== "undefined" && result?.asnNumber) {
+        window.localStorage.setItem(pendingKey, result.asnNumber);
+      }
+      return result;
+    } catch {
+      // Keep the local/demo fallback sequential as well. The backend endpoint
+      // remains authoritative whenever it is available.
+      const key = "kaizen-next-asn-sequence-v2";
+      const pending = window.localStorage.getItem(pendingKey);
+      if (pending) return { asnNumber: pending };
+      const stored = Number.parseInt(window.localStorage.getItem(key) || "0", 10);
+      const next = Number.isFinite(stored) ? stored + 1 : 1;
+      const asnNumber = `ASN-${new Date().getFullYear()}-${next}`;
+      window.localStorage.setItem(pendingKey, asnNumber);
+      return {
+        asnNumber,
+      };
+    }
+  },
+
+  async getMaterialComponents(): Promise<any[]> {
+    try {
+      const res = await request<any[]>(`${BUSINESS_API_URL}/api/v1/gate/materials`);
+      if (Array.isArray(res) && res.length > 0) return res;
+    } catch {}
+
+    return [
+      { code: "MAT-RAD-001", name: "SKID MOUNTED RADIATOR", category: "Heavy Components", uom: "PCS" },
+      { code: "MAT-ECP-002", name: "ENGINE CONTROL PANEL", category: "Control Systems", uom: "PCS" },
+      { code: "MAT-EXS-003", name: "EXHAUST SILENCER", category: "Exhaust Systems", uom: "PCS" },
+      { code: "MAT-EFP-004", name: "EXHAUST FLEXIBLE PIPE WITH INSULATION AND ALUMINIUM CLADDING", category: "Piping & Cladding", uom: "METER" },
+      { code: "MAT-ATB-005", name: "ALTERNATOR TERMINAL BOX", category: "Electrical", uom: "PCS" },
+      { code: "MAT-DTK-006", name: "990 LITERS DOUBLE WALL DAY TANK", category: "Tanks & Vessels", uom: "PCS" },
+      { code: "MAT-MVI-007", name: "MV Isolator", category: "Electrical", uom: "PCS" },
+      { code: "MAT-PWC-008", name: "Power Cable", category: "Electrical", uom: "METER" },
+      { code: "MAT-FPA-009", name: "Fuel Pipe & accessories", category: "Piping", uom: "SET" },
+      { code: "MAT-CTR-010", name: "Cable Trays", category: "Electrical Accessories", uom: "METER" },
+      { code: "MAT-ENC-011", name: "Enclosure Module-1 (DG Set + Radiator)", category: "Enclosure Modules", uom: "SET" },
+      { code: "MAT-ENC-012", name: "Enclosure Module-2 (Fuel Tank + MV Isolator)", category: "Enclosure Modules", uom: "SET" },
+      { code: "MAT-ENC-013", name: "Enclosure Module-3 (Top cover Module 1)", category: "Enclosure Modules", uom: "SET" },
+      { code: "MAT-ENC-014", name: "Enclosure Module-4 (Top cover Module 2)", category: "Enclosure Modules", uom: "SET" },
+      { code: "MAT-ENC-015", name: "Enclosure Module-5 (Air Intake)", category: "Enclosure Modules", uom: "SET" },
+      { code: "MAT-ENC-016", name: "Enclosure Module-6 (Exhaust Attenuators)", category: "Enclosure Modules", uom: "SET" },
+      { code: "MAT-ENC-017", name: "Enclosure Module-7 (Exhaust duct on top of Module 6)", category: "Enclosure Modules", uom: "SET" },
+      { code: "MAT-ENC-018", name: "Enclosure Module-8 (Exhaust duct with hood on top of Module 7)", category: "Enclosure Modules", uom: "SET" },
+      { code: "MAT-EOD-019", name: "Enclosure Overall Dimension", category: "Enclosure Structures", uom: "SET" },
+      { code: "MAT-GWR-020", name: "Genset with radiator", category: "Gensets", uom: "SET" },
+      { code: "MAT-GNR-021", name: "Genset without radiator", category: "Gensets", uom: "SET" },
+      { code: "MAT-LSE-022", name: "Loose Item", category: "General Accessories", uom: "BOX" },
+    ];
+  },
+
+  async createMaterialComponent(name: string, uom: string = "PCS"): Promise<any> {
+    try {
+      return await request<any>(`${BUSINESS_API_URL}/api/v1/gate/materials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, uom }),
+      });
+    } catch {
+      return {
+        code: `MAT-${name.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
+        name,
+        category: "General Components",
+        uom,
+      };
+    }
   },
 
   async getNextMaterialRequestNumber(): Promise<{

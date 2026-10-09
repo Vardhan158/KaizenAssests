@@ -86,19 +86,19 @@ function InboundArrivals() {
   );
 
   // FR-02 Section A: Supplier and Shipment Details
-  const [selectedWarehouse, setSelectedWarehouse] = useState("Raw Material Warehouse");
-  const [selectedSupplier, setSelectedSupplier] = useState("Bharat Electronics Components Pvt. Ltd.");
-  const [selectedAsn, setSelectedAsn] = useState("ASN-2026-004582");
-  const [autoPoNumber, setAutoPoNumber] = useState("PO-2026-008741");
-  const [autoExpectedDate, setAutoExpectedDate] = useState("07 Oct 2026");
-  const [deliveryType, setDeliveryType] = useState("Regular Delivery");
+  const [selectedWarehouse, setSelectedWarehouse] = useState("");
+  const [selectedSupplier, setSelectedSupplier] = useState("");
+  const [selectedAsn, setSelectedAsn] = useState("");
+  const [autoPoNumber, setAutoPoNumber] = useState("");
+  const [autoExpectedDate, setAutoExpectedDate] = useState("");
+  const [deliveryType, setDeliveryType] = useState("");
   const [remarksText, setRemarksText] = useState("");
 
   // FR-02 Section B: Vehicle and Driver Details
-  const [vehicleNumberInput, setVehicleNumberInput] = useState("KA 01 AB 4582");
+  const [vehicleNumberInput, setVehicleNumberInput] = useState("");
   const [vehicleTypeInput, setVehicleTypeInput] = useState("Container Truck");
-  const [driverNameInput, setDriverNameInput] = useState("Suresh Gowda");
-  const [driverMobileInput, setDriverMobileInput] = useState("+91 98450 12345");
+  const [driverNameInput, setDriverNameInput] = useState("");
+  const [driverMobileInput, setDriverMobileInput] = useState("");
   const [transporterInput, setTransporterInput] = useState("VRL Logistics Ltd");
   const [driverIdTypeInput, setDriverIdTypeInput] = useState("Driving Licence");
   const [driverIdRefInput, setDriverIdRefInput] = useState("DL-2026-90812");

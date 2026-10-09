@@ -68,12 +68,16 @@ logger = logging.getLogger(__name__)
 
 
 def _asn_response(asn: AsnModel) -> dict:
+    logistics = asn.logistics or []
+    details = next((item for item in logistics if isinstance(item, dict) and item.get("type") == "asn_details"), {})
     return {
         "id": str(asn.id),
         "asn_number": asn.asn_number,
         "po_id": asn.po_id,
         "po_number": asn.po_number,
         "supplier_id": str(asn.supplier_id) if asn.supplier_id else None,
+        "supplier_name": details.get("supplier_name"),
+        "destination_warehouse": details.get("destination_warehouse"),
         "vehicle_number": asn.vehicle_number,
         "driver_name": asn.driver_name,
         "driver_contact": asn.driver_contact,
@@ -82,7 +86,7 @@ def _asn_response(asn: AsnModel) -> dict:
         "shipment_date": asn.shipment_date.isoformat() if asn.shipment_date else None,
         "status": asn.status,
         "transporter": asn.transporter,
-        "logistics": asn.logistics or [],
+        "logistics": logistics,
         "lines": [
             {
                 "item_code": line.item_code,
@@ -109,6 +113,88 @@ async def list_expected_deliveries(
             return []
     result = await uow.session.execute(query)
     return [_asn_response(asn) for asn in result.scalars().all()]
+
+
+DEFAULT_MATERIAL_COMPONENTS = [
+    {"code": "MAT-RAD-001", "name": "SKID MOUNTED RADIATOR", "category": "Heavy Components", "uom": "PCS"},
+    {"code": "MAT-ECP-002", "name": "ENGINE CONTROL PANEL", "category": "Control Systems", "uom": "PCS"},
+    {"code": "MAT-EXS-003", "name": "EXHAUST SILENCER", "category": "Exhaust Systems", "uom": "PCS"},
+    {"code": "MAT-EFP-004", "name": "EXHAUST FLEXIBLE PIPE WITH INSULATION AND ALUMINIUM CLADDING", "category": "Piping & Cladding", "uom": "METER"},
+    {"code": "MAT-ATB-005", "name": "ALTERNATOR TERMINAL BOX", "category": "Electrical", "uom": "PCS"},
+    {"code": "MAT-DTK-006", "name": "990 LITERS DOUBLE WALL DAY TANK", "category": "Tanks & Vessels", "uom": "PCS"},
+    {"code": "MAT-MVI-007", "name": "MV Isolator", "category": "Electrical", "uom": "PCS"},
+    {"code": "MAT-PWC-008", "name": "Power Cable", "category": "Electrical", "uom": "METER"},
+    {"code": "MAT-FPA-009", "name": "Fuel Pipe & accessories", "category": "Piping", "uom": "SET"},
+    {"code": "MAT-CTR-010", "name": "Cable Trays", "category": "Electrical Accessories", "uom": "METER"},
+    {"code": "MAT-ENC-011", "name": "Enclosure Module-1 (DG Set + Radiator)", "category": "Enclosure Modules", "uom": "SET"},
+    {"code": "MAT-ENC-012", "name": "Enclosure Module-2 (Fuel Tank + MV Isolator)", "category": "Enclosure Modules", "uom": "SET"},
+    {"code": "MAT-ENC-013", "name": "Enclosure Module-3 (Top cover Module 1)", "category": "Enclosure Modules", "uom": "SET"},
+    {"code": "MAT-ENC-014", "name": "Enclosure Module-4 (Top cover Module 2)", "category": "Enclosure Modules", "uom": "SET"},
+    {"code": "MAT-ENC-015", "name": "Enclosure Module-5 (Air Intake)", "category": "Enclosure Modules", "uom": "SET"},
+    {"code": "MAT-ENC-016", "name": "Enclosure Module-6 (Exhaust Attenuators)", "category": "Enclosure Modules", "uom": "SET"},
+    {"code": "MAT-ENC-017", "name": "Enclosure Module-7 (Exhaust duct on top of Module 6)", "category": "Enclosure Modules", "uom": "SET"},
+    {"code": "MAT-ENC-018", "name": "Enclosure Module-8 (Exhaust duct with hood on top of Module 7)", "category": "Enclosure Modules", "uom": "SET"},
+    {"code": "MAT-EOD-019", "name": "Enclosure Overall Dimension", "category": "Enclosure Structures", "uom": "SET"},
+    {"code": "MAT-GWR-020", "name": "Genset with radiator", "category": "Gensets", "uom": "SET"},
+    {"code": "MAT-GNR-021", "name": "Genset without radiator", "category": "Gensets", "uom": "SET"},
+    {"code": "MAT-LSE-022", "name": "Loose Item", "category": "General Accessories", "uom": "BOX"},
+]
+
+_custom_materials_store: list[dict] = []
+
+@preview_router.get("/materials")
+async def get_material_components(uow: UnitOfWork = Depends(get_uow)) -> list[dict]:
+    try:
+        from app.common.persistence.models import MaterialModel
+        res = await uow.session.execute(select(MaterialModel))
+        db_mats = res.scalars().all()
+        if db_mats and len(db_mats) > 0:
+            db_list = [{"code": m.material_code, "name": m.material_name, "category": m.category, "uom": m.base_uom} for m in db_mats]
+            return db_list + _custom_materials_store
+    except Exception:
+        pass
+
+    return DEFAULT_MATERIAL_COMPONENTS + _custom_materials_store
+
+
+@preview_router.post("/materials")
+async def add_material_component(
+    payload: dict = Body(...),
+    uow: UnitOfWork = Depends(get_uow)
+) -> dict:
+    mat_name = str(payload.get("name") or payload.get("material_name") or "").strip()
+    if not mat_name:
+        raise HTTPException(status_code=400, detail="Material name is required.")
+
+    code_prefix = re.sub(r"[^A-Z0-9]", "", mat_name.upper())[:6] or "MAT"
+    mat_code = f"MAT-{code_prefix}-{uuid.uuid4().hex[:4].upper()}"
+    uom = str(payload.get("uom") or "PCS").upper()
+    category = str(payload.get("category") or "General Components")
+
+    new_mat = {"code": mat_code, "name": mat_name, "category": category, "uom": uom}
+    _custom_materials_store.append(new_mat)
+
+    try:
+        from app.common.persistence.models import MaterialModel
+        existing = await uow.session.execute(
+            select(MaterialModel).where(MaterialModel.material_name.ilike(mat_name))
+        )
+        if not existing.scalar_one_or_none():
+            uow.session.add(
+                MaterialModel(
+                    id=uuid.uuid4(),
+                    material_code=mat_code,
+                    material_name=mat_name,
+                    category=category,
+                    base_uom=uom,
+                    status="Active",
+                )
+            )
+            await uow.session.commit()
+    except Exception as e:
+        logging.warning("Could not persist new material to DB table: %s", e)
+
+    return new_mat
 
 
 @preview_router.get("/asns/next-number")
@@ -271,6 +357,12 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
     if expected_raw:
         try:
             expected_arrival_at = datetime.datetime.fromisoformat(str(expected_raw).replace("Z", "+00:00"))
+            # The UI sends a date-only value. Store it at midnight while the
+            # API continues to expose the date separately to consumers.
+            if isinstance(expected_raw, str) and len(expected_raw) == 10:
+                expected_arrival_at = datetime.datetime.combine(
+                    datetime.date.fromisoformat(expected_raw), datetime.time.min
+                )
             # The ASN column is TIMESTAMP WITHOUT TIME ZONE. Normalize browser
             # ISO timestamps before binding them through asyncpg.
             if expected_arrival_at.tzinfo is not None:
@@ -295,7 +387,11 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
         shipment_type=str(payload.get("shipment_type") or "STANDARD").upper(),
         invoice_number=str(payload.get("invoice_number") or "").strip() or None,
         challan_number=str(payload.get("challan_number") or "").strip() or None,
-        logistics=payload.get("logistics") if isinstance(payload.get("logistics"), list) else None,
+        logistics=(payload.get("logistics") if isinstance(payload.get("logistics"), list) else []) + [{
+            "type": "asn_details",
+            "supplier_name": str(payload.get("supplier_name") or "").strip(),
+            "destination_warehouse": str(payload.get("destination_warehouse") or "").strip(),
+        }],
     )
     uow.session.add(asn)
     for raw_line, quantity in validated_lines:

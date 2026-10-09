@@ -53,7 +53,7 @@ function GateDashboard() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const entries = dashboardData?.gateEntries || [
+  const entries = Array.isArray(dashboardData?.gateEntries) ? dashboardData.gateEntries : []; /*
     {
       id: "ge-1",
       gate_pass_number: "GP-BLR-20261008-0048",
@@ -96,7 +96,7 @@ function GateDashboard() {
       driver_contact: "+91 98800 11223",
       invoice_number: "INV-ME-1092",
     },
-  ];
+  ]; */
 
   const filteredEntries = entries.filter((e: any) => {
     if (!searchQuery.trim()) return true;

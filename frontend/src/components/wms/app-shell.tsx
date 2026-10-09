@@ -734,7 +734,7 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {false && <header className="sticky top-0 z-30 glass-strong">
+        <header className="sticky top-0 z-30 glass-strong">
           <div className="flex h-16 items-center gap-3 px-4 lg:px-7">
             <button
               type="button"
@@ -845,7 +845,7 @@ export function AppShell({
               </div>
             </div>
           </div>
-        </header>}
+        </header>
 
         <main className="page-enter flex-1 px-4 py-6 lg:px-7">
           <div className="mx-auto w-full max-w-[1360px]">
