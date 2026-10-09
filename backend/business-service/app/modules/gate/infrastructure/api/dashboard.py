@@ -146,6 +146,8 @@ async def get_dashboard_stats(
             "id": str(m.id),
             "vehicle_number": m.vehicle_number,
             "gate_entry_no": m.gate_entry_number,
+            "gate_pass_number": m.gate_entry_number,
+            "asn_number": m.asn_number or "",
             "driver_name": m.driver_name or "Driver",
             "po_number": m.po_number or "—",
             "arrival_time": m.created_at.strftime("%H:%M") if m.created_at else "09:00",
@@ -201,6 +203,12 @@ async def get_dashboard_stats(
             "id": str(req.id),
             "vehicle_number": req.vehicle_number,
             "gate_entry_no": req.existing_gate_pass_id,
+            "gate_pass_number": req.existing_gate_pass_id,
+            "asn_number": next(
+                (entry.asn_number or "" for entry in gate_models
+                 if entry.gate_entry_number == req.existing_gate_pass_id),
+                "",
+            ),
             "driver_name": "Driver",
             "po_number": req.material_reference or "",
             "arrival_time": (req.arrived_at or req.created_at).strftime("%H:%M") if (req.arrived_at or req.created_at) else "09:00",

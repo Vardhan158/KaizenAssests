@@ -115,7 +115,7 @@ function GateDashboard() {
   const todayExits = metrics.todayExits ?? entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
 
   const handlePrintPass = (pass: any) => {
-    toast.success(`Print job sent for Gate Pass ${pass.gate_pass_number || pass.id}`, {
+    toast.success(`Print job sent for Gate Pass ${pass.gate_pass_number || pass.gate_entry_no || pass.id}`, {
       description: "Opening print preview...",
     });
     window.print();
@@ -282,7 +282,7 @@ function GateDashboard() {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground font-semibold">Gate Pass ID:</span>
                     <span className="font-mono font-bold text-primary">
-                      {selectedPassModal.gate_pass_number || "GP-BLR-20261008-0048"}
+                      {selectedPassModal.gate_pass_number || selectedPassModal.gate_entry_no || "—"}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -302,7 +302,7 @@ function GateDashboard() {
                 <div className="rounded-2xl border-2 border-dashed border-primary/40 bg-muted/20 p-4 text-center">
                   <QrCode className="mx-auto size-28 text-primary" />
                   <p className="font-mono text-xs font-bold mt-2 text-primary">
-                    {selectedPassModal.gate_pass_number || "GP-BLR-20261008-0048"}
+                    {selectedPassModal.gate_pass_number || selectedPassModal.gate_entry_no || "—"}
                   </p>
                 </div>
 
@@ -329,7 +329,7 @@ function GateDashboard() {
             {selectedDetailsDrawer && (
               <div className="space-y-3 text-xs">
                 <div className="rounded-xl bg-muted/40 p-3 border space-y-1.5">
-                  <p className="flex justify-between"><span className="text-muted-foreground">Gate Pass Number:</span> <span className="font-mono font-bold text-primary">{selectedDetailsDrawer.gate_pass_number || "GP-BLR-20261008-0048"}</span></p>
+                  <p className="flex justify-between"><span className="text-muted-foreground">Gate Pass Number:</span> <span className="font-mono font-bold text-primary">{selectedDetailsDrawer.gate_pass_number || selectedDetailsDrawer.gate_entry_no || "—"}</span></p>
                   <p className="flex justify-between"><span className="text-muted-foreground">Vehicle Number:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.vehicle_number}</span></p>
                   <p className="flex justify-between"><span className="text-muted-foreground">Driver Name:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.driver_name || "Suresh Gowda"} ({selectedDetailsDrawer.driver_contact || "+91 98450 12345"})</span></p>
                   <p className="flex justify-between"><span className="text-muted-foreground">Invoice Number:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.invoice_number || "INV-2026-9901"}</span></p>
