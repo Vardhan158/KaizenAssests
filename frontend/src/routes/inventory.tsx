@@ -144,7 +144,10 @@ function SimpleWarehouseModule() {
       ] = await Promise.all([
         api.getPutawayTasks(),
         api.getWarehouseInventorySummary(),
-        api.getMaterialRequests(),
+        // Material requests are auxiliary to Putaway. Some deployments do
+        // not expose the legacy Procurement route, so a 404 must not prevent
+        // the valid Putaway, inventory, pickup, and store data from loading.
+        api.getMaterialRequests().catch(() => []),
         api.getPickupTasks(),
         api.getStores(),
       ]);
