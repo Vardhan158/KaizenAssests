@@ -9,6 +9,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    existing = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("damage_report")}
+    if "report_number" in existing:
+        return
     op.add_column("damage_report", sa.Column("report_number", sa.String(32), nullable=True))
     op.add_column("damage_report", sa.Column("received_quantity", sa.Numeric(18, 4), nullable=True))
     op.add_column("damage_report", sa.Column("status", sa.String(32), nullable=False, server_default="PENDING_PROCUREMENT"))

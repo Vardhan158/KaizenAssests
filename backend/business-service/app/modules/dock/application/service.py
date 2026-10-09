@@ -84,8 +84,8 @@ class DockAllocationService:
                 vehicle_number=entry.vehicle_number,
                 vendor_reference=entry.ocr_supplier_name,
                 material_reference=entry.ocr_product_material,
-                material_description=entry.material_description,
-                quantity=entry.ocr_quantity if entry.ocr_quantity is not None else entry.total_quantity,
+                material_description=entry.ocr_product_material,
+                quantity=entry.ocr_quantity if entry.ocr_quantity is not None else 0,
             )
         await session.flush()
 
@@ -413,9 +413,14 @@ class DockAllocationService:
             select(DockModel).where(DockModel.dock_number == dock.dock_code).with_for_update()
         )).scalar_one_or_none()
         if gate_dock is None:
-            warehouse_id = getattr(assigned_store, "warehouse_id", None)
-            if not warehouse_id:
-                raise HTTPException(status_code=422, detail="Assigned store has no warehouse configured for gate receiving")
+            # Older store rows may not have a warehouse value, and some docks
+            # are intentionally not tied to a store. Keep gate receiving
+            # functional by using the application's default warehouse.
+            warehouse_id = (
+                getattr(assigned_store, "warehouse_id", None)
+                or getattr(dock, "warehouse_id", None)
+                or "Main Warehouse"
+            )
             gate_dock = DockModel(
                 dock_number=dock.dock_code,
                 warehouse_id=warehouse_id,
@@ -439,9 +444,9 @@ class DockAllocationService:
             po_id=gate_entry.po_id,
             vehicle_number=gate_entry.vehicle_number,
             dock_number=dock.dock_code,
-            assigned_store_id=assigned_store.id,
-            assigned_store_code=assigned_store.store_code,
-            assigned_store_name=assigned_store.store_name,
+            assigned_store_id=assigned_store.id if assigned_store else None,
+            assigned_store_code=assigned_store.store_code if assigned_store else None,
+            assigned_store_name=assigned_store.store_name if assigned_store else None,
             assigned_store_manager_id=req.assigned_store_manager_id,
             assigned_store_manager_username=req.assigned_store_manager_username,
             assigned_store_manager_name=req.assigned_store_manager_name,

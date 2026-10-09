@@ -104,10 +104,15 @@ function GateDashboard() {
     const gp = String(e.gate_pass_number || e.gate_entry_no || e.id || "").toLowerCase();
     const veh = String(e.vehicle_number || "").toLowerCase();
     const sup = String(e.supplier_name || e.vendor || "").toLowerCase();
-    const po = String(e.po_number || "").toLowerCase();
     const asn = String(e.asn_number || "").toLowerCase();
-    return gp.includes(q) || veh.includes(q) || sup.includes(q) || po.includes(q) || asn.includes(q);
+    return gp.includes(q) || veh.includes(q) || sup.includes(q) || asn.includes(q);
   });
+
+  const metrics = dashboardData?.stats || dashboardData?.metrics || dashboardData || {};
+  const todayEntries = metrics.todayEntries ?? metrics.todaysEntries ?? metrics.totalArrivals ?? entries.length;
+  const vehiclesInside = metrics.vehiclesInside ?? Math.max(0, Number(todayEntries) - Number(metrics.vehiclesExited || 0));
+  const awaitingDock = metrics.awaitingDock ?? entries.filter((e: any) => String(e.status).toUpperCase() === "AWAITING_DOCK").length;
+  const todayExits = metrics.todayExits ?? entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
 
   const handlePrintPass = (pass: any) => {
     toast.success(`Print job sent for Gate Pass ${pass.gate_pass_number || pass.id}`, {
@@ -122,7 +127,7 @@ function GateDashboard() {
       subtitle="FR-01: Live gate metrics, searchable recent gate pass activity, and vehicle tracking"
       actions={
         <Button asChild className="rounded-xl font-bold shadow-sm">
-          <Link to="/vehicle-queue">
+          <Link to="/vehicle-queue" search={{ action: "new" }}>
             <PlusCircle className="mr-2 size-4" /> New Gate Entry
           </Link>
         </Button>
@@ -133,7 +138,7 @@ function GateDashboard() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             label="Today's Entries"
-            value="24"
+            value={String(todayEntries)}
             delta="Total vehicles registered today"
             icon={Truck}
             tone="primary"
@@ -141,7 +146,7 @@ function GateDashboard() {
           />
           <StatCard
             label="Vehicles Inside"
-            value="8"
+            value={String(vehiclesInside)}
             delta="Currently inside facility"
             icon={ShieldCheck}
             tone="success"
@@ -149,7 +154,7 @@ function GateDashboard() {
           />
           <StatCard
             label="Awaiting Dock"
-            value="3"
+            value={String(awaitingDock)}
             delta="Pending dock check-in"
             icon={Clock3}
             tone="warning"
@@ -157,7 +162,7 @@ function GateDashboard() {
           />
           <StatCard
             label="Today's Exits"
-            value="16"
+            value={String(todayExits)}
             delta="Cleared & exited facility"
             icon={LogOut}
             tone="teal"
@@ -179,7 +184,7 @@ function GateDashboard() {
               <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search Gate Pass, Vehicle, Supplier, PO..."
+                placeholder="Search Gate Pass, Vehicle, Supplier, ASN..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-9 w-full rounded-xl border bg-background pl-9 pr-3 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
@@ -194,7 +199,7 @@ function GateDashboard() {
                     <th className="px-4 py-3">Gate Pass No</th>
                     <th className="px-4 py-3">Vehicle Number</th>
                     <th className="px-4 py-3">Supplier Name</th>
-                    <th className="px-4 py-3">PO / ASN Number</th>
+                    <th className="px-4 py-3">ASN Number</th>
                     <th className="px-4 py-3">Entry Time</th>
                     <th className="px-4 py-3">Allocated Dock</th>
                     <th className="px-4 py-3">Current Status</th>
@@ -206,7 +211,7 @@ function GateDashboard() {
                     const passNo = e.gate_pass_number || e.gate_entry_no || `GP-BLR-20261008-00${idx + 48}`;
                     const vehNo = e.vehicle_number || "KA 01 AB 4582";
                     const suppName = e.supplier_name || e.vendor || "Bharat Electronics Components Pvt. Ltd.";
-                    const poAsn = `${e.po_number || "PO-8741"} / ${e.asn_number || "ASN-004582"}`;
+                    const asnNumber = e.asn_number || "—";
                     const entryTime = e.entry_time || e.arrival_time || "10:42 AM";
                     const dockNo = e.dock_number || e.dock_name || "Dock D-04";
 
@@ -215,7 +220,7 @@ function GateDashboard() {
                         <td className="px-4 py-3 font-mono font-bold text-primary">{passNo}</td>
                         <td className="px-4 py-3 font-bold">{vehNo}</td>
                         <td className="px-4 py-3 font-medium">{suppName}</td>
-                        <td className="px-4 py-3 font-semibold">{poAsn}</td>
+                        <td className="px-4 py-3 font-semibold">{asnNumber}</td>
                         <td className="px-4 py-3 font-medium text-muted-foreground">{entryTime}</td>
                         <td className="px-4 py-3 font-bold text-emerald-600 dark:text-emerald-400">
                           {dockNo}

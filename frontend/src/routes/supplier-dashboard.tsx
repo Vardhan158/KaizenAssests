@@ -94,7 +94,11 @@ function SupplierDashboard() {
   const loadAsns = async () => {
     try {
       const data = await api.getAsns();
-      setAsns(data || []);
+      setAsns((data || []).map((asn: any) => ({
+        ...asn,
+        supplier_name: asn.supplier_name || asn.supplierName || asn.supplier_company_name || asn.supplier?.supplier_name || "",
+        destination_warehouse: asn.destination_warehouse || asn.destinationWarehouse || asn.warehouse_name || asn.delivery_warehouse_name || "",
+      })));
     } catch {
       setAsns([]);
     }
@@ -158,6 +162,7 @@ function SupplierDashboard() {
         vehicle_number: vehicleNumber.toUpperCase().trim(),
         driver_name: driverName.trim(),
         driver_contact: driverMobile.trim(),
+        expected_arrival_at: expectedArrivalDate,
         created_at: new Date().toISOString(),
         status: "SUBMITTED",
         lines: payload.lines,
@@ -455,7 +460,7 @@ function SupplierDashboard() {
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Destination Warehouse</p><p className="mt-1 font-bold text-slate-900">{selected.destination_warehouse || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Vehicle Number</p><p className="mt-1 font-mono font-bold text-slate-900">{selected.vehicle_number || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Driver Name & Mobile</p><p className="mt-1 font-bold text-slate-900">{selected.driver_name || "—"} · {selected.driver_contact || "—"}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Expected Arrival Date</p><p className="mt-1 font-bold text-slate-900">{selected.expected_arrival_date || selected.expected_arrival_at?.split("T")[0] || "—"}</p></div>
+                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Expected Arrival Date</p><p className="mt-1 font-bold text-slate-900">{selected.expected_arrival_date || selected.expected_arrival_at?.split("T")[0] || selected.delivery_date || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Status</p><p className="mt-1 font-black text-slate-900">{String(selected.status || "SUBMITTED").replaceAll("_", " ")}</p></div>
               </div>
             )}

@@ -324,6 +324,7 @@ class AsnModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     logistics: Mapped[Optional[list[dict]]] = mapped_column(JSON, nullable=True)
 
+    supplier: Mapped[Optional[SupplierModel]] = relationship("SupplierModel")
     lines: Mapped[List[AsnLineModel]] = relationship(back_populates="asn", cascade="all, delete-orphan")
     documents: Mapped[List[AsnDocumentModel]] = relationship(back_populates="asn", cascade="all, delete-orphan")
 

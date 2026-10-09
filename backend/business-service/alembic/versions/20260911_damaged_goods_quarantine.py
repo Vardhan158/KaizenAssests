@@ -9,11 +9,20 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("receiving_line", sa.Column("disposition_status", sa.String(32), nullable=True))
-    op.add_column("receiving_line", sa.Column("quarantine_location", sa.String(128), nullable=True))
-    op.add_column("receiving_line", sa.Column("quarantined_by", sa.String(128), nullable=True))
-    op.add_column("receiving_line", sa.Column("quarantined_at", sa.DateTime(timezone=True), nullable=True))
-    op.create_index("ix_receiving_line_disposition_status", "receiving_line", ["disposition_status"])
+    bind = op.get_bind()
+    existing = {column["name"] for column in sa.inspect(bind).get_columns("receiving_line")}
+    columns = [
+        ("disposition_status", sa.String(32)),
+        ("quarantine_location", sa.String(128)),
+        ("quarantined_by", sa.String(128)),
+        ("quarantined_at", sa.DateTime(timezone=True)),
+    ]
+    for name, column_type in columns:
+        if name not in existing:
+            op.add_column("receiving_line", sa.Column(name, column_type, nullable=True))
+    indexes = {index["name"] for index in sa.inspect(bind).get_indexes("receiving_line")}
+    if "ix_receiving_line_disposition_status" not in indexes:
+        op.create_index("ix_receiving_line_disposition_status", "receiving_line", ["disposition_status"])
 
 
 def downgrade() -> None:

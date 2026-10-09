@@ -810,11 +810,11 @@ function GrnPageWorkflow() {
     });
   }, [activeTab, grnId, (search as any).grn_id, currentPage, navigate]);
 
-  // Page 1: Auto-Fetch PO Context (100% Dynamic for Present & Future PO Numbers)
+  // Page 1: Auto-fetch the complete receiving context from the ASN.
   async function fetchPoContext(targetPoNumber?: string) {
-    const numToFetch = (targetPoNumber || header.po_number).trim();
+    const numToFetch = (targetPoNumber || header.asn_number).trim();
     if (!numToFetch) {
-      toast.error("Please select or enter a valid PO Number");
+      toast.error("Please enter a valid ASN Number");
       return;
     }
     const isAsnLookup = numToFetch.toUpperCase().startsWith("ASN-");
@@ -831,12 +831,8 @@ function GrnPageWorkflow() {
       // Resolve the ASN first, then load the receiving context by its
       // authoritative PO. This returns the persisted gate-entry number that
       // was created when Generate Gate Pass was pressed.
-      const ctx = isAsnLookup ? await api.getAsn(numToFetch) : await api.getGrnContext(numToFetch);
-      const receivingContext =
-        isAsnLookup && (ctx.po_number || ctx.poNumber)
-          ? await api.getGrnContext({ poNumber: ctx.po_number || ctx.poNumber })
-          : null;
-      const resolvedContext = receivingContext || ctx;
+      const ctx = await api.getAsn(numToFetch);
+      const resolvedContext = ctx;
       if (requestId !== contextRequest.current) return;
       const resolvedPoNumber =
         resolvedContext.po_number || resolvedContext.poNumber || resolvedContext.purchase_order_number || resolvedContext.purchaseOrderNumber || ctx.po_number || ctx.poNumber || "";
@@ -872,7 +868,14 @@ function GrnPageWorkflow() {
         ctx.gate_entry?.driver_name ||
         ctx.gate_entry?.driverName ||
         "";
-      const warehouseName = resolvedContext.warehouse_name || resolvedContext.warehouseName || "";
+      const warehouseName =
+        resolvedContext.warehouse_name ||
+        resolvedContext.warehouseName ||
+        resolvedContext.destination_warehouse ||
+        resolvedContext.destinationWarehouse ||
+        ctx.destination_warehouse ||
+        ctx.destinationWarehouse ||
+        "";
 
       // Auto-detect allocated dock from warehouse allocation, gate entry, or PO context
       let prefilledDock =
@@ -909,7 +912,7 @@ function GrnPageWorkflow() {
 
       setHeader({
         receipt_type: resolvedContext.receipt_type || resolvedContext.receiptType || "",
-        po_number: resolvedPoNumber,
+        po_number: "",
         supplier_name: supplierName,
         supplier_company_name: supplierComp,
         supplier_email: supplierEmail,
@@ -984,8 +987,7 @@ function GrnPageWorkflow() {
         setMaterialBatches(initBatches);
       }
 
-      const poDisplay = numToFetch.toUpperCase().startsWith("PO") ? numToFetch : `PO-${numToFetch}`;
-      toast.success(`${poDisplay} details fetched successfully`);
+      toast.success(`${asnNum} details fetched successfully`);
     } catch (err: any) {
       if (requestId !== contextRequest.current) return;
       console.error("PO Fetch error:", err);
@@ -996,7 +998,7 @@ function GrnPageWorkflow() {
   }
 
   function changePoNumber(value: string) {
-    setHeader((previous) => ({ ...previous, po_number: value }));
+    setHeader((previous) => ({ ...previous, asn_number: value, po_number: "" }));
   }
 
   async function handleReceiptTypeChange(newType: "PO_RECEIPT" | "UNEXPECTED_DELIVERY") {
@@ -1376,9 +1378,7 @@ function GrnPageWorkflow() {
         "No Receiving Dock assigned by warehouse dock allocation. Please ensure a dock is allocated before proceeding.",
       );
     }
-    if (header.receipt_type === "PO_RECEIPT" && !header.po_number.trim()) {
-      throw new Error("Please select a PO on Step 1.");
-    }
+    if (!header.asn_number.trim()) throw new Error("Please enter an ASN on Step 1.");
     if (header.receipt_type === "UNEXPECTED_DELIVERY") {
       if (!header.vehicle_number.trim()) {
         throw new Error("Please enter a Vehicle Number for Unexpected Delivery.");
@@ -1389,9 +1389,8 @@ function GrnPageWorkflow() {
     }
     const res = await api.createGrnHeader({
       grn_id: grnId || undefined,
-      receipt_type: header.receipt_type,
-      po_number:
-        header.receipt_type === "PO_RECEIPT" ? header.po_number.trim() || undefined : undefined,
+      receipt_type: "ASN_RECEIPT",
+      asn_number: header.asn_number.trim(),
       dock_number: header.receiving_dock.trim(),
       invoice_number: header.invoice_number,
       supplier_name:
@@ -2430,9 +2429,10 @@ function GrnPageWorkflow() {
       return;
     }
 
-    const filteredMaterials = targetItemCode
+    const filteredMaterials = (targetItemCode
       ? materials.filter((m) => m.item_code === targetItemCode)
-      : materials;
+      : materials
+    ).filter((m, index, list) => list.findIndex((item) => item.item_code === m.item_code) === index);
 
     let labelsHtml = "";
     for (const m of filteredMaterials) {
@@ -2443,7 +2443,11 @@ function GrnPageWorkflow() {
         qr_id: `QR-MAT-${m.item_code}-${materialIndex + 1 || 1}`,
         data_url: "",
       };
-      for (const b of bList) {
+      const b = bList[0] || {
+        batch_number: `MATERIAL-${m.item_code}`,
+        batch_quantity: m.good_quantity,
+      };
+      {
         labelsHtml += `
           <div class="card">
             <div class="header">WMS GOODS RECEIVING BATCH LABEL</div>
@@ -3382,7 +3386,7 @@ function GrnPageWorkflow() {
 
       {/* 📋 RECORDS OVERVIEW TAB */}
       {activeTab === "records" && (
-        <div className="space-y-6">
+        <div className="mx-auto w-full max-w-7xl space-y-4 px-1 sm:px-2">
           <SectionCard
             title="All Goods Receipt Notes (GRN)"
             description="Complete register of all inbound material receipts, inspection outcomes, and certificates"
@@ -3490,7 +3494,6 @@ function GrnPageWorkflow() {
                     .map((r, idx) => {
                       const grnKey = r.id || r.grn_id || r.grn_number || `grn_rec_${idx}`;
                       const grnNumber = r.grn_number || "—";
-                      const poNumber = r.po_number || "—";
                       const supplierName = r.supplier_name || r.supplier_company_name || "—";
                       const dockNumber = r.dock_number
                         ? r.dock_number.startsWith("Dock")
@@ -3514,9 +3517,6 @@ function GrnPageWorkflow() {
                                 <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
                                   Goods Receipt Note
                                 </span>
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-primary-soft text-primary">
-                                  Ref: {poNumber}
-                                </span>
                               </div>
                               <h3 className="font-mono text-xl font-bold text-primary mt-0.5">
                                 {grnNumber}
@@ -3528,13 +3528,7 @@ function GrnPageWorkflow() {
                             <StatusBadge status={status} />
                           </div>
 
-                          <div className="grid gap-3 rounded-xl border border-border/60 bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4 font-mono">
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] uppercase font-sans">
-                                PO Reference
-                              </span>
-                              <span className="font-bold text-foreground">{poNumber}</span>
-                            </div>
+                          <div className="grid gap-3 rounded-xl border border-border/60 bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-3 font-mono">
                             <div>
                               <span className="text-muted-foreground block text-[10px] uppercase font-sans">
                                 Receiving Dock
@@ -3617,10 +3611,10 @@ function GrnPageWorkflow() {
 
       {/* ✨ 6-PAGE WIZARD WORKFLOW */}
       {activeTab === "wizard" && (
-        <div className="space-y-6">
+        <div className="mx-auto w-full max-w-7xl space-y-4 px-1 sm:px-2">
           {/* STEP NAVIGATION HEADER */}
           <Card className="rounded-2xl p-4 overflow-x-auto shadow-sm border border-border/80">
-            <div className="flex items-center justify-between min-w-[720px] gap-3">
+            <div className="flex items-center justify-between min-w-[720px] gap-2">
               {PAGES.map((pg) => {
                 const displayMaxCompletedStep = Math.max(maxCompletedStep, currentPage - 1);
                 const isCurrent = currentPage === pg.id;
@@ -3633,7 +3627,7 @@ function GrnPageWorkflow() {
                     key={pg.id}
                     className={`flex-1 flex flex-col items-center text-center transition-all p-2 rounded-xl select-none ${
                       isCurrent
-                        ? "bg-primary/5 font-bold shadow-xs scale-[1.02]"
+                        ? "bg-primary/5 font-bold shadow-xs"
                         : isAccessible
                           ? "opacity-90"
                           : "opacity-40"
@@ -3665,15 +3659,15 @@ function GrnPageWorkflow() {
 
           {/* PAGE 1 – GRN HEADER DETAILS */}
           {currentPage === 1 && (
-            <div className="space-y-6">
-              {/* A. PURCHASE ORDER */}
-              <Card className="rounded-2xl p-6 space-y-5 shadow-sm">
+            <div className="space-y-4">
+              {/* A. ASN REFERENCE */}
+              <Card className="rounded-xl p-4 space-y-4 shadow-sm">
                 <div className="border-b pb-3">
                   <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
-                    Purchase Order
+                    Advance Shipping Notice (ASN)
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Enter purchase order number to populate vendor and inbound order information.
+                    Enter an ASN number to automatically populate supplier, gate, vehicle, and material details.
                   </p>
                 </div>
 
@@ -3690,7 +3684,7 @@ function GrnPageWorkflow() {
                     </label>
                     <Input
                       placeholder="Enter ASN (e.g. ASN-2026-1)"
-                      value={header.po_number}
+                      value={header.asn_number}
                       disabled={busyAction || loadingContext}
                       onChange={(e) => changePoNumber(e.target.value)}
                       onKeyDown={(e) => {
@@ -3705,7 +3699,7 @@ function GrnPageWorkflow() {
                   <Button
                     type="button"
                     onClick={() => void fetchPoContext()}
-                    disabled={loadingContext || busyAction || !header.po_number.trim()}
+                    disabled={loadingContext || busyAction || !header.asn_number.trim()}
                     className="rounded-xl font-semibold shadow-xs h-10 px-5"
                   >
                     {loadingContext ? (
@@ -3754,7 +3748,7 @@ function GrnPageWorkflow() {
               </Card>
 
               {/* B. INBOUND DETAILS */}
-              <Card className="rounded-2xl p-6 space-y-5 shadow-sm">
+              <Card className="rounded-xl p-4 space-y-4 shadow-sm">
                 <div className="border-b pb-3">
                   <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
                     Inbound Details
@@ -3808,7 +3802,7 @@ function GrnPageWorkflow() {
                   </div>
 
                   {/* Driver Name */}
-                  <div className="rounded-xl border bg-muted/10 p-3 md:col-span-2">
+                  <div className="rounded-xl border bg-muted/10 p-3">
                     <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
                       Driver Name
                     </label>
@@ -3822,7 +3816,7 @@ function GrnPageWorkflow() {
               </Card>
 
               {/* C. WAREHOUSE & DOCK */}
-              <Card className="rounded-2xl p-6 space-y-5 shadow-sm">
+              <Card className="rounded-xl p-4 space-y-4 shadow-sm">
                 <div className="border-b pb-3">
                   <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
                     Warehouse & Dock
@@ -3941,20 +3935,20 @@ function GrnPageWorkflow() {
 
           {/* PAGE 2 – ITEM RECEIVING DETAILS */}
           {currentPage === 2 && (
-            <Card className="rounded-2xl p-6 space-y-6 shadow-sm">
+            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between border-b pb-4 gap-3">
                 <div>
                   <h3 className="font-bold text-foreground text-base flex items-center gap-2">
                     <span>
                       {header.receipt_type === "UNEXPECTED_DELIVERY"
                         ? "Manual Material Receipt (Unexpected Delivery)"
-                        : "PO Material Line Items"}
+                        : "Material Line Items"}
                     </span>
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {header.receipt_type === "UNEXPECTED_DELIVERY"
                       ? "Add materials received in this shipment and enter their physical counts."
-                      : "Compare PO quantity with physically received quantity."}
+                      : "Compare quantity with physically received quantity."}
                   </p>
                 </div>
                 {header.receipt_type === "UNEXPECTED_DELIVERY" ? (
@@ -4137,15 +4131,19 @@ function GrnPageWorkflow() {
                   </div>
                 )
               ) : (
-                /* PO DELIVERY TABLE */
+                /* ASN MATERIAL TABLE */
                 <div className="overflow-x-auto rounded-xl border">
-                  <table className="w-full text-sm text-left">
+                  <table className="w-full table-fixed text-sm text-left">
+                    <colgroup>
+                      <col className="w-[40%]" />
+                      <col className="w-[20%]" />
+                      <col className="w-[25%]" />
+                      <col className="w-[15%]" />
+                    </colgroup>
                     <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
                       <tr>
                         <th className="px-4 py-3">Material</th>
-                        <th className="px-4 py-3">Material Code</th>
-                        <th className="px-4 py-3">Material Variant</th>
-                        <th className="px-4 py-3 text-right">PO Quantity</th>
+                        <th className="px-4 py-3 text-right">Quantity</th>
                         <th className="px-4 py-3 text-right">Received Quantity</th>
                         <th className="px-4 py-3 text-center">Status</th>
                       </tr>
@@ -4163,25 +4161,6 @@ function GrnPageWorkflow() {
                               <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
                                 Category: {m.material_category || "General"}
                               </span>
-                            </td>
-                            <td className="px-4 py-3 font-mono text-xs text-primary">
-                              {m.item_code}
-                            </td>
-                            <td className="px-4 py-3">
-                              {m.variant_code ? (
-                                <div className="space-y-0.5">
-                                  <div className="font-mono text-xs font-bold text-primary">
-                                    {m.variant_code}
-                                  </div>
-                                  <div className="text-[10px] text-muted-foreground font-medium">
-                                    {[m.variant_size, m.variant_color, m.variant_grade]
-                                      .filter(Boolean)
-                                      .join(" | ")}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">-</span>
-                              )}
                             </td>
                             <td className="px-4 py-3 text-right font-bold">
                               <div>
@@ -4208,7 +4187,7 @@ function GrnPageWorkflow() {
                                     }
                                     if (val > m.po_quantity) {
                                       toast.error(
-                                        `Received quantity for ${m.material_name} cannot exceed PO quantity (${m.po_quantity}).`,
+                                        `Received quantity for ${m.material_name} cannot exceed quantity (${m.po_quantity}).`,
                                       );
                                       return;
                                     }
@@ -4247,7 +4226,7 @@ function GrnPageWorkflow() {
                                   }}
                                   className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-0.5"
                                 >
-                                  Match PO Qty ({m.po_quantity})
+                                  Match Quantity ({m.po_quantity})
                                 </button>
                               </div>
                             </td>
@@ -4269,7 +4248,7 @@ function GrnPageWorkflow() {
                     <tfoot className="bg-muted/40 font-bold border-t text-sm">
                       <tr>
                         <td
-                          colSpan={3}
+                          colSpan={1}
                           className="px-4 py-3 uppercase text-xs text-muted-foreground"
                         >
                           Totals
@@ -4336,7 +4315,7 @@ function GrnPageWorkflow() {
 
           {/* PAGE 3 – QUALITY INSPECTION & DAMAGED GOODS */}
           {currentPage === 3 && (
-            <Card className="rounded-2xl p-6 space-y-6 shadow-sm">
+            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
               <div className="border-b pb-4">
                 <h3 className="font-bold text-foreground text-base">
                   Quality Inspection & Damage Breakdown
@@ -4587,7 +4566,7 @@ function GrnPageWorkflow() {
 
           {/* PAGE 4 – BATCH CREATION */}
           {currentPage === 4 && (
-            <Card className="rounded-2xl p-6 space-y-6 shadow-sm">
+            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
               <div className="border-b pb-4">
                 <h3 className="font-bold text-foreground text-base">Lot & Batch Creation</h3>
                 <p className="text-xs text-muted-foreground">
@@ -4761,7 +4740,7 @@ function GrnPageWorkflow() {
 
           {/* PAGE 5 – DOCUMENT COMPLIANCE & ATTACHMENTS REPOSITORY */}
           {currentPage === 5 && (
-            <Card className="rounded-2xl p-6 space-y-6 shadow-sm">
+            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between border-b pb-4 gap-3">
                 <div>
                   <h3 className="font-bold text-foreground text-base flex items-center gap-2">
@@ -5108,7 +5087,7 @@ function GrnPageWorkflow() {
 
           {/* PAGE 6 – QR CODE GENERATION */}
           {currentPage === 6 && (
-            <Card className="rounded-2xl p-6 space-y-6 shadow-sm">
+            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
               <div className="border-b pb-4">
                 <h3 className="font-bold text-foreground text-base">
                   Batch-wise QR Code Generation
@@ -5150,10 +5129,15 @@ function GrnPageWorkflow() {
                 {(() => {
                   const goodMaterials =
                     selectedQrMaterialCode === "ALL"
-                      ? materials.filter((m) => (m.good_quantity || 0) > 0)
+                      ? materials.filter((m, index, list) =>
+                          (m.good_quantity || 0) > 0 &&
+                          list.findIndex((item) => item.item_code === m.item_code) === index,
+                        )
                       : materials.filter(
-                          (m) =>
-                            m.item_code === selectedQrMaterialCode && (m.good_quantity || 0) > 0,
+                          (m, index, list) =>
+                            m.item_code === selectedQrMaterialCode &&
+                            (m.good_quantity || 0) > 0 &&
+                            list.findIndex((item) => item.item_code === m.item_code) === index,
                         );
                   if (goodMaterials.length === 0) {
                     return (
@@ -5167,7 +5151,7 @@ function GrnPageWorkflow() {
                     const rowKey =
                       materialIndex >= 0 ? grnMaterialKey(mat, materialIndex) : grnMaterialKey(mat, matIdx);
                     const matBatches = materialBatches[rowKey] || materialBatches[mat.item_code];
-                    const bList =
+                    const batchList =
                       matBatches && matBatches.length > 0
                         ? matBatches.filter((b) => (b.batch_quantity || 0) > 0)
                         : [
@@ -5176,6 +5160,7 @@ function GrnPageWorkflow() {
                               batch_quantity: mat.good_quantity,
                             },
                           ];
+                    const bList = batchList.slice(0, 1);
                     return (
                       <div
                         key={rowKey}

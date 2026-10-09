@@ -452,7 +452,7 @@ async def update_dock(
     except IntegrityError as exc:
         await uow.session.rollback()
         raise HTTPException(status_code=409, detail="Dock code already exists") from exc
-    return await get_dock_by_id(dock.id, uow)
+    return await get_dock_by_id(dock.id, uow=uow)
 
 
 @router.patch("/docks/{dock_id}/status", response_model=DockMasterResponse)
@@ -477,7 +477,7 @@ async def update_dock_status(
         )
     )
     await uow.session.commit()
-    return await get_dock_by_id(dock_id, uow)
+    return await get_dock_by_id(dock_id, uow=uow)
 
 
 @router.get("/dock-allocation-requests", response_model=List[AllocationRequestResponse])

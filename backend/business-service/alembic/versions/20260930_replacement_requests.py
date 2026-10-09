@@ -8,9 +8,17 @@ branch_labels = None
 depends_on = None
 
 def upgrade():
-    op.add_column("asn", sa.Column("shipment_type", sa.String(32), nullable=False, server_default="STANDARD"))
-    op.add_column("asn", sa.Column("replacement_request_id", sa.UUID(), nullable=True))
-    op.add_column("asn", sa.Column("original_asn_id", sa.UUID(), nullable=True))
+    bind = op.get_bind()
+    existing_asn_columns = {column["name"] for column in sa.inspect(bind).get_columns("asn")}
+    for column in (
+        sa.Column("shipment_type", sa.String(32), nullable=False, server_default="STANDARD"),
+        sa.Column("replacement_request_id", sa.UUID(), nullable=True),
+        sa.Column("original_asn_id", sa.UUID(), nullable=True),
+    ):
+        if column.name not in existing_asn_columns:
+            op.add_column("asn", column)
+    if "replacement_request" in sa.inspect(bind).get_table_names():
+        return
     op.create_table(
         "replacement_request",
         sa.Column("id", sa.UUID(), primary_key=True),

@@ -530,10 +530,12 @@ export function AppShell({
       const targetTab = targetParams.get("tab");
       const targetPage = targetParams.get("page");
       const targetModule = targetParams.get("module");
+      const targetAction = targetParams.get("action");
       const currentParams = new URLSearchParams(searchStr);
       const currentTab = currentParams.get("tab") || (path === "/grn" ? "dashboard" : "");
       const currentPage = currentParams.get("page") || "";
       const currentModule = currentParams.get("module") || "";
+      const currentAction = currentParams.get("action") || "";
       if (targetPage && targetTab) {
         return path === targetPath && targetTab === currentTab && targetPage === currentPage;
       }
@@ -549,6 +551,12 @@ export function AppShell({
           path === targetPath &&
           (targetModule === currentModule || (!currentModule && targetModule === "warehouse"))
         );
+      }
+      if (targetAction) {
+        return path === targetPath && targetAction === currentAction;
+      }
+      if (targetPath === "/vehicle-queue" && !targetTab && !targetPage && !targetModule && !targetAction) {
+        return path === targetPath && !currentTab && !currentPage && !currentModule && !currentAction;
       }
       return fullHref === to || (searchStr ? fullHref.startsWith(to) : to === "/grn?tab=dashboard");
     }

@@ -87,7 +87,11 @@ function SimpleWarehouseModule() {
 
   // Selected Detail Modals
   const [selectedInventory, setSelectedInventory] = useState<any>(null);
+  const [selectedPutawayGroup, setSelectedPutawayGroup] = useState<any>(null);
   const [assignPutawayTask, setAssignPutawayTask] = useState<any>(null);
+  const [scanPutawayTask, setScanPutawayTask] = useState<any>(null);
+  const [putawayScan, setPutawayScan] = useState({ materialQr: "", rackQr: "", quantity: "" });
+  const [putawayQrImages, setPutawayQrImages] = useState({ material: "", rack: "" });
   const [pickupToConfirm, setPickupToConfirm] = useState<any>(null);
   const [pickupConfirmation, setPickupConfirmation] = useState({ material_scan: "", zone_scan: "", quantity: "" });
   const [selectedLocationId, setSelectedLocationId] = useState("");
@@ -104,6 +108,8 @@ function SimpleWarehouseModule() {
     rack: "",
     position: "",
   });
+  const [newBinRows, setNewBinRows] = useState([{ rack: "", position: "", bin_code: "" }]);
+  const [rackGenerator, setRackGenerator] = useState({ prefix: "RACK-", start: "1", count: "10" });
   const [viewBinQrModal, setViewBinQrModal] = useState<any>(null);
   const [binQrImage, setBinQrImage] = useState<string | null>(null);
 
@@ -224,6 +230,68 @@ function SimpleWarehouseModule() {
     }
   };
 
+  const openPutawayScan = (task: any) => {
+    setScanPutawayTask(task);
+    setPutawayScan({
+      materialQr: task.material_qr || task.barcode_value || "",
+      rackQr: task.destination_bin_code || task.destination_bin || "",
+      quantity: String(task.quantity ?? ""),
+    });
+  };
+
+  useEffect(() => {
+    if (!scanPutawayTask) {
+      setPutawayQrImages({ material: "", rack: "" });
+      return;
+    }
+    let active = true;
+    void Promise.all([
+      putawayScan.materialQr.trim() ? QRCode.toDataURL(putawayScan.materialQr.trim(), { width: 180, margin: 1 }) : Promise.resolve(""),
+      putawayScan.rackQr.trim() ? QRCode.toDataURL(putawayScan.rackQr.trim(), { width: 180, margin: 1 }) : Promise.resolve(""),
+    ]).then(([material, rack]) => {
+      if (active) setPutawayQrImages({ material, rack });
+    }).catch(() => {
+      if (active) setPutawayQrImages({ material: "", rack: "" });
+    });
+    return () => { active = false; };
+  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.rackQr]);
+
+  const handleConfirmPutaway = async () => {
+    if (!scanPutawayTask) return;
+    const quantity = Number(putawayScan.quantity);
+    if (!putawayScan.materialQr.trim() || !putawayScan.rackQr.trim() || !Number.isFinite(quantity) || quantity <= 0) {
+      toast.error("Scan the material QR and rack QR, then enter a valid quantity.");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const resolved = await api.resolveGrnQr(putawayScan.materialQr.trim());
+      if (resolved.putaway_task_id && resolved.putaway_task_id !== scanPutawayTask.id) {
+        throw new Error("The scanned material does not match this putaway task.");
+      }
+      if (String(resolved.material_code || "").toUpperCase() !== String(scanPutawayTask.item_code || "").toUpperCase()) {
+        throw new Error("The scanned material does not match this putaway task.");
+      }
+      const rack = await api.resolveBinQr(putawayScan.rackQr.trim(), scanPutawayTask.destination_store_id);
+      if (scanPutawayTask.destination_bin_id && rack.bin_id !== scanPutawayTask.destination_bin_id) {
+        throw new Error(`Wrong rack. Scan ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin}.`);
+      }
+      await api.executePutaway({
+        task_id: scanPutawayTask.id,
+        grn_qr_code: putawayScan.materialQr.trim(),
+        bin_qr_code: putawayScan.rackQr.trim(),
+        quantity,
+      });
+      toast.success("Putaway confirmed and inventory updated.");
+      setScanPutawayTask(null);
+      await fetchData(true);
+    } catch (err: any) {
+      toast.error(err.message || "Putaway confirmation failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Action: Approve Material Request
   const handleApproveMaterialRequest = async (req: any) => {
     const reqQty = Number(req.quantity ?? req.required_quantity ?? 0);
@@ -271,29 +339,57 @@ function SimpleWarehouseModule() {
   };
 
   // Action: Create Location Sub-Form (Warehouse, Zone, Bin)
+  async function printRackQrLabels() {
+    const store = stores.find((s) => s.id === newBinForm.store_id);
+    const zone = zones.find((z) => z.id === newBinForm.zone_id);
+    const start = Number(rackGenerator.start) || 1;
+    const count = Math.min(100, Math.max(1, Number(rackGenerator.count) || 1));
+    const prefix = rackGenerator.prefix.trim() || "RACK-";
+    const labels = await Promise.all(Array.from({ length: count }, async (_, i) => {
+      const code = `${prefix}${String(start + i).padStart(3, "0")}`;
+      const payload = `QR-RACK-${store?.store_code || "WAREHOUSE"}-${zone?.zone_code || "ZONE"}-${code}`;
+      return { code, image: await QRCode.toDataURL(payload, { width: 220, margin: 1 }) };
+    }));
+    const win = window.open("", "_blank", "width=900,height=800");
+    if (!win) { toast.error("Please allow popups to print QR labels"); return; }
+    win.document.write(`<html><head><title>Rack QR Labels</title><style>body{font-family:Arial;padding:16px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.label{text-align:center;border:1px solid #999;padding:8px;break-inside:avoid}.label img{width:150px;height:150px}@media print{.label{break-inside:avoid}}</style></head><body><h2>${store?.store_name || "Warehouse"} / ${zone?.zone_code || "Zone"}</h2><div class="grid">${labels.map((l) => `<div class="label"><img src="${l.image}"/><b>${l.code}</b></div>`).join("")}</div><script>window.onload=()=>{window.print()}</script></body></html>`);
+    win.document.close();
+  }
+
   const handleCreateLocationSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
       if (createLocationType === "store") {
-        if (!newStoreForm.store_code || !newStoreForm.store_name) {
-          toast.error("Please fill in Store Code and Store Name.");
+        const storeName = newStoreForm.store_name.trim();
+        if (!storeName) {
+          toast.error("Please enter a warehouse name.");
           return;
         }
-        await api.createStore(newStoreForm);
-        toast.success(`✓ Warehouse created: ${newStoreForm.store_name} (${newStoreForm.store_code})`);
+        const nextCode = await api.getNextStoreCode();
+        const generatedStoreCode = nextCode?.suggested_store_code;
+        const createdStore = await api.createStore({
+          store_name: storeName,
+          store_code: generatedStoreCode,
+          description: undefined,
+        });
+        toast.success(`Warehouse created: ${createdStore?.store_name || storeName} (${createdStore?.store_code || generatedStoreCode || "auto-generated"})`);
+        setNewStoreForm({ store_code: "", store_name: "", description: "" });
       } else if (createLocationType === "zone") {
         const targetStoreId = newZoneForm.store_id;
         if (!targetStoreId) {
           toast.error("Select a warehouse before creating a zone.");
           return;
         }
-        if (!newZoneForm.zone_code || !newZoneForm.zone_name) {
-          toast.error("Please fill in Zone Code and Zone Name.");
+        if (!newZoneForm.zone_name.trim()) {
+          toast.error("Please enter a zone name.");
           return;
         }
-        await api.createZone(targetStoreId, newZoneForm);
-        toast.success(`✓ Storage Zone created: ${newZoneForm.zone_name} (${newZoneForm.zone_code})`);
+        const nextZone = await api.getNextZoneCode(targetStoreId);
+        const generatedZoneCode = nextZone?.suggested_zone_code;
+        const createdZone = await api.createZone(targetStoreId, { zone_name: newZoneForm.zone_name.trim(), zone_code: generatedZoneCode });
+        setNewZoneForm({ store_id: "", zone_code: "", zone_name: "" });
+        toast.success(`Zone created: ${createdZone?.zone_name || newZoneForm.zone_name} (${createdZone?.zone_code || generatedZoneCode || "auto-generated"})`);
       } else if (createLocationType === "bin") {
         const targetStoreId = newBinForm.store_id;
         const targetZoneId = newBinForm.zone_id;
@@ -303,24 +399,35 @@ function SimpleWarehouseModule() {
         }
         const selectedZoneObj = zones.find((z) => z.id === targetZoneId);
 
-        if (!newBinForm.bin_code) {
-          toast.error("Please enter a Bin Code.");
+        const prefix = rackGenerator.prefix.trim() || "RACK-";
+        const start = Number(rackGenerator.start);
+        const count = Number(rackGenerator.count);
+        if (!Number.isInteger(start) || !Number.isInteger(count) || start < 1 || count < 1 || count > 100) {
+          toast.error("Enter a valid starting number and between 1 and 100 racks.");
           return;
         }
 
-        const qrVal = `QR-LOC-${stores.find(s => s.id === targetStoreId)?.store_code}-${selectedZoneObj?.zone_code}-${newBinForm.rack}-${newBinForm.position}-${newBinForm.bin_code}`;
-
-        const binRes = await api.createBin(targetStoreId, targetZoneId, {
-          bin_code: newBinForm.bin_code,
-          bin_name: newBinForm.bin_code,
-          rack: newBinForm.rack,
-          position: newBinForm.position,
-          qr_identifier: qrVal,
-        });
+        const storeCode = stores.find(s => s.id === targetStoreId)?.store_code;
+        const rackCodes = Array.from({ length: count }, (_, i) => `${prefix}${String(start + i).padStart(3, "0")}`);
+        const existingBins = await api.getStoreBins(targetStoreId, targetZoneId);
+        const existingCodes = new Set((existingBins || []).map((b: any) => String(b.bin_code || "").toUpperCase()));
+        const duplicateCodes = rackCodes.filter((code) => existingCodes.has(code.toUpperCase()));
+        if (duplicateCodes.length) {
+          toast.error(`Rack codes already exist: ${duplicateCodes.join(", ")}`);
+          return;
+        }
+        await Promise.all(rackCodes.map((code) => api.createBin(targetStoreId, targetZoneId, {
+          bin_code: code,
+          bin_name: code,
+          rack: code,
+          position: "",
+          qr_identifier: `QR-RACK-${storeCode}-${selectedZoneObj?.zone_code}-${code}`,
+        })));
+        setNewBinRows([{ rack: "", position: "", bin_code: "" }]);
         toast.success(`✓ Storage Bin created: ${newBinForm.bin_code} (Rack: ${newBinForm.rack}, Shelf: ${newBinForm.position}) with Auto QR Code!`);
       }
       setCreateLocationType(null);
-      void fetchData(true);
+      await fetchData(true);
     } catch (err: any) {
       toast.error(err.message || "Failed to create location entity");
     } finally {
@@ -350,6 +457,34 @@ function SimpleWarehouseModule() {
   const pendingPutawayCount = putawayTasks.filter((t) => t.status === "PENDING" || t.status === "CREATED").length;
   const pendingRequestsCount = materialRequests.filter((r) => r.status === "PENDING" || r.status === "SUBMITTED").length;
   const pendingPickingCount = pickupTasks.filter((p) => p.status === "PENDING" || p.status === "IN_PROGRESS").length;
+  const groupedPutawayTasks = useMemo(() => {
+    const groups = new Map<string, any>();
+    for (const task of putawayTasks) {
+      const key = task.grn_number || task.grnNumber || task.order_number || task.asn_number || task.asnNumber || task.id;
+      const group = groups.get(key) || {
+        key,
+        grn_number: task.grn_number || task.grnNumber,
+        asn_number: task.asn_number || task.asnNumber,
+        tasks: [],
+        batches: new Set<string>(),
+        materials: new Set<string>(),
+        quantity: 0,
+        uom: task.uom || "",
+        status: task.status,
+      };
+      group.tasks.push(task);
+      if (task.batch_number || task.batchNumber) group.batches.add(task.batch_number || task.batchNumber);
+      if (task.material_name || task.item_code) group.materials.add(task.material_name || task.item_code);
+      group.quantity += Number(task.quantity || task.received_quantity || 0);
+      if (task.status !== "COMPLETED" && task.status !== "STORED") group.status = task.status;
+      groups.set(key, group);
+    }
+    return Array.from(groups.values()).map((group) => ({
+      ...group,
+      batch_count: group.batches.size,
+      material_count: group.materials.size,
+    }));
+  }, [putawayTasks]);
   const totalAvailableStock = inventorySummary.reduce((acc, i) => acc + Number(i.available || i.available_quantity || 0), 0);
 
   const handleAllocateDockFromLocations = async (requestId: string) => {
@@ -512,7 +647,7 @@ function SimpleWarehouseModule() {
                     <th className="py-2.5 px-3">Material</th>
                     <th className="py-2.5 px-3">Batch</th>
                     <th className="py-2.5 px-3">Quantity</th>
-                    <th className="py-2.5 px-3">Assigned Bin</th>
+                    <th className="py-2.5 px-3">Assigned Rack</th>
                     <th className="py-2.5 px-3">Status</th>
                     <th className="py-2.5 px-3 text-right">Actions</th>
                   </tr>
@@ -525,16 +660,16 @@ function SimpleWarehouseModule() {
                       </td>
                     </tr>
                   ) : (
-                    putawayTasks.map((t) => (
+                    groupedPutawayTasks.map((t) => (
                       <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                        <td className="py-3 px-3 font-semibold text-indigo-600">{t.grn_number || t.task_number || t.id}</td>
-                        <td className="py-3 px-3 font-medium">{t.material_name || t.item_code}</td>
-                        <td className="py-3 px-3 font-mono text-slate-500">{t.batch_number || "-"}</td>
+                        <td className="py-3 px-3 font-semibold text-indigo-600">{t.grn_number || t.key}</td>
+                        <td className="py-3 px-3 font-medium">{t.material_count} material{t.material_count === 1 ? "" : "s"}</td>
+                        <td className="py-3 px-3 font-mono text-slate-500">{t.batch_count ? `${t.batch_count} batch${t.batch_count === 1 ? "" : "es"}` : ""}</td>
                         <td className="py-3 px-3 font-bold">{t.quantity ?? "—"} {t.uom || ""}</td>
                         <td className="py-3 px-3">
-                          {t.destination_bin_code || t.destination_bin ? (
+                          {t.tasks[0]?.destination_bin_code || t.tasks[0]?.destination_bin ? (
                             <Badge variant="outline" className="bg-emerald-50 text-emerald-700 font-mono text-[10px]">
-                              {t.destination_bin_code || t.destination_bin}
+                              {t.tasks[0]?.destination_bin_code || t.tasks[0]?.destination_bin}
                             </Badge>
                           ) : (
                             <span className="text-slate-400 italic">Unassigned</span>
@@ -554,10 +689,27 @@ function SimpleWarehouseModule() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setAssignPutawayTask(t)}
+                            onClick={() => setAssignPutawayTask(t.tasks[0])}
                             className="h-7 text-xs border-indigo-200 text-indigo-700"
                           >
-                            Assign Bin
+                            Assign Rack
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openPutawayScan(t.tasks[0])}
+                            disabled={!t.tasks[0]?.destination_bin_id || t.status === "PUTAWAY_COMPLETED" || t.status === "COMPLETED" || t.status === "STORED"}
+                            className="h-7 text-xs border-emerald-200 text-emerald-700"
+                          >
+                            <Scan className="mr-1 h-3 w-3" /> Scan QR
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSelectedPutawayGroup(t)}
+                            className="h-7 text-xs"
+                          >
+                            View Details
                           </Button>
                         </td>
                       </tr>
@@ -944,7 +1096,7 @@ function SimpleWarehouseModule() {
           <DialogHeader>
             <DialogTitle>Assign Storage Location</DialogTitle>
             <DialogDescription>
-              Select destination bin for Putaway Task {assignPutawayTask?.grn_number}
+              Select destination rack for Putaway Task {assignPutawayTask?.grn_number}
             </DialogDescription>
           </DialogHeader>
 
@@ -960,16 +1112,16 @@ function SimpleWarehouseModule() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="font-semibold text-slate-700 dark:text-slate-300">Single Storage Location Selector</label>
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">Warehouse / Zone / Rack</label>
                 {allFlattenedBins.length === 0 ? (
                   <p className="text-xs text-rose-500">No bins available in database. Create a bin in Locations tab first.</p>
                 ) : (
                   <Select value={selectedLocationId} onValueChange={setSelectedLocationId}>
                     <SelectTrigger className="w-full text-xs">
-                      <SelectValue placeholder="Search location (ZONE / RACK / BIN)..." />
+                      <SelectValue placeholder="Select an active rack..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {allFlattenedBins.map((loc) => (
+                      {allFlattenedBins.filter((loc) => !loc.status || ["ACTIVE", "AVAILABLE"].includes(String(loc.status).toUpperCase())).map((loc) => (
                         <SelectItem key={loc.id} value={loc.id}>
                           {loc.label}
                         </SelectItem>
@@ -986,9 +1138,87 @@ function SimpleWarehouseModule() {
               Cancel
             </Button>
             <Button onClick={handleConfirmAssignPutaway} disabled={isSubmitting || allFlattenedBins.length === 0} className="bg-indigo-600 text-white">
-              ASSIGN
+              ASSIGN RACK
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 1b. Scan and confirm physical rack putaway */}
+      <Dialog open={!!scanPutawayTask} onOpenChange={() => setScanPutawayTask(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Scan Material & Rack</DialogTitle>
+            <DialogDescription>Scan the existing material QR first, then scan the assigned rack QR.</DialogDescription>
+          </DialogHeader>
+          {scanPutawayTask && (
+            <div className="space-y-4 text-xs">
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
+                <div className="font-semibold">{scanPutawayTask.material_name || scanPutawayTask.item_code}</div>
+                <div className="text-slate-500">GRN: {scanPutawayTask.grn_number || "-"} · Batch: {scanPutawayTask.batch_number || "-"}</div>
+                <div className="mt-1 font-semibold">Pending: {scanPutawayTask.quantity} {scanPutawayTask.uom || ""}</div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold">Material QR</label>
+                {putawayQrImages.material && (
+                  <div className="flex justify-center rounded-lg border bg-white p-2">
+                    <img src={putawayQrImages.material} alt={`Material QR for ${scanPutawayTask.item_code || scanPutawayTask.material_name}`} className="h-36 w-36" />
+                  </div>
+                )}
+                <Input value={putawayScan.materialQr} placeholder="Scan material QR" onChange={(e) => setPutawayScan((s) => ({ ...s, materialQr: e.target.value }))} autoFocus />
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold">Rack QR</label>
+                {putawayQrImages.rack && (
+                  <div className="flex justify-center rounded-lg border bg-white p-2">
+                    <img src={putawayQrImages.rack} alt={`Rack QR for ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin}`} className="h-36 w-36" />
+                  </div>
+                )}
+                <Input value={putawayScan.rackQr} placeholder="Scan rack QR" onChange={(e) => setPutawayScan((s) => ({ ...s, rackQr: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold">Stored quantity {scanPutawayTask.uom ? `(${scanPutawayTask.uom})` : ""}</label>
+                <Input type="number" min="0.0001" step="0.0001" max={scanPutawayTask.quantity} value={putawayScan.quantity} onChange={(e) => setPutawayScan((s) => ({ ...s, quantity: e.target.value }))} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setScanPutawayTask(null)}>Cancel</Button>
+            <Button onClick={handleConfirmPutaway} disabled={isSubmitting} className="bg-emerald-600 text-white">
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Putaway"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedPutawayGroup} onOpenChange={() => setSelectedPutawayGroup(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Putaway Details</DialogTitle>
+            <DialogDescription>
+              {selectedPutawayGroup?.grn_number || "GRN"}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedPutawayGroup && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-4">
+                <div><span className="text-xs text-muted-foreground">GRN Number</span><p className="font-mono font-bold">{selectedPutawayGroup.grn_number || ""}</p></div>
+                <div><span className="text-xs text-muted-foreground">Materials</span><p className="font-bold">{selectedPutawayGroup.material_count}</p></div>
+                <div><span className="text-xs text-muted-foreground">Batches</span><p className="font-bold">{selectedPutawayGroup.batch_count}</p></div>
+                <div><span className="text-xs text-muted-foreground">Total Quantity</span><p className="font-bold">{selectedPutawayGroup.quantity} {selectedPutawayGroup.uom}</p></div>
+              </div>
+              <div className="max-h-64 overflow-auto rounded-xl border">
+                {selectedPutawayGroup.tasks.map((task: any) => (
+                  <div key={task.id} className="grid grid-cols-4 gap-2 border-b p-3 last:border-0">
+                    <span className="font-medium">{task.material_name || task.item_code || "—"}</span>
+                    <span className="font-mono text-muted-foreground">{task.batch_number || ""}</span>
+                    <span>{task.quantity ?? "—"} {task.uom || ""}</span>
+                    <span className="text-right">{task.status || "—"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -1159,29 +1389,12 @@ function SimpleWarehouseModule() {
             {createLocationType === "store" && (
               <>
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">Warehouse Code</label>
-                  <Input
-                    required
-                    placeholder="Enter warehouse code"
-                    value={newStoreForm.store_code}
-                    onChange={(e) => setNewStoreForm({ ...newStoreForm, store_code: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
                   <label className="font-semibold text-slate-700">Warehouse Name</label>
                   <Input
                     required
                     placeholder="e.g. Main Raw Material Warehouse 2"
                     value={newStoreForm.store_name}
                     onChange={(e) => setNewStoreForm({ ...newStoreForm, store_name: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">Description</label>
-                  <Input
-                    placeholder="Primary storage facility for raw assembly parts"
-                    value={newStoreForm.description}
-                    onChange={(e) => setNewStoreForm({ ...newStoreForm, description: e.target.value })}
                   />
                 </div>
               </>
@@ -1206,15 +1419,6 @@ function SimpleWarehouseModule() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">Zone Code</label>
-                  <Input
-                    required
-                    placeholder="Enter zone code"
-                    value={newZoneForm.zone_code}
-                    onChange={(e) => setNewZoneForm({ ...newZoneForm, zone_code: e.target.value })}
-                  />
                 </div>
                 <div className="space-y-1">
                   <label className="font-semibold text-slate-700">Zone Name</label>
@@ -1271,34 +1475,57 @@ function SimpleWarehouseModule() {
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1"><label className="font-semibold text-slate-700">Rack Prefix</label><Input value={rackGenerator.prefix} placeholder="RACK-" onChange={(e) => setRackGenerator({ ...rackGenerator, prefix: e.target.value })} /></div>
+                  <div className="space-y-1"><label className="font-semibold text-slate-700">Starting Number</label><Input type="number" min={1} value={rackGenerator.start} onChange={(e) => setRackGenerator({ ...rackGenerator, start: e.target.value })} /></div>
+                  <div className="space-y-1"><label className="font-semibold text-slate-700">Number of Racks</label><Input type="number" min={1} max={100} value={rackGenerator.count} onChange={(e) => setRackGenerator({ ...rackGenerator, count: e.target.value })} /></div>
+                </div>
+                <div className="rounded-lg border bg-muted/20 p-3 text-xs font-mono">
+                  Preview: {rackGenerator.prefix || "RACK-"}{String(Number(rackGenerator.start) || 1).padStart(3, "0")} to {rackGenerator.prefix || "RACK-"}{String((Number(rackGenerator.start) || 1) + Math.max(1, Number(rackGenerator.count) || 1) - 1).padStart(3, "0")}
+                </div>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => void printRackQrLabels()}><QrCode className="mr-1.5 size-4" /> Print All QR Labels</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => toast.info("Preview uses the generated rack range shown above.")}>Preview</Button>
+                </div>
+                <div className="hidden grid grid-cols-3 gap-2">
                   <div className="space-y-1">
                     <label className="font-semibold text-slate-700">Rack</label>
                     <Input
-                      required
                       placeholder="Enter rack"
-                      value={newBinForm.rack}
-                      onChange={(e) => setNewBinForm({ ...newBinForm, rack: e.target.value })}
+                      value={newBinRows[0].rack}
+                      onChange={(e) => setNewBinRows((rows) => rows.map((row, i) => i === 0 ? { ...row, rack: e.target.value } : row))}
                     />
                   </div>
                   <div className="space-y-1">
                     <label className="font-semibold text-slate-700">Shelf / Position</label>
                     <Input
-                      required
                       placeholder="Enter shelf or position"
-                      value={newBinForm.position}
-                      onChange={(e) => setNewBinForm({ ...newBinForm, position: e.target.value })}
+                      value={newBinRows[0].position}
+                      onChange={(e) => setNewBinRows((rows) => rows.map((row, i) => i === 0 ? { ...row, position: e.target.value } : row))}
                     />
                   </div>
                   <div className="space-y-1">
                     <label className="font-semibold text-slate-700">Bin Code</label>
                     <Input
-                      required
                       placeholder="Enter bin code"
-                      value={newBinForm.bin_code}
-                      onChange={(e) => setNewBinForm({ ...newBinForm, bin_code: e.target.value })}
+                      value={newBinRows[0].bin_code}
+                      onChange={(e) => setNewBinRows((rows) => rows.map((row, i) => i === 0 ? { ...row, bin_code: e.target.value } : row))}
                     />
                   </div>
                 </div>
+
+                {false && newBinRows.length > 1 && newBinRows.slice(1).map((row, rowIndex) => {
+                  const index = rowIndex + 1;
+                  return (
+                    <div key={index} className="grid grid-cols-3 gap-2 items-end">
+                      <Input placeholder="Enter rack" value={row.rack} onChange={(e) => setNewBinRows((rows) => rows.map((item, i) => i === index ? { ...item, rack: e.target.value } : item))} />
+                      <Input placeholder="Enter shelf or position" value={row.position} onChange={(e) => setNewBinRows((rows) => rows.map((item, i) => i === index ? { ...item, position: e.target.value } : item))} />
+                      <div className="flex gap-2"><Input placeholder="Enter bin code" value={row.bin_code} onChange={(e) => setNewBinRows((rows) => rows.map((item, i) => i === index ? { ...item, bin_code: e.target.value } : item))} /><Button type="button" variant="outline" onClick={() => setNewBinRows((rows) => rows.filter((_, i) => i !== index))}>Remove</Button></div>
+                    </div>
+                  );
+                })}
+                <Button className="hidden" type="button" variant="outline" size="sm" onClick={() => setNewBinRows((rows) => [...rows, { rack: "", position: "", bin_code: "" }])}>
+                  + Add Rack Row
+                </Button>
 
                 {/* Auto-Generated QR Code Preview */}
                 <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-lg border border-indigo-100 dark:border-indigo-900 space-y-1.5">
@@ -1311,8 +1538,8 @@ function SimpleWarehouseModule() {
                     </Badge>
                   </div>
                   <div className="font-mono font-bold text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 p-2 rounded border border-indigo-200 text-xs">
-                    {newBinForm.store_id && newBinForm.zone_id && newBinForm.rack && newBinForm.position && newBinForm.bin_code
-                      ? `QR-LOC-${stores.find(s => s.id === newBinForm.store_id)?.store_code}-${zones.find(z => z.id === newBinForm.zone_id)?.zone_code}-${newBinForm.rack}-${newBinForm.position}-${newBinForm.bin_code}`
+                    {newBinForm.store_id && newBinForm.zone_id && newBinRows[0].rack && newBinRows[0].position && newBinRows[0].bin_code
+                      ? `QR-LOC-${stores.find(s => s.id === newBinForm.store_id)?.store_code}-${zones.find(z => z.id === newBinForm.zone_id)?.zone_code}-${newBinRows[0].rack}-${newBinRows[0].position}-${newBinRows[0].bin_code}`
                       : "Select a warehouse and zone and enter rack, position, and bin code."}
                   </div>
                 </div>
@@ -1324,7 +1551,7 @@ function SimpleWarehouseModule() {
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting} className="bg-indigo-600 text-white">
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : `Create ${createLocationType?.toUpperCase()}`}
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : createLocationType === "bin" ? "Bulk Create Racks" : `Create ${createLocationType?.toUpperCase()}`}
               </Button>
             </DialogFooter>
           </form>

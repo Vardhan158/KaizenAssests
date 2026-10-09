@@ -46,7 +46,7 @@ async def get_dashboard_stats(
     for m in models:
         status_upper = (m.status or "").upper()
 
-        if status_upper == "VEHICLE_EXITED" or entry.get("exited_at"):
+        if status_upper == "VEHICLE_EXITED" or m.exited_at:
             vehicles_exited += 1
 
         if "REJECT" in status_upper:

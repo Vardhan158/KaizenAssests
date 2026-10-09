@@ -573,7 +573,7 @@ async def get_material_inventory_detail(
     tot_hold = sum(float(q.damaged_quantity) for q in quar_list)
 
     # Total Stock & Available Stock according to Stock Formula (Section 22)
-    total_stock = float(stk_obj.on_hand) if stk_obj else max(tot_loc_on_hand, tot_loc_avail + tot_hold)
+    total_stock = float(stk_obj.on_hand_quantity) if stk_obj else max(tot_loc_on_hand, tot_loc_avail + tot_hold)
     eligible_on_hand = max(0.0, total_stock - tot_hold)
     available_stock = max(0.0, eligible_on_hand - tot_reserved)
 
@@ -828,7 +828,7 @@ async def get_warehouse_inventory_summary(
         elif available_qty <= 0:
             stk_status = "REJECTED" if on_hand_qty == 0 else "BLOCKED"
             qc_stat = "REJECTED" if on_hand_qty == 0 else "PASSED"
-        elif stk_obj and available_qty < float(stk_obj.reorder_point):
+        elif stk_obj and available_qty < float(getattr(stk_obj, "reorder_point", 10.0) or 10.0):
             stk_status = "AVAILABLE"
             qc_stat = "PASSED"
         else:
@@ -870,7 +870,7 @@ async def get_warehouse_inventory_summary(
             "total_quantity": on_hand_qty,
             "on_hand_quantity": on_hand_qty,
             "uom": bal.uom,
-            "reorder_point": float(stk_obj.reorder_point) if stk_obj else 10.0,
+            "reorder_point": float(getattr(stk_obj, "reorder_point", 10.0) or 10.0) if stk_obj else 10.0,
             "status": stk_status,
             "stock_status": stk_status,
             "qc_status": qc_stat,
@@ -889,7 +889,7 @@ async def get_warehouse_inventory_summary(
                 quar_qty = float(quar_by_mat.get(m_code, Decimal("0.0")))
                 res_qty = float(res_by_mat.get(m_code, Decimal("0.0")))
                 hold_qty = quar_qty
-                on_hand_qty = float(stk.on_hand)
+                on_hand_qty = float(stk.on_hand_quantity)
                 eligible_on_hand = max(0.0, on_hand_qty - hold_qty)
                 available_qty = max(0.0, eligible_on_hand - res_qty)
                 batch_num = f"BT-{m_code.replace('MAT-', '')}-101"
@@ -899,9 +899,9 @@ async def get_warehouse_inventory_summary(
                 output.append({
                     "id": str(stk.id),
                     "material_code": m_code,
-                    "material_name": stk.material_name,
-                    "material": stk.material_name,
-                    "category": stk.category,
+                    "material_name": mat_obj.name if mat_obj else m_code,
+                    "material": mat_obj.name if mat_obj else m_code,
+                    "category": getattr(mat_obj, "category", None) or "General",
                     "batch": batch_num,
                     "batch_number": batch_num,
                     "supplier": "Central Receiving Vendor",
@@ -931,7 +931,7 @@ async def get_warehouse_inventory_summary(
                     "total_quantity": on_hand_qty,
                     "on_hand_quantity": on_hand_qty,
                     "uom": stk.uom,
-                    "reorder_point": float(stk.reorder_point),
+                    "reorder_point": 10.0,
                     "status": stk_status,
                     "stock_status": stk_status,
                     "qc_status": "PASSED",
@@ -1986,7 +1986,7 @@ async def create_material_issue(
         )
         stk_obj = stk_res.scalar_one_or_none()
 
-        stock_before = float(stk_obj.on_hand) if stk_obj else (float(bal_obj.available_quantity) if bal_obj else 0.0)
+        stock_before = float(stk_obj.on_hand_quantity) if stk_obj else (float(bal_obj.available_quantity) if bal_obj else 0.0)
 
         # Section 38 Inventory Deduction
         if bal_obj:
@@ -1995,11 +1995,11 @@ async def create_material_issue(
             bal_obj.updated_at = now_utc
 
         if stk_obj:
-            stk_obj.on_hand = max(Decimal("0.0"), stk_obj.on_hand - iss_qty)
-            stk_obj.allocated = max(Decimal("0.0"), stk_obj.allocated - iss_qty)
-            stk_obj.available = max(Decimal("0.0"), stk_obj.available - iss_qty)
+            stk_obj.on_hand_quantity = max(Decimal("0.0"), stk_obj.on_hand_quantity - iss_qty)
+            stk_obj.allocated_quantity = max(Decimal("0.0"), stk_obj.allocated_quantity - iss_qty)
+            stk_obj.available_quantity = max(Decimal("0.0"), stk_obj.available_quantity - iss_qty)
 
-        stock_after = float(stk_obj.on_hand) if stk_obj else (float(bal_obj.available_quantity) if bal_obj else 0.0)
+        stock_after = float(stk_obj.on_hand_quantity) if stk_obj else (float(bal_obj.available_quantity) if bal_obj else 0.0)
 
         item.issued_quantity += iss_qty
 
@@ -2207,8 +2207,8 @@ async def create_material_return(
             bal_obj.available_quantity += ret_qty
             bal_obj.updated_at = now_utc
         if stk_obj:
-            stk_obj.on_hand += ret_qty
-            stk_obj.available += ret_qty
+            stk_obj.on_hand_quantity += ret_qty
+            stk_obj.available_quantity += ret_qty
 
         uow.session.add(
             InventoryMovementHistoryModel(
@@ -2566,7 +2566,7 @@ async def create_stock_adjustment(
     )
     stk_obj = stk_res.scalar_one_or_none()
 
-    curr_qty = Decimal(str(bal_obj.available_quantity)) if bal_obj else (stk_obj.available if stk_obj else Decimal("0.0"))
+    curr_qty = Decimal(str(bal_obj.available_quantity)) if bal_obj else (stk_obj.available_quantity if stk_obj else Decimal("0.0"))
     new_qty = curr_qty + adj_qty
 
     if new_qty < Decimal("0.0"):
@@ -2587,8 +2587,8 @@ async def create_stock_adjustment(
         bal_obj.updated_at = now_utc
 
     if stk_obj:
-        stk_obj.on_hand = max(Decimal("0.0"), stk_obj.on_hand + adj_qty)
-        stk_obj.available = max(Decimal("0.0"), stk_obj.available + adj_qty)
+        stk_obj.on_hand_quantity = max(Decimal("0.0"), stk_obj.on_hand_quantity + adj_qty)
+        stk_obj.available_quantity = max(Decimal("0.0"), stk_obj.available_quantity + adj_qty)
 
     # Record Stock Adjustment
     adj_rec = StockAdjustmentModel(
@@ -2867,13 +2867,13 @@ async def universal_scan(
         "entity_type": "MATERIAL",
         "scan_code": code,
         "title": f"Material {mat_obj.material_code if mat_obj else stk_obj.material_code}",
-        "subtitle": f"{mat_obj.name if mat_obj else 'Raw Material Item'} Â· Available: {float(stk_obj.available) if stk_obj else 0.0}",
+        "subtitle": f"{mat_obj.name if mat_obj else 'Raw Material Item'} Â· Available: {float(stk_obj.available_quantity) if stk_obj else 0.0}",
         "data": {
             "material_code": mat_obj.material_code if mat_obj else stk_obj.material_code,
             "material_name": mat_obj.name if mat_obj else stk_obj.material_name,
             "base_uom": mat_obj.base_uom if mat_obj else stk_obj.uom,
-            "on_hand": float(stk_obj.on_hand) if stk_obj else 0.0,
-            "available": float(stk_obj.available) if stk_obj else 0.0,
+            "on_hand": float(stk_obj.on_hand_quantity) if stk_obj else 0.0,
+            "available": float(stk_obj.available_quantity) if stk_obj else 0.0,
             "reserved": float(stk_obj.reserved) if stk_obj else 0.0,
         },
     }
@@ -2962,9 +2962,9 @@ async def get_inventory_traceability(
         "zone": current_location[1].zone if current_location else None,
         "rack": current_location[1].rack if current_location else None,
         "bin": current_location[1].bin if current_location else None,
-        "on_hand": float(stk_obj.on_hand) if stk_obj else None,
-        "reserved": float(stk_obj.allocated) if stk_obj else None,
-        "available": float(stk_obj.available) if stk_obj else None,
+            "on_hand": float(stk_obj.on_hand_quantity) if stk_obj else None,
+        "reserved": float(stk_obj.allocated_quantity) if stk_obj else None,
+        "available": float(stk_obj.available_quantity) if stk_obj else None,
         "qc_status": None,
         "stock_status": None,
     }

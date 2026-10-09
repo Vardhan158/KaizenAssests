@@ -76,7 +76,7 @@ def _asn_response(asn: AsnModel) -> dict:
         "po_id": asn.po_id,
         "po_number": asn.po_number,
         "supplier_id": str(asn.supplier_id) if asn.supplier_id else None,
-        "supplier_name": details.get("supplier_name"),
+        "supplier_name": details.get("supplier_name") or (asn.supplier.supplier_name if asn.supplier else None),
         "destination_warehouse": details.get("destination_warehouse"),
         "vehicle_number": asn.vehicle_number,
         "driver_name": asn.driver_name,
@@ -105,7 +105,7 @@ async def list_expected_deliveries(
     supplier_id: str | None = Query(default=None),
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
-    query = select(AsnModel).options(selectinload(AsnModel.lines)).order_by(AsnModel.created_at.desc())
+    query = select(AsnModel).options(selectinload(AsnModel.lines), selectinload(AsnModel.supplier)).order_by(AsnModel.created_at.desc())
     if supplier_id:
         try:
             query = query.where(AsnModel.supplier_id == uuid.UUID(supplier_id))
@@ -245,7 +245,23 @@ async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uo
             )
     if asn is None:
         raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
-    return _asn_response(asn)
+    response = _asn_response(asn)
+    gate_result = await uow.session.execute(
+        select(GateEntryModel)
+        .where(GateEntryModel.asn_id == asn.id)
+        .order_by(GateEntryModel.created_at.desc())
+        .limit(1)
+    )
+    gate_entry = gate_result.scalars().first()
+    if gate_entry:
+        response["gate_entry_number"] = gate_entry.gate_entry_number
+        response["gate_entry"] = {
+            "gate_entry_number": gate_entry.gate_entry_number,
+            "vehicle_number": gate_entry.vehicle_number,
+            "driver_name": gate_entry.driver_name,
+            "dock_number": gate_entry.assigned_dock_id,
+        }
+    return response
 
 
 @preview_router.post("/asns", status_code=status.HTTP_201_CREATED)
@@ -1137,12 +1153,13 @@ async def create_gate_entry(
 
     # 1. Block only a duplicate arrival for the same PO and vehicle. A single
     # PO can have multiple ASN shipments and therefore multiple vehicles.
-    active_result = await uow.session.execute(
-        select(GateEntryModel).where(
-            GateEntryModel.po_number == po_num,
-            GateEntryModel.status.notin_([GateEntryStatus.REJECTED.value]),
-        )
-    )
+    duplicate_filters = [
+        GateEntryModel.po_number == po_num,
+        GateEntryModel.status.notin_([GateEntryStatus.REJECTED.value]),
+    ]
+    if asn:
+        duplicate_filters.append(GateEntryModel.asn_id == asn.id)
+    active_result = await uow.session.execute(select(GateEntryModel).where(*duplicate_filters))
     active_entries = [_gate_entry_from_model(model) for model in active_result.scalars().all()]
     GateVerificationService.check_duplicate_active_entry(active_entries, po_num, plate)
 
@@ -1154,7 +1171,7 @@ async def create_gate_entry(
     if asn:
         ocr_res = OcrResult(
             po_number=po_num,
-            supplier_name=po_record.supplier_name if po_record else "",
+            supplier_name=(po_record.supplier_name if po_record and po_record.supplier_name else request.supplier_name or ""),
             material_description=", ".join(line.material_name or line.item_code for line in asn.lines),
             total_quantity=sum(float(line.shipped_quantity or 0) for line in asn.lines),
             po_date=po_record.po_date if po_record else "",
