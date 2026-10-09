@@ -114,7 +114,8 @@ function AssemblyRequestsPage() {
       setLoading(true);
       const [reqData, matData] = await Promise.all([
         api.getAssemblyRequisitions("Assembly"),
-        api.getMaterials({ status: "Active" }).catch(() => []),
+        // Use the same persisted component catalog as Supplier Dashboard.
+        api.getMaterialComponents().catch(() => []),
       ]);
       setRequests(reqData || []);
       setMasterMaterials(matData || []);
@@ -174,19 +175,19 @@ function AssemblyRequestsPage() {
       return;
     }
 
-    const foundMat = masterMaterials.find((m) => m.id === matId);
+    const foundMat = masterMaterials.find((m) => (m.id || m.code) === matId);
     if (!foundMat) return;
     setItems(
       items.map((it, i) =>
         i === idx
           ? {
               ...it,
-              material_id: foundMat.id,
+              material_id: foundMat.id || foundMat.code || "",
               material_variant_id: "",
-              material_code: foundMat.material_code,
+              material_code: foundMat.material_code || foundMat.code || "",
               variant_code: "",
-              material_name: foundMat.material_name,
-              uom: foundMat.base_uom || "",
+              material_name: foundMat.material_name || foundMat.name || "",
+              uom: foundMat.base_uom || foundMat.uom || "",
               is_custom: false,
               custom_material_name: "",
             }
@@ -778,9 +779,9 @@ function AssemblyRequestsPage() {
                                 </span>
                               </SelectItem>
                               {masterMaterials.map((m) => (
-                                <SelectItem key={m.id} value={m.id}>
+                                <SelectItem key={m.id || m.code} value={m.id || m.code}>
                                   <span className="font-mono font-bold text-primary">
-                                    {m.material_code}
+                                    {m.material_code || m.code}
                                   </span>{" "}
                                   — {m.material_name}
                                 </SelectItem>
