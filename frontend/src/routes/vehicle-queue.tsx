@@ -1,6 +1,7 @@
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import QRCode from "qrcode";
 import {
   AlertTriangle,
   ArrowRight,
@@ -9,6 +10,7 @@ import {
   FileCheck2,
   Loader2,
   PlusCircle,
+  Printer,
   QrCode,
   RefreshCw,
   ShieldCheck,
@@ -47,10 +49,12 @@ type Arrival = {
   po_id?: string | null;
   assigned_by?: string | null;
   assigned_at?: string | null;
+  allocation_request_id?: string | null;
   movement_started_by?: string | null;
   movement_started_at?: string | null;
   dock_checked_in_by?: string | null;
   dock_arrival_at?: string | null;
+  allocation_arrived_at?: string | null;
   shipment: {
     transporter?: string;
     number_of_packages?: number;
@@ -126,6 +130,7 @@ function InboundArrivals() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [submittingWebEntry, setSubmittingWebEntry] = useState(false);
   const [generatedGatePass, setGeneratedGatePass] = useState<string | null>(null);
+  const [generatedGatePassQr, setGeneratedGatePassQr] = useState<string | null>(null);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -287,6 +292,30 @@ function InboundArrivals() {
     }
   }
 
+  async function confirmPhysicalDockArrival(arrival: Arrival) {
+    if (!arrival.allocation_request_id) {
+      toast.error("Dock check-in unavailable", {
+        description: "No persisted dock allocation is linked to this arrival.",
+      });
+      return;
+    }
+    setAssigning(arrival.id);
+    try {
+      await api.markVehicleArrived(arrival.allocation_request_id);
+      toast.success("Vehicle checked in at dock", {
+        description: `${arrival.vehicle_number} is now AT DOCK at ${arrival.assigned_dock_id}.`,
+      });
+      await load(true);
+    } catch (error) {
+      toast.error("Dock check-in failed", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+      await load(true);
+    } finally {
+      setAssigning(null);
+    }
+  }
+
   const isEligibleForInboundExit = (statusStr: string) => {
     const upper = (statusStr || "").toUpperCase().trim();
     return [
@@ -327,6 +356,17 @@ function InboundArrivals() {
       setAssigning(null);
     }
   }
+
+  const printGeneratedGatePass = () => {
+    if (!generatedGatePass || !generatedGatePassQr) return;
+    const printWindow = window.open("", "_blank", "width=500,height=700");
+    if (!printWindow) {
+      toast.error("Allow pop-ups to print the gate pass");
+      return;
+    }
+    printWindow.document.write(`<!doctype html><html><head><title>Gate Pass ${generatedGatePass}</title><style>body{font-family:Arial,sans-serif;text-align:center;padding:32px;color:#172033}img{width:240px;height:240px}.pass{border:1px solid #d9e1ee;border-radius:16px;padding:24px}h1{font-size:22px}p{font-family:monospace;font-size:18px;font-weight:700}</style></head><body><div class="pass"><h1>KAIZENTRIX GATE PASS</h1><img src="${generatedGatePassQr}" alt="Gate pass QR code"/><p>${generatedGatePass}</p><p>ASN: ${selectedAsn || "—"}</p></div><script>window.onload=()=>{window.print();window.close()}</script></body></html>`);
+    printWindow.document.close();
+  };
 
   return (
     <AppShell
@@ -390,6 +430,7 @@ function InboundArrivals() {
                     onAssign={() => void assignDock(arrival)}
                     onMove={() => void startMovement(arrival)}
                     onCheckIn={() => void confirmDockArrival(arrival)}
+                    onDockCheckIn={() => void confirmPhysicalDockArrival(arrival)}
                     onApproveExit={() => void approveGateExit(arrival)}
                     isEligibleForInboundExit={isEligibleForInboundExit}
                     busy={assigning === arrival.id}
@@ -413,19 +454,40 @@ function InboundArrivals() {
               formData.append("asn_reference", selectedAsn);
               formData.append("supplier_name", selectedSupplier);
               formData.append("driver_name", driverNameInput);
-              formData.append("total_quantity", "500");
+              const asnQuantity = asnMaterials.reduce(
+                (total, line) => total + Number(line.shipped_quantity ?? line.quantity ?? 0),
+                0,
+              );
+              formData.append("total_quantity", String(asnQuantity));
               if (vehiclePhotoBlob)
                 formData.append("vehicle_photo", vehiclePhotoBlob, "vehicle-photo.jpg");
               api
                 .createGateEntry(formData)
-                .then((createdEntry) => {
+                .then(async (createdEntry) => {
                   setSubmittingWebEntry(false);
                   setIsNewRegistrationModalOpen(false);
-                  const gatePassId =
-                    createdEntry?.gate_pass_number ||
-                    createdEntry?.gate_entry_number ||
-                    `GE-${Date.now().toString(36).toUpperCase()}`;
+                  const savedEntry = createdEntry?.data || createdEntry?.gate_entry || createdEntry;
+                  let gatePassId =
+                    savedEntry?.gate_entry_number ||
+                    savedEntry?.gate_entry_no ||
+                    savedEntry?.gate_pass_number ||
+                    savedEntry?.gate_pass_id;
+                  if (!gatePassId) {
+                    const arrivals = await api.getInboundArrivals();
+                    const matchingArrival = arrivals.find((arrival: any) =>
+                      String(arrival.asn_number || "").toLowerCase() === selectedAsn.toLowerCase() &&
+                      String(arrival.vehicle_number || "").replace(/[^a-z0-9]/gi, "").toLowerCase() ===
+                        vehicleNumberInput.replace(/[^a-z0-9]/gi, "").toLowerCase(),
+                    );
+                    gatePassId = matchingArrival?.gate_entry_number;
+                  }
+                  if (!gatePassId) {
+                    throw new Error("Gate entry was created but no persisted gate-pass number was returned.");
+                  }
                   setGeneratedGatePass(gatePassId);
+                  void QRCode.toDataURL(gatePassId, { width: 240, margin: 1 })
+                    .then(setGeneratedGatePassQr)
+                    .catch(() => setGeneratedGatePassQr(null));
                   toast.success("Web Gate Entry Registered Successfully ✓", {
                     description: `Gate Pass: ${gatePassId}\nSupplier: ${selectedSupplier}\nASN: ${selectedAsn}`,
                   });
@@ -931,7 +993,12 @@ function InboundArrivals() {
       </Dialog>
       <Dialog
         open={Boolean(generatedGatePass)}
-        onOpenChange={(open) => !open && setGeneratedGatePass(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setGeneratedGatePass(null);
+            setGeneratedGatePassQr(null);
+          }
+        }}
       >
         <DialogContent className="max-w-md rounded-2xl bg-card p-6 text-center shadow-2xl">
           <div className="mx-auto grid size-14 place-items-center rounded-full bg-emerald-100 text-emerald-600">
@@ -942,9 +1009,24 @@ function InboundArrivals() {
           <div className="mt-4 rounded-xl border bg-muted/40 p-4 font-mono text-2xl font-black tracking-wider text-primary">
             {generatedGatePass}
           </div>
-          <Button className="mt-5 w-full rounded-xl" onClick={() => setGeneratedGatePass(null)}>
-            Done
-          </Button>
+          <div className="mt-4 rounded-2xl border-2 border-dashed border-primary/40 bg-muted/20 p-4">
+            {generatedGatePassQr ? (
+              <img src={generatedGatePassQr} alt={`Scannable QR code for ${generatedGatePass}`} className="mx-auto size-48 rounded-lg bg-white p-2" />
+            ) : (
+              <p className="py-20 text-xs text-muted-foreground">Generating QR code...</p>
+            )}
+          </div>
+          <div className="mt-5 flex gap-2">
+            <Button className="flex-1 rounded-xl" disabled={!generatedGatePassQr} onClick={printGeneratedGatePass}>
+              <Printer className="mr-2 size-4" /> Print Gate Pass
+            </Button>
+            <Button variant="outline" className="flex-1 rounded-xl" onClick={() => {
+              setGeneratedGatePass(null);
+              setGeneratedGatePassQr(null);
+            }}>
+              Done
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </AppShell>
@@ -961,6 +1043,7 @@ function ArrivalRows({
   onAssign,
   onMove,
   onCheckIn,
+  onDockCheckIn,
   onApproveExit,
   isEligibleForInboundExit,
   busy,
@@ -974,6 +1057,7 @@ function ArrivalRows({
   onAssign: () => void;
   onMove: () => void;
   onCheckIn: () => void;
+  onDockCheckIn: () => void;
   onApproveExit: (arrival: Arrival) => void;
   isEligibleForInboundExit: (status: string) => boolean;
   busy: boolean;
@@ -1048,6 +1132,7 @@ function ArrivalRows({
               onAssign={onAssign}
               onMove={onMove}
               onCheckIn={onCheckIn}
+              onDockCheckIn={onDockCheckIn}
               busy={busy}
             />
           </td>
@@ -1074,6 +1159,7 @@ function ArrivalDetails({
   onAssign,
   onMove,
   onCheckIn,
+  onDockCheckIn,
   busy,
 }: {
   arrival: Arrival;
@@ -1083,6 +1169,7 @@ function ArrivalDetails({
   onAssign: () => void;
   onMove: () => void;
   onCheckIn: () => void;
+  onDockCheckIn: () => void;
   busy: boolean;
 }) {
   return (
@@ -1129,7 +1216,22 @@ function ArrivalDetails({
                 ? new Date(arrival.expected_arrival_at).toLocaleString()
                 : "—"}
             </dd>
+            <dt className="text-muted-foreground">Allocated dock</dt>
+            <dd className="font-semibold">{arrival.assigned_dock_id || "—"}</dd>
+            <dt className="text-muted-foreground">Dock assigned</dt>
+            <dd>{arrival.assigned_at ? new Date(arrival.assigned_at).toLocaleString() : "—"}</dd>
+            <dt className="text-muted-foreground">Dock check-in</dt>
+            <dd>
+              {(arrival.dock_arrival_at || arrival.allocation_arrived_at)
+                ? new Date(arrival.dock_arrival_at || arrival.allocation_arrived_at!).toLocaleString()
+                : "Not checked in"}
+            </dd>
           </dl>
+          {arrival.status === "DOCK_ASSIGNED" && arrival.allocation_request_id && (
+            <Button className="mt-4 rounded-lg" onClick={onDockCheckIn} disabled={busy}>
+              <ShieldCheck className="size-4" /> Confirm Dock Check-In
+            </Button>
+          )}
         </div>
         <div>
           <h3 className="mb-3 font-semibold">Expected materials</h3>

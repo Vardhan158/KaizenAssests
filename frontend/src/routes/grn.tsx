@@ -76,7 +76,10 @@ export const Route = createFileRoute("/grn")({
   } => ({
     tab: (search.tab as string) || "dashboard",
     page: Number(search.page) || 1,
-    grn_id: (search.grn_id as string) || undefined,
+    grn_id:
+      search.grn_id && !["undefined", "null", ""].includes(String(search.grn_id).toLowerCase())
+        ? String(search.grn_id)
+        : undefined,
     gatePassId: (search.gatePassId as string) || (search.gate_pass_id as string) || undefined,
     dock: (search.dock as string) || (search.dock_number as string) || undefined,
     po: (search.po as string) || (search.po_number as string) || undefined,
@@ -93,6 +96,7 @@ type GrnLineItem = {
   good_quantity: number;
   damaged_quantity: number;
   rejected_quantity?: number;
+  held_quantity?: number;
   balance_quantity: number;
   uom: string;
   material_category?: string;
@@ -103,6 +107,8 @@ type GrnLineItem = {
   quality_approved_quantity?: number;
   quality_result?: string;
   damage_reason?: string;
+  rejected_reason?: string;
+  held_reason?: string;
 };
 
 type BatchEntry = {
@@ -338,6 +344,7 @@ function GrnPageWorkflow() {
 
   const contextRequest = useRef(0);
   const saveLock = useRef(false);
+  const resumeRequest = useRef<string | null>(null);
   const [grnId, setGrnId] = useState<string | null>(null);
   const [dockOptions, setDockOptions] = useState<any[]>([]);
   const [loadingContext, setLoadingContext] = useState(false);
@@ -421,11 +428,20 @@ function GrnPageWorkflow() {
       if (Array.isArray(draft?.uploadedDocuments)) setUploadedDocuments(draft.uploadedDocuments);
       if (Number(draft?.currentPage) > 0) setCurrentPage(Number(draft.currentPage));
       if (Number(draft?.maxCompletedStep) > 0) setMaxCompletedStep(Number(draft.maxCompletedStep));
-      if (draft?.grnId && typeof draft.grnId === "string") {
-        setGrnId(draft.grnId);
-        localStorage.setItem("active_grn_id", draft.grnId);
+      const draftGrnId = typeof draft?.grnId === "string" ? draft.grnId.trim() : "";
+      const hasValidDraftId = draftGrnId && !["undefined", "null"].includes(draftGrnId.toLowerCase());
+      if (hasValidDraftId) {
+        setGrnId(draftGrnId);
+        localStorage.setItem("active_grn_id", draftGrnId);
+      } else if (!Array.isArray(draft?.materials) || draft.materials.length === 0) {
+        setSaveStatus("idle");
+        return;
       }
-      setSaveStatus("saved");
+      if (hasValidDraftId && Array.isArray(draft?.materials) && draft.materials.length > 0) {
+        setSaveStatus("saved");
+      } else {
+        setSaveStatus("idle");
+      }
     } catch (err) {
       console.warn("Unable to restore GRN local draft:", err);
     }
@@ -783,7 +799,9 @@ function GrnPageWorkflow() {
         console.error("Failed to load formal POs", e);
       }
     }
-    void loadPos();
+    // Purchase orders are optional in the ASN-based receiving flow. Do not
+    // call the unavailable PO endpoint during GRN page initialization.
+    if (false) void loadPos();
   }, []);
 
   // Persistent Rehydration on Page Refresh / Navigation
@@ -797,12 +815,15 @@ function GrnPageWorkflow() {
         ? rawId.trim()
         : null;
     if (targetId && activeTab === "wizard" && !grnId) {
+      if (resumeRequest.current === targetId) return;
+      resumeRequest.current = targetId;
       void loadExistingGrnSession(targetId);
     }
   }, [(search as any).grn_id, activeTab, grnId]);
 
   useEffect(() => {
-    if (activeTab !== "wizard" || !grnId || (search as any).grn_id) return;
+    const urlGrnId = String((search as any).grn_id || "").toLowerCase();
+    if (activeTab !== "wizard" || !grnId || (urlGrnId && urlGrnId !== "undefined" && urlGrnId !== "null")) return;
     navigate({
       to: "/grn",
       search: { tab: "wizard", page: currentPage, grn_id: grnId },
@@ -928,7 +949,11 @@ function GrnPageWorkflow() {
       });
 
       setDamagePhotos({});
-      setGrnId(resolvedContext.grn_id || resolvedContext.grnId || null);
+      const resolvedGrnId = resolvedContext.grn_id || resolvedContext.grnId || resolvedContext.id || ctx.grn_id || ctx.grnId || ctx.id || null;
+      if (resolvedGrnId) {
+        setGrnId(String(resolvedGrnId));
+        localStorage.setItem("active_grn_id", String(resolvedGrnId));
+      }
       if (resolvedContext.dock_options && resolvedContext.dock_options.length > 0) {
         setDockOptions((prev) => {
           const existingNums = new Set(prev.map((d: any) => d.dock_number));
@@ -938,16 +963,19 @@ function GrnPageWorkflow() {
       }
 
       const mapped: GrnLineItem[] = (resolvedContext.lines || ctx.lines || []).map((l: any) => {
-        const poQty = Number(l.ordered_quantity ?? l.orderedQuantity ?? 100);
-        const recQty = Number(l.received_quantity ?? l.receivedQuantity ?? poQty);
-        const goodQty = Number(l.good_quantity ?? l.goodQuantity ?? recQty);
+        const sourceMaterial = l.material || l.material_master || {};
+        const poQty = Number(l.ordered_quantity ?? l.orderedQuantity ?? l.quantity ?? 100);
+        // ASN/PO quantities are reference quantities only. A new receipt must
+        // be physically counted by the operator before it is accepted.
+        const recQty = Number(l.received_quantity ?? l.receivedQuantity ?? 0);
+        const goodQty = Number(l.good_quantity ?? l.goodQuantity ?? 0);
         const dmgQty = Number(l.damaged_quantity ?? l.damagedQuantity ?? 0);
         const bal = Math.max(poQty - recQty, 0);
 
         return {
           grn_line_id: l.grn_line_id || l.grnLineId,
-          material_name: l.material_name || l.materialName || l.item_code,
-          item_code: l.item_code || l.itemCode,
+          material_name: l.material_name || l.materialName || sourceMaterial.material_name || sourceMaterial.name || l.item_code || l.itemCode,
+          item_code: l.item_code || l.itemCode || l.material_code || sourceMaterial.material_code || sourceMaterial.code,
           po_quantity: poQty,
           received_quantity: recQty,
           good_quantity: goodQty,
@@ -960,7 +988,7 @@ function GrnPageWorkflow() {
           variant_color: l.color || l.variant_color || l.variantColor || "",
           variant_grade: l.grade || l.variant_grade || l.variantGrade || "",
           quality_approved_quantity: goodQty,
-          quality_result: "ACCEPTED",
+          quality_result: "PENDING",
         };
       });
 
@@ -1157,7 +1185,13 @@ function GrnPageWorkflow() {
       const detail = await api.getGrnDetail(cleanId);
       if (!detail) throw new Error("GRN record not found in database.");
 
-      const resolvedId = detail.grn_id || String(detail.id);
+      // The route parameter is already the persisted GRN UUID. Some older
+      // response shapes omit `grn_id`, so retain the URL identifier instead
+      // of cancelling a valid session.
+      const resolvedId = String(detail.grn_id || detail.id || cleanId);
+      if (!resolvedId || ["undefined", "null"].includes(resolvedId.toLowerCase())) {
+        throw new Error("Backend returned an invalid GRN identifier; resume was cancelled.");
+      }
       setGrnId(resolvedId);
       localStorage.setItem("active_grn_id", resolvedId);
 
@@ -1178,8 +1212,19 @@ function GrnPageWorkflow() {
         received_by: detail.received_by || loggedInUserName,
       });
 
-      if (Array.isArray(detail.lines) && detail.lines.length > 0) {
-        const rehydratedLines: GrnLineItem[] = detail.lines.map((l: any) => {
+      let persistedLines = Array.isArray(detail.lines) ? detail.lines : [];
+      if (persistedLines.length === 0 && detail.asn_number) {
+        try {
+          const asn = await api.getAsn(detail.asn_number);
+          persistedLines = Array.isArray(asn?.lines) ? asn.lines : [];
+        } catch {
+          persistedLines = [];
+        }
+      }
+
+      if (persistedLines.length > 0) {
+        const rehydratedLines: GrnLineItem[] = persistedLines.map((l: any) => {
+          const sourceMaterial = l.material || l.material_master || {};
           const poQty = Number(l.ordered_quantity ?? l.orderedQuantity ?? 0);
           const recQty = Number(
             l.received_quantity ??
@@ -1193,13 +1238,17 @@ function GrnPageWorkflow() {
           );
           return {
             grn_line_id: l.grn_line_id || String(l.id),
-            item_code: l.item_code,
-            material_name: l.material_name || l.item_code,
+            item_code: l.item_code || l.material_code || l.code || sourceMaterial.material_code || sourceMaterial.code,
+            material_name: l.material_name || l.materialName || l.material_description || sourceMaterial.material_name || sourceMaterial.name || l.item_code || l.material_code || l.code,
             material_category: l.material_category || "Raw Materials",
             po_quantity: poQty,
             received_quantity: recQty,
             good_quantity: goodQty,
             damaged_quantity: dmgQty,
+            rejected_quantity: Number(l.rejected_quantity ?? l.rejectedQuantity ?? 0),
+            held_quantity: Number(l.held_quantity ?? l.heldQuantity ?? 0),
+            rejected_reason: l.rejected_reason || l.rejectedReason || "",
+            held_reason: l.held_reason || l.heldReason || "",
             balance_quantity: balQty,
             uom: l.uom || "PCS",
             variant_code: l.variant_code || l.variantCode || "",
@@ -1207,7 +1256,7 @@ function GrnPageWorkflow() {
             variant_color: l.color || l.variant_color || l.variantColor || "",
             variant_grade: l.grade || l.variant_grade || l.variantGrade || "",
             quality_approved_quantity: Number(l.quality_approved_quantity ?? goodQty),
-            quality_result: l.quality_result || "ACCEPTED",
+            quality_result: l.quality_result || "PENDING",
           };
         });
         setMaterials(rehydratedLines);
@@ -1216,7 +1265,7 @@ function GrnPageWorkflow() {
         const bMap: Record<string, BatchEntry[]> = {};
         const pMap: Record<string, any> = {};
 
-        detail.lines.forEach((l: any, idx: number) => {
+        persistedLines.forEach((l: any, idx: number) => {
           const itemTarget = rehydratedLines[idx] || (l as GrnLineItem);
           const rowKey = grnMaterialKey(itemTarget, idx);
           qApp[rowKey] = Number(l.quality_approved_quantity ?? l.good_quantity ?? 0);
@@ -1301,16 +1350,42 @@ function GrnPageWorkflow() {
       setMaxCompletedStep(effectiveMaxStep);
       setCurrentPage(targetStep);
       setSaveStatus("saved");
-      toast.success(`Resumed in-progress GRN ${detail.grn_number || resolvedId}`);
       navigate({ to: "/grn", search: { tab: "wizard", page: targetStep, grn_id: resolvedId } });
-    } catch (err: any) {
-      console.warn("Existing GRN session not found or deleted, resetting active session:", err);
+      } catch (err: any) {
+      console.warn("Unable to restore GRN session:", err);
+      setSaveStatus("error");
+      // Do not keep retrying a deleted/stale GRN UUID from the URL or local
+      // draft. Clear only the invalid session and return to a new header form.
       localStorage.removeItem("active_grn_id");
       localStorage.removeItem(GRN_LOCAL_DRAFT_KEY);
       setGrnId(null);
-      setSaveStatus("idle");
+      setMaterials([]);
+      setCurrentPage(1);
+      toast.error("Unable to restore GRN data", {
+        description: err instanceof Error ? err.message : "The saved GRN could not be loaded.",
+      });
+      void navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
     } finally {
       setLoadingContext(false);
+    }
+  }
+
+  async function handleDeleteGrn(record: any) {
+    const grnId = String(record?.grn_id || record?.id || "").trim();
+    if (!grnId) {
+      toast.error("This GRN has no valid database ID.");
+      return;
+    }
+    const label = record?.grn_number || grnId;
+    if (!window.confirm(`Delete GRN ${label}? This will remove its receiving data, lines, batches, and documents.`)) return;
+    try {
+      await api.deleteGrn(grnId);
+      toast.success(`GRN ${label} deleted.`);
+      await loadRecords();
+    } catch (error) {
+      toast.error("Unable to delete GRN", {
+        description: error instanceof Error ? error.message : "The backend rejected the deletion.",
+      });
     }
   }
 
@@ -1354,22 +1429,19 @@ function GrnPageWorkflow() {
   }
 
   function handleStepClick(targetPage: number) {
-    if (targetPage <= maxCompletedStep + 1) {
-      setCurrentPage(targetPage);
-      if (grnId) {
-        void api
-          .updateGrnStep(grnId, { current_step: targetPage, max_completed_step: maxCompletedStep })
-          .catch(() => {});
-      }
-      navigate({
-        to: "/grn",
-        search: { tab: "wizard", page: targetPage, grn_id: grnId || undefined },
-      });
-    } else {
-      toast.info(
-        `Please complete Step ${maxCompletedStep} before proceeding to Step ${targetPage}.`,
-      );
+    // The step navigation is intentionally always clickable so operators can
+    // review any section and return to an earlier step. Each step still keeps
+    // its own validation and Next button guards before allowing progression.
+    setCurrentPage(targetPage);
+    if (grnId) {
+      void api
+        .updateGrnStep(grnId, { current_step: targetPage, max_completed_step: maxCompletedStep })
+        .catch(() => {});
     }
+    void navigate({
+      to: "/grn",
+      search: { tab: "wizard", page: targetPage, grn_id: grnId || undefined },
+    });
   }
 
   async function saveGrnHeader(): Promise<string> {
@@ -1440,7 +1512,7 @@ function GrnPageWorkflow() {
       void api
         .updateGrnStep(savedId, { current_step: nextStep, max_completed_step: 1 })
         .catch(() => {});
-      navigate({ to: "/grn", search: { tab: "wizard", page: nextStep, grn_id: savedId } });
+      await navigate({ to: "/grn", search: { tab: "wizard", page: nextStep, grn_id: savedId } });
     } catch (error) {
       setSaveStatus("error");
       toast.error(error instanceof Error ? error.message : "Failed to save GRN header.");
@@ -1474,6 +1546,19 @@ function GrnPageWorkflow() {
       rowKey: grnMaterialKey(material, materialIndex),
     }))
     .filter(({ material }) => (material.damaged_quantity || 0) > 0);
+  const qcHasRequiredEvidence = materials.every((m, idx) => {
+    const received = Number(m.received_quantity || 0);
+    const total = Number(m.good_quantity || 0) + Number(m.rejected_quantity || 0) + Number(m.damaged_quantity || 0) + Number(m.held_quantity || 0);
+    if (total !== received) return false;
+    if ((m.rejected_quantity || 0) > 0 && !m.rejected_reason?.trim()) return false;
+    if ((m.damaged_quantity || 0) > 0 && !m.damage_reason?.trim()) return false;
+    if ((m.held_quantity || 0) > 0 && !m.held_reason?.trim()) return false;
+    if ((m.damaged_quantity || 0) > 0) {
+      const evidence = damagePhotos[grnMaterialKey(m, idx)] || damagePhotos[m.item_code];
+      return Boolean(evidence?.file || evidence?.previewUrl || evidence?.evidenceId || evidence?.evidenceIds?.length || evidence?.photos?.length);
+    }
+    return true;
+  });
 
   // Page 2 -> Proceed to Page 3
   async function handleProceedFromPage2() {
@@ -1511,10 +1596,10 @@ function GrnPageWorkflow() {
       if (
         materials.some((m) => {
           const rec = m.received_quantity !== undefined ? m.received_quantity : m.good_quantity;
-          return !Number.isFinite(rec) || rec < 0;
+          return !Number.isFinite(rec) || rec <= 0;
         })
       ) {
-        toast.error("Received quantity cannot be negative.");
+        toast.error("Enter the physically counted received quantity for all material lines.");
         return;
       }
       const invalidLine = materials.find((m) => {
@@ -1665,6 +1750,9 @@ function GrnPageWorkflow() {
       } catch (err) {
         console.warn("GRN autosave failed:", err);
         setSaveStatus("error");
+        toast.error("Unable to save GRN changes", {
+          description: err instanceof Error ? err.message : "The backend rejected the saved values.",
+        });
       } finally {
         saveLock.current = false;
       }
@@ -1693,6 +1781,22 @@ function GrnPageWorkflow() {
   ]);
 
   async function handleProceedFromPage3() {
+    const invalidQcLine = materials.find((m) => {
+      const received = Number(m.received_quantity || 0);
+      const accepted = Number(m.good_quantity || 0);
+      const rejected = Number(m.rejected_quantity || 0);
+      const damaged = Number(m.damaged_quantity || 0);
+      const held = Number(m.held_quantity || 0);
+      return accepted + rejected + damaged + held !== received ||
+        (rejected > 0 && !m.rejected_reason?.trim()) ||
+        (damaged > 0 && !m.damage_reason?.trim()) ||
+        (held > 0 && !m.held_reason?.trim());
+    });
+    if (invalidQcLine) {
+      toast.error(`QC quantities and reasons are incomplete for ${invalidQcLine.material_name}. Accepted + Rejected + Damaged + Held must equal Received.`);
+      return;
+    }
+
     // Strictly validate that if any material has damaged_quantity > 0, at least 1 photo evidence MUST be taken/attached
     const missingPhotoLine = damagedMaterialRows.find(({ material, rowKey }) => {
       const p = damagePhotos[rowKey] || damagePhotos[material.item_code];
@@ -2233,14 +2337,14 @@ function GrnPageWorkflow() {
           : [
               {
                 batch_number: `BATCH-${itemCode}-001`,
-                batch_quantity: m.good_quantity ?? m.received_quantity ?? 100,
+                batch_quantity: m.good_quantity ?? m.received_quantity ?? 0,
               },
             ];
 
       for (const b of batches) {
         const batchNum = b.batch_number || `BATCH-${itemCode}-001`;
         const batchQty =
-          b.batch_quantity !== undefined ? b.batch_quantity : (m.good_quantity ?? 100);
+          b.batch_quantity !== undefined ? b.batch_quantity : (m.good_quantity ?? m.received_quantity ?? 0);
         const qrId = `QR-${grnNum}-${itemCode}-${batchNum}`;
         const payload = [
           `Material Code: ${itemCode}`,
@@ -3293,6 +3397,14 @@ function GrnPageWorkflow() {
                                       >
                                         <Printer className="mr-1 size-3.5 text-primary" /> Print
                                       </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="rounded-lg text-xs h-7 font-semibold border-rose-300 text-rose-600 hover:bg-rose-50 shrink-0"
+                                        onClick={() => void handleDeleteGrn(r)}
+                                      >
+                                        <Trash2 className="mr-1 size-3.5" /> Delete
+                                      </Button>
                                     </div>
                                   </td>
                                 </tr>
@@ -3625,7 +3737,18 @@ function GrnPageWorkflow() {
                 return (
                   <div
                     key={pg.id}
-                    className={`flex-1 flex flex-col items-center text-center transition-all p-2 rounded-xl select-none ${
+                    role="button"
+                    tabIndex={0}
+                    aria-current={isCurrent ? "step" : undefined}
+                    aria-label={`Open ${pg.title}`}
+                    onClick={() => handleStepClick(pg.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleStepClick(pg.id);
+                      }
+                    }}
+                    className={`flex-1 flex flex-col items-center text-center transition-all p-2 rounded-xl select-none cursor-pointer hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
                       isCurrent
                         ? "bg-primary/5 font-bold shadow-xs"
                         : isAccessible
@@ -4157,7 +4280,7 @@ function GrnPageWorkflow() {
                         return (
                           <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
                             <td className="px-4 py-3 font-bold text-foreground">
-                              <div>{m.material_name}</div>
+                              <div>{m.item_code || m.material_code} — {m.material_name || m.materialName || m.material_description || "Material"}</div>
                               <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
                                 Category: {m.material_category || "General"}
                               </span>
@@ -4240,6 +4363,13 @@ function GrnPageWorkflow() {
                               >
                                 {isCompleted ? "✓ COMPLETED" : "PENDING"}
                               </span>
+                              {(rejectedVal > 0 || damagedVal > 0 || heldVal > 0) && (
+                                <div className="mt-2 space-y-1 text-left">
+                                  {rejectedVal > 0 && <Input placeholder="Rejected reason *" value={m.rejected_reason || ""} onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, rejected_reason: e.target.value } : item))} className="h-7 text-[11px]" />}
+                                  {damagedVal > 0 && <Input placeholder="Damage reason *" value={m.damage_reason || ""} onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, damage_reason: e.target.value } : item))} className="h-7 text-[11px]" />}
+                                  {heldVal > 0 && <Input placeholder="Held reason *" value={m.held_reason || ""} onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, held_reason: e.target.value } : item))} className="h-7 text-[11px]" />}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
@@ -4301,7 +4431,12 @@ function GrnPageWorkflow() {
                     )}
                   </div>
                   <Button
-                    disabled={busyAction || loadingContext}
+                    disabled={
+                      busyAction ||
+                      loadingContext ||
+                      materials.length === 0 ||
+                      materials.some((m) => Number(m.received_quantity || 0) <= 0)
+                    }
                     onClick={() => void handleProceedFromPage2()}
                     className="rounded-xl font-bold px-6"
                   >
@@ -4339,7 +4474,9 @@ function GrnPageWorkflow() {
                         <th className="px-4 py-3">Material</th>
                         <th className="px-4 py-3 text-right">Received Qty (Step 2)</th>
                         <th className="px-4 py-3 text-right">Accepted Qty</th>
+                        <th className="px-4 py-3 text-right">Rejected Qty</th>
                         <th className="px-4 py-3 text-right">Damaged Qty</th>
+                        <th className="px-4 py-3 text-right">Held Qty</th>
                         <th className="px-4 py-3 text-center">Quality Status</th>
                       </tr>
                     </thead>
@@ -4354,9 +4491,14 @@ function GrnPageWorkflow() {
                           qualityApproved[rowKey] !== undefined
                             ? qualityApproved[rowKey]
                             : m.good_quantity;
+                        const rejectedVal = m.rejected_quantity || 0;
                         const damagedVal = m.damaged_quantity || 0;
-                        const isSound = Number(m.po_quantity) > 0 && acceptedVal >= Number(m.po_quantity);
-                        const isPartial = acceptedVal > 0 && !isSound;
+                        const heldVal = m.held_quantity || 0;
+                        const hasInspection = !["", "PENDING", "UNINSPECTED"].includes(
+                          String(m.quality_result || "PENDING").toUpperCase(),
+                        );
+                        const isSound = hasInspection && acceptedVal > 0 && damagedVal === 0;
+                        const isPartial = hasInspection && (acceptedVal > 0 || damagedVal > 0) && !isSound;
 
                         return (
                           <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
@@ -4385,7 +4527,6 @@ function GrnPageWorkflow() {
                                   const raw = e.target.value;
                                   const val =
                                     raw === "" ? 0 : Math.max(0, Math.min(Number(raw), recQty));
-                                  const newDamaged = Math.max(recQty - val, 0);
                                   setQualityApproved((prev) => ({ ...prev, [rowKey]: val }));
                                   setMaterials((prev) =>
                                     prev.map((item, i) =>
@@ -4393,8 +4534,11 @@ function GrnPageWorkflow() {
                                         ? {
                                             ...item,
                                             good_quantity: val,
-                                            damaged_quantity: newDamaged,
+                                            damaged_quantity: item.damaged_quantity || 0,
+                                            rejected_quantity: item.rejected_quantity || 0,
+                                            held_quantity: item.held_quantity || 0,
                                             quality_approved_quantity: val,
+                                            quality_result: "INSPECTED",
                                           }
                                         : item,
                                     ),
@@ -4414,19 +4558,18 @@ function GrnPageWorkflow() {
                                   const raw = e.target.value;
                                   const val =
                                     raw === "" ? 0 : Math.max(0, Math.min(Number(raw), recQty));
-                                  const newAccepted = Math.max(recQty - val, 0);
                                   setQualityApproved((prev) => ({
-                                    ...prev,
-                                    [rowKey]: newAccepted,
+                                    ...prev, [rowKey]: Number(m.good_quantity || 0),
                                   }));
                                   setMaterials((prev) =>
                                     prev.map((item, i) =>
                                       i === idx
                                         ? {
                                             ...item,
-                                            good_quantity: newAccepted,
+                                            good_quantity: item.good_quantity || 0,
                                             damaged_quantity: val,
-                                            quality_approved_quantity: newAccepted,
+                                            quality_approved_quantity: item.good_quantity || 0,
+                                            quality_result: "INSPECTED",
                                           }
                                         : item,
                                     ),
@@ -4434,6 +4577,16 @@ function GrnPageWorkflow() {
                                 }}
                                 className="w-28 text-right font-bold text-rose-600 rounded-xl ml-auto"
                               />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Input type="number" min={0} max={recQty} value={rejectedVal || ""} placeholder="0"
+                                onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, rejected_quantity: Math.max(0, Number(e.target.value) || 0), quality_result: "INSPECTED" } : item))}
+                                className="w-28 text-right font-bold text-orange-600 rounded-xl ml-auto" />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Input type="number" min={0} max={recQty} value={heldVal || ""} placeholder="0"
+                                onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, held_quantity: Math.max(0, Number(e.target.value) || 0), quality_result: "INSPECTED" } : item))}
+                                className="w-28 text-right font-bold text-indigo-600 rounded-xl ml-auto" />
                             </td>
                             <td className="px-4 py-3 text-center">
                               <span
@@ -4445,10 +4598,12 @@ function GrnPageWorkflow() {
                                       : "bg-rose-100 text-rose-800 border-rose-300"
                                 }`}
                               >
-                                {isSound
+                                {!hasInspection
+                                  ? "PENDING QC"
+                                  : isSound
                                   ? "COMPLETED"
                                   : isPartial
-                                    ? "PARTIALLY COMPLETED"
+                                    ? "INSPECTED — WITH EXCEPTIONS"
                                     : "REJECTED ✗"}
                               </span>
                             </td>
@@ -4488,11 +4643,11 @@ function GrnPageWorkflow() {
                         {damagedMaterialRows.map(({ material: m, materialIndex, rowKey }) => (
                           <tr key={rowKey}>
                             <td className="px-4 py-3 font-mono font-bold text-primary">
-                              {m.item_code}
+                              {m.item_code || m.material_code}
                             </td>
 
                             <td className="px-4 py-3 font-bold text-foreground">
-                              {m.material_name}
+                              {m.item_code || m.material_code} — {m.material_name || m.materialName || m.material_description || "Material"}
                             </td>
 
                             <td className="px-4 py-3 text-right font-bold text-rose-600">
@@ -4554,7 +4709,7 @@ function GrnPageWorkflow() {
                   <ArrowLeft className="mr-2 size-4" /> Back to Step 2
                 </Button>
                 <Button
-                  disabled={busyAction}
+                  disabled={busyAction || !qcHasRequiredEvidence}
                   onClick={() => void handleProceedFromPage3()}
                   className="rounded-xl font-bold px-6"
                 >

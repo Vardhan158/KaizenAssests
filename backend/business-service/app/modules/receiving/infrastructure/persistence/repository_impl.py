@@ -874,6 +874,37 @@ class SqlAlchemyGrnRepository(GrnRepository):
             if gate_entry_id is not None: existing.gate_entry_id = _uuid_or_none(gate_entry_id)
             if gate_entry_number is not None: existing.gate_entry_number = gate_entry_number
             if verification_notes is not None: existing.verification_notes = verification_notes
+
+            # Older ASN-based GRNs may contain only the header because ASN
+            # lines were not copied when they were first created. Backfill
+            # the editable receiving rows from the persisted ASN once, while
+            # preserving any lines already entered by the operator.
+            if asn_receipt and asn_number and not existing.lines:
+                asn_result = await self._session.execute(
+                    select(AsnModel)
+                    .options(selectinload(AsnModel.lines))
+                    .where(AsnModel.asn_number == asn_number.strip())
+                    .order_by(AsnModel.created_at.desc())
+                )
+                asn_for_lines = asn_result.scalars().first()
+                if asn_for_lines:
+                    for line in (asn_for_lines.lines or []):
+                        existing.lines.append(
+                            GrnLineModel(
+                                id=uuid.uuid4(),
+                                item_code=line.item_code,
+                                material_name=line.material_name or line.item_code,
+                                material_category="General",
+                                uom=line.uom or "PCS",
+                                ordered_quantity=line.shipped_quantity or Decimal("0"),
+                                received_quantity=Decimal("0"),
+                                good_quantity=Decimal("0"),
+                                damaged_quantity=Decimal("0"),
+                                rejected_quantity=Decimal("0"),
+                                quality_approved_quantity=Decimal("0"),
+                                balance_quantity=line.shipped_quantity or Decimal("0"),
+                            )
+                        )
             existing.updated_at = now
             await self._session.flush()
             return existing
@@ -889,10 +920,14 @@ class SqlAlchemyGrnRepository(GrnRepository):
         asn_num_val: str | None = asn_number if asn_receipt else None
         gate_id_val: uuid.UUID | None = _uuid_or_none(gate_entry_id) if gate_entry_id else None
         gate_num_val: str | None = gate_entry_number
+        gate = None
 
         if asn_receipt and asn_number:
             asn = (await self._session.execute(
-                select(AsnModel).where(AsnModel.asn_number == asn_number.strip()).order_by(AsnModel.created_at.desc())
+                select(AsnModel)
+                .options(selectinload(AsnModel.lines))
+                .where(AsnModel.asn_number == asn_number.strip())
+                .order_by(AsnModel.created_at.desc())
             )).scalars().first()
             if asn:
                 asn_id_val = _uuid_or_none(asn.id)
@@ -904,6 +939,26 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 if gate:
                     gate_id_val = _uuid_or_none(gate.id)
                     gate_num_val = gate.gate_entry_number
+
+                if gate is None:
+                    raise ValueError("ASN is not linked to a valid gate entry")
+                assignment_result = await self._session.execute(
+                    select(DockAssignmentModel).where(
+                        DockAssignmentModel.gate_entry_id == gate.id
+                    )
+                )
+                assignment = assignment_result.scalars().first()
+                if assignment is None or assignment.dock_arrival_at is None:
+                    raise ValueError("Receiving can start only after dock check-in is completed")
+
+                duplicate_result = await self._session.execute(
+                    select(GrnModel.id).where(
+                        GrnModel.asn_id == asn_id_val,
+                        GrnModel.status.notin_(["CANCELLED", "VOID"]),
+                    ).limit(1)
+                )
+                if duplicate_result.first() is not None:
+                    raise ValueError("A GRN already exists for this ASN receiving event")
         if not is_unexpected and not asn_receipt and (po_uuid or po_number):
             asn = await self.find_latest_asn_for_po(po_id=po_id, po_number=po_number)
             if asn:
@@ -987,6 +1042,28 @@ class SqlAlchemyGrnRepository(GrnRepository):
                         )
                     )
 
+        # ASN receipts do not require a PO. Seed the editable receiving rows
+        # from the persisted ASN shipment lines so Item Receiving opens with
+        # the actual material, quantity, and UOM from the shipment.
+        if asn_receipt and asn is not None:
+            for line in (asn.lines or []):
+                new_grn.lines.append(
+                    GrnLineModel(
+                        id=uuid.uuid4(),
+                        item_code=line.item_code,
+                        material_name=line.material_name or line.item_code,
+                        material_category="General",
+                        uom=line.uom or "PCS",
+                        ordered_quantity=line.shipped_quantity or Decimal("0"),
+                        received_quantity=Decimal("0"),
+                        good_quantity=Decimal("0"),
+                        damaged_quantity=Decimal("0"),
+                        rejected_quantity=Decimal("0"),
+                        quality_approved_quantity=Decimal("0"),
+                        balance_quantity=line.shipped_quantity or Decimal("0"),
+                    )
+                )
+
         self._session.add(new_grn)
         await self._session.flush()
         return new_grn
@@ -1014,10 +1091,14 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 received = Decimal(str(item["received_quantity"]))
                 good = Decimal(str(item["good_quantity"])) if item.get("good_quantity") is not None else received
                 damaged = Decimal(str(item["damaged_quantity"])) if item.get("damaged_quantity") is not None else Decimal("0")
+                rejected = Decimal(str(item.get("rejected_quantity", 0) or 0))
+                held = Decimal(str(item.get("held_quantity", 0) or 0))
             else:
                 good = Decimal(str(item.get("good_quantity", 0)))
                 damaged = Decimal(str(item.get("damaged_quantity", 0)))
-                received = good + damaged
+                rejected = Decimal(str(item.get("rejected_quantity", 0) or 0))
+                held = Decimal(str(item.get("held_quantity", 0) or 0))
+                received = good + damaged + rejected + held
 
             if code in line_map:
                 line = line_map[code]
@@ -1028,6 +1109,11 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 line.received_quantity = received
                 line.good_quantity = good
                 line.damaged_quantity = damaged
+                line.rejected_quantity = rejected
+                line.held_quantity = held
+                line.rejected_reason = item.get("rejected_reason")
+                line.damage_reason = item.get("damage_reason")
+                line.held_reason = item.get("held_reason")
                 line.quality_approved_quantity = good
                 if is_unexpected:
                     line.ordered_quantity = None
@@ -1050,7 +1136,11 @@ class SqlAlchemyGrnRepository(GrnRepository):
                         received_quantity=received,
                         good_quantity=good,
                         damaged_quantity=damaged,
-                        rejected_quantity=Decimal("0"),
+                        rejected_quantity=rejected,
+                        held_quantity=held,
+                        rejected_reason=item.get("rejected_reason"),
+                        damage_reason=item.get("damage_reason"),
+                        held_reason=item.get("held_reason"),
                         quality_approved_quantity=good,
                         balance_quantity=Decimal("0"),
                     )
@@ -1116,14 +1206,31 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 line = line_code_map[item["item_code"]]
 
             if line is not None:
+                received_qty = line.received_quantity or Decimal("0")
+                accepted_qty = Decimal(str(item.get("accepted_quantity", item.get("good_quantity", 0)) or 0))
+                rejected_qty = Decimal(str(item.get("rejected_quantity", 0) or 0))
+                damaged_qty = Decimal(str(item.get("damaged_quantity", 0) or 0))
+                held_qty = Decimal(str(item.get("held_quantity", 0) or 0))
+                if accepted_qty + rejected_qty + damaged_qty + held_qty != received_qty:
+                    raise ValueError(
+                        f"Accepted, rejected, damaged, and held quantities must equal received quantity for {line.item_code}"
+                    )
+                if rejected_qty > 0 and not str(item.get("rejected_reason") or "").strip():
+                    raise ValueError(f"Rejected reason is required for {line.item_code}")
+                if damaged_qty > 0 and not str(item.get("damage_reason") or "").strip():
+                    raise ValueError(f"Damage reason is required for {line.item_code}")
+                if held_qty > 0 and not str(item.get("held_reason") or "").strip():
+                    raise ValueError(f"Held reason is required for {line.item_code}")
                 line.quality_result = item.get("quality_result", "ACCEPTED")
-                good_val = item.get("good_quantity") if item.get("good_quantity") is not None else item.get("accepted_quantity", 0)
-                dmg_val = item.get("damaged_quantity") if item.get("damaged_quantity") is not None else item.get("rejected_quantity", 0)
-                line.accepted_quantity = Decimal(str(good_val or 0))
-                line.rejected_quantity = Decimal(str(dmg_val or 0))
+                line.accepted_quantity = accepted_qty
+                line.rejected_quantity = rejected_qty
+                line.held_quantity = held_qty
+                line.rejected_reason = item.get("rejected_reason")
+                line.damage_reason = item.get("damage_reason")
+                line.held_reason = item.get("held_reason")
                 line.quality_approved_quantity = line.accepted_quantity
                 line.good_quantity = line.accepted_quantity
-                line.damaged_quantity = line.rejected_quantity
+                line.damaged_quantity = damaged_qty
 
         grn.updated_at = datetime.now(timezone.utc)
         await self._session.flush()
@@ -1147,6 +1254,16 @@ class SqlAlchemyGrnRepository(GrnRepository):
         approved_qty = line.quality_approved_quantity if (line.quality_approved_quantity is not None and line.quality_approved_quantity > Decimal("0")) else line.good_quantity
         if approved_qty <= Decimal("0"):
             return []
+
+        if not batch_quantities or any(q <= Decimal("0") for q in batch_quantities):
+            raise ValueError("Batch quantities must be greater than zero")
+        existing_batches = await self._session.execute(
+            select(GrnBatchModel.id).where(GrnBatchModel.grn_line_id == grn_line_id)
+        )
+        if existing_batches.first() is not None:
+            raise ValueError("Batches already exist for this GRN line")
+        if sum(batch_quantities, Decimal("0")) != approved_qty:
+            raise ValueError("Total batch quantity must equal the QC-accepted quantity")
 
         # Fetch warehouse name for QR payload
         wh_res = await self._session.execute(
@@ -1223,6 +1340,17 @@ class SqlAlchemyGrnRepository(GrnRepository):
         grn = res.scalar_one_or_none()
         if not grn:
             raise ValueError(f"GRN not found: {grn_id}")
+
+        if grn.status == "COMPLETED":
+            raise ValueError("GRN is already completed")
+        if not grn.lines:
+            raise ValueError("GRN cannot be completed without material lines")
+        for line in grn.lines:
+            accepted_qty = line.quality_approved_quantity or line.good_quantity or Decimal("0")
+            if accepted_qty < Decimal("0"):
+                raise ValueError(f"Accepted quantity is invalid for {line.item_code}")
+            if line.batches and sum((b.batch_quantity or Decimal("0")) for b in line.batches) != accepted_qty:
+                raise ValueError(f"Batch quantities do not match accepted quantity for {line.item_code}")
 
         now = datetime.now(timezone.utc)
         damage_lots: list[GrnDamageLotModel] = []
@@ -1478,9 +1606,9 @@ class SqlAlchemyGrnRepository(GrnRepository):
                     if st.id == dest_store_id:
                         assigned_to = st.store_manager_name or st.store_manager_id
                         break
-            post_qty = line.quality_approved_quantity if line.quality_approved_quantity > Decimal("0") else line.good_quantity
-            if post_qty <= Decimal("0"):
-                post_qty = line.received_quantity
+            # Only QC-accepted material may create a putaway task. Received
+            # but rejected, damaged, or held quantities remain unavailable.
+            post_qty = line.quality_approved_quantity or line.good_quantity or Decimal("0")
 
             if post_qty > Decimal("0"):
                 # 1. Update material_stock
@@ -1697,6 +1825,50 @@ class SqlAlchemyGrnRepository(GrnRepository):
         )
         res = await self._session.execute(stmt)
         g = res.scalar_one_or_none()
+        # Older ASN-based GRNs could have been saved with only a header.  Make
+        # the persisted GRN self-contained before returning it so every client
+        # (including a refreshed Step 2 page) receives the actual ASN lines.
+        if g and not g.lines and not g.asn_id and not g.asn_number and g.gate_entry_id:
+            gate_result = await self._session.execute(
+                select(GateEntryModel.asn_id).where(GateEntryModel.id == g.gate_entry_id)
+            )
+            gate_asn_id = gate_result.scalar_one_or_none()
+            if gate_asn_id:
+                g.asn_id = gate_asn_id
+
+        if g and not g.lines and (g.asn_id or g.asn_number):
+            asn_conditions = []
+            if g.asn_id:
+                asn_conditions.append(AsnModel.id == g.asn_id)
+            if g.asn_number:
+                asn_conditions.append(AsnModel.asn_number == g.asn_number.strip())
+            asn_result = await self._session.execute(
+                select(AsnModel)
+                .options(selectinload(AsnModel.lines))
+                .where(or_(*asn_conditions))
+                .order_by(AsnModel.created_at.desc())
+            )
+            asn = asn_result.scalar_one_or_none()
+            if asn and asn.lines:
+                for line in asn.lines:
+                    g.lines.append(
+                        GrnLineModel(
+                            id=uuid.uuid4(),
+                            item_code=line.item_code,
+                            material_name=line.material_name or line.item_code,
+                            material_category="General",
+                            uom=line.uom or "PCS",
+                            ordered_quantity=line.shipped_quantity or Decimal("0"),
+                            received_quantity=Decimal("0"),
+                            good_quantity=Decimal("0"),
+                            damaged_quantity=Decimal("0"),
+                            rejected_quantity=Decimal("0"),
+                            held_quantity=Decimal("0"),
+                            quality_approved_quantity=Decimal("0"),
+                            balance_quantity=line.shipped_quantity or Decimal("0"),
+                        )
+                    )
+                await self._session.flush()
         if g and (not g.supplier_name or _is_uuid_string(g.supplier_name) or _is_uuid_string(g.supplier_company_name)):
             s_name, s_comp = await _resolve_real_supplier_names(
                 self._session,
@@ -1710,3 +1882,22 @@ class SqlAlchemyGrnRepository(GrnRepository):
             g.supplier_company_name = s_comp
             await self._session.flush()
         return g
+
+    async def delete_grn(self, grn_id: uuid.UUID) -> bool:
+        result = await self._session.execute(
+            select(GrnModel)
+            .options(
+                selectinload(GrnModel.lines).selectinload(GrnLineModel.damage_evidence),
+                selectinload(GrnModel.lines).selectinload(GrnLineModel.batches),
+                selectinload(GrnModel.lines).selectinload(GrnLineModel.damage_lots),
+                selectinload(GrnModel.documents),
+                selectinload(GrnModel.receiving_sessions),
+            )
+            .where(GrnModel.id == grn_id)
+        )
+        grn = result.scalar_one_or_none()
+        if grn is None:
+            return False
+        await self._session.delete(grn)
+        await self._session.flush()
+        return True

@@ -458,6 +458,11 @@ class GrnLineModel(Base):
         server_default="0",
     )
 
+    held_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"), server_default="0")
+    rejected_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    damage_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    held_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # --------------------------------------------------------
     # Quality Approved Quantity
     #

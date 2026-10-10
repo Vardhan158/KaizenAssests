@@ -338,25 +338,28 @@ async def create_grn_header(
             )
 
     repo = SqlAlchemyGrnRepository(uow.session)
-    grn = await repo.create_or_update_grn_header(
-        receipt_type=request.receipt_type,
-        dock_number=request.dock_number,
-        grn_id=request.grn_id,
-        po_id=request.po_id if request.receipt_type == "PO_RECEIPT" else None,
-        po_number=request.po_number if request.receipt_type == "PO_RECEIPT" else None,
-        asn_number=request.asn_number if request.receipt_type == "ASN_RECEIPT" else None,
-        gate_entry_id=request.gate_entry_id,
-        gate_entry_number=request.gate_entry_number,
-        invoice_number=request.invoice_number,
-        supplier_name=request.supplier_name,
-        supplier_company_name=request.supplier_company_name,
-        warehouse_id=request.warehouse_id,
-        warehouse_name=request.warehouse_name,
-        vehicle_number=request.vehicle_number,
-        driver_name=request.driver_name,
-        received_by=user.username or "System User",
-        verification_notes=request.verification_notes,
-    )
+    try:
+        grn = await repo.create_or_update_grn_header(
+            receipt_type=request.receipt_type,
+            dock_number=request.dock_number,
+            grn_id=request.grn_id,
+            po_id=request.po_id if request.receipt_type == "PO_RECEIPT" else None,
+            po_number=request.po_number if request.receipt_type == "PO_RECEIPT" else None,
+            asn_number=request.asn_number if request.receipt_type == "ASN_RECEIPT" else None,
+            gate_entry_id=request.gate_entry_id,
+            gate_entry_number=request.gate_entry_number,
+            invoice_number=request.invoice_number,
+            supplier_name=request.supplier_name,
+            supplier_company_name=request.supplier_company_name,
+            warehouse_id=request.warehouse_id,
+            warehouse_name=request.warehouse_name,
+            vehicle_number=request.vehicle_number,
+            driver_name=request.driver_name,
+            received_by=user.username or "System User",
+            verification_notes=request.verification_notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return GrnHeaderResponse(
         grn_id=str(grn.id),
@@ -528,10 +531,13 @@ async def update_quality_inspection(
     _user=Depends(require_permission("receiving:write")),
 ) -> QualityInspectionResponse:
     repo = SqlAlchemyGrnRepository(uow.session)
-    grn = await repo.update_quality_inspection(
-        grn_id=uuid.UUID(grn_id),
-        quality_data=[line.model_dump() for line in request.lines],
-    )
+    try:
+        grn = await repo.update_quality_inspection(
+            grn_id=uuid.UUID(grn_id),
+            quality_data=[line.model_dump() for line in request.lines],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return {
         "grn_id": str(grn.id),
@@ -563,11 +569,14 @@ async def create_batches_for_line(
     _perm=Depends(require_permission("receiving:write")),
 ) -> list[BatchWithQrResponse]:
     repo = SqlAlchemyGrnRepository(uow.session)
-    created_batches = await repo.create_batches_for_line(
-        grn_line_id=uuid.UUID(grn_line_id),
-        batch_quantities=[b.batch_quantity for b in batches],
-        created_by=user.username or "System User",
-    )
+    try:
+        created_batches = await repo.create_batches_for_line(
+            grn_line_id=uuid.UUID(grn_line_id),
+            batch_quantities=[b.batch_quantity for b in batches],
+            created_by=user.username or "System User",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Fetch line and QR safely without triggering un-awaited relationship lazy loading
     res_line = await uow.session.execute(
@@ -1258,11 +1267,14 @@ async def complete_grn(
         else:
             raise HTTPException(status_code=404, detail=f"GRN not found: {grn_id}")
 
-    grn = await repo.complete_grn_posting(
-        grn_id=target_uuid,
-        posted_by=user.username or "System User",
-        verification_notes=notes,
-    )
+    try:
+        grn = await repo.complete_grn_posting(
+            grn_id=target_uuid,
+            posted_by=user.username or "System User",
+            verification_notes=notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return CompleteGrnResponse(
         grn_id=str(grn.id),
@@ -1724,6 +1736,26 @@ async def lookup_qr_code(
         stock_status=stock_status,
         summary=summary_text,
     )
+
+
+# ============================================================================
+# DELETE GRN DATA
+# ============================================================================
+
+@router.delete("/{grn_id}", status_code=204)
+async def delete_grn(
+    grn_id: str,
+    uow: UnitOfWork = Depends(get_uow),
+    _user=Depends(require_permission("receiving:write")),
+):
+    try:
+        target_id = uuid.UUID(grn_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid GRN identifier") from exc
+    repo = SqlAlchemyGrnRepository(uow.session)
+    if not await repo.delete_grn(target_id):
+        raise HTTPException(status_code=404, detail=f"GRN not found: {grn_id}")
+    return None
 
 
 # ============================================================================

@@ -78,11 +78,13 @@ def _asn_response(asn: AsnModel) -> dict:
         "supplier_id": str(asn.supplier_id) if asn.supplier_id else None,
         "supplier_name": details.get("supplier_name") or (asn.supplier.supplier_name if asn.supplier else None),
         "destination_warehouse": details.get("destination_warehouse"),
+        "destination_warehouse_id": details.get("destination_warehouse_id"),
         "vehicle_number": asn.vehicle_number,
         "driver_name": asn.driver_name,
         "driver_contact": asn.driver_contact,
         "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn.expected_arrival_at else None,
         "delivery_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
+        "expected_arrival_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
         "shipment_date": asn.shipment_date.isoformat() if asn.shipment_date else None,
         "status": asn.status,
         "transporter": asn.transporter,
@@ -150,28 +152,14 @@ async def get_material_components(uow: UnitOfWork = Depends(get_uow)) -> list[di
         res = await uow.session.execute(select(MaterialModel))
         db_mats = res.scalars().all()
         materials.extend(
-            {"code": m.material_code, "name": m.material_name, "category": m.category, "uom": m.base_uom}
+            {"id": str(m.id), "code": m.material_code, "name": m.material_name, "category": m.category, "uom": m.base_uom, "status": m.status}
             for m in db_mats
             if m.material_code and m.material_name
         )
     except Exception:
         pass
 
-    # Keep the shared catalog visible even when the database already contains
-    # some materials. Database records remain authoritative for matching codes;
-    # catalog entries fill in items that have not been created in this database.
-    materials.extend(DEFAULT_MATERIAL_COMPONENTS)
-    materials.extend(_custom_materials_store)
-
-    merged: list[dict] = []
-    seen: set[str] = set()
-    for material in materials:
-        key = str(material.get("code") or material.get("name") or "").strip().upper()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        merged.append(material)
-    return merged
+    return [material for material in materials if str(material.get("status") or "ACTIVE").upper() == "ACTIVE"]
 
 
 @preview_router.post("/materials")
@@ -317,6 +305,7 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
     if not isinstance(submitted_lines, list):
         raise HTTPException(status_code=422, detail="lines must be a list")
     validated_lines: list[tuple[dict, Decimal]] = []
+    submitted_material_ids: set[str] = set()
     for raw_line in submitted_lines:
         if not isinstance(raw_line, dict):
             raise HTTPException(status_code=422, detail="each ASN line must be an object")
@@ -329,6 +318,15 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
             raise HTTPException(status_code=422, detail="shipped_quantity must be a finite number")
         if validated_quantity < 0:
             raise HTTPException(status_code=422, detail="shipped_quantity cannot be negative")
+        material_id = str(raw_line.get("material_id") or "").strip()
+        if material_id:
+            if material_id in submitted_material_ids:
+                raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
+            try:
+                uuid.UUID(material_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
+            submitted_material_ids.add(material_id)
         validated_lines.append((raw_line, validated_quantity))
 
     if po_model and validated_lines:
@@ -424,11 +422,13 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
             "type": "asn_details",
             "supplier_name": str(payload.get("supplier_name") or "").strip(),
             "destination_warehouse": str(payload.get("destination_warehouse") or "").strip(),
+            "destination_warehouse_id": str(payload.get("destination_warehouse_id") or "").strip() or None,
         }],
     )
     uow.session.add(asn)
     for raw_line, quantity in validated_lines:
         asn.lines.append(AsnLineModel(
+            material_id=uuid.UUID(str(raw_line["material_id"])) if raw_line.get("material_id") else None,
             item_code=str(raw_line.get("item_code") or raw_line.get("material_code") or "ITEM"),
             material_name=str(raw_line.get("material_name") or raw_line.get("material_description") or ""),
             shipped_quantity=quantity,
@@ -1407,10 +1407,26 @@ async def list_inbound_arrivals(
             GateEntryStatus.EXIT_APPROVED.value,
             GateEntryStatus.GATE_EXIT_COMPLETED.value,
         ]))
-        .order_by(GateEntryModel.created_at.asc())
+        # A single ASN must resolve to one active gate entry in the warehouse
+        # queue. Newest-first ensures an older duplicate cannot surface a
+        # different gate-pass number in Arrival Details.
+        .order_by(GateEntryModel.created_at.desc())
     )
+    allocation_result = await uow.session.execute(select(DockAllocationRequestModel))
+    allocations_by_gate_pass = {
+        allocation.existing_gate_pass_id: allocation
+        for allocation in allocation_result.scalars().all()
+        if allocation.existing_gate_pass_id
+    }
     arrivals = []
+    seen_asn_keys: set[str] = set()
     for gate_entry, asn, po, assignment in result.all():
+        allocation = allocations_by_gate_pass.get(gate_entry.gate_entry_number)
+        asn_key = str(asn.id) if asn else (asn.asn_number if asn else None)
+        if asn_key and asn_key in seen_asn_keys:
+            continue
+        if asn_key:
+            seen_asn_keys.add(asn_key)
         if store_scoped:
             if not assignment or not assignment.assigned_store_id:
                 continue
@@ -1436,6 +1452,9 @@ async def list_inbound_arrivals(
             "arrival_time": gate_entry.created_at.isoformat(),
             "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn and asn.expected_arrival_at else None,
             "status": (
+                allocation.status
+                if allocation and allocation.status in {"DOCK_ASSIGNED", "AT_DOCK", "OCCUPIED"}
+                else
                 GateEntryStatus.AWAITING_DOCK.value
                 if gate_entry.status in {
                     GateEntryStatus.PO_VERIFIED.value,
@@ -1451,10 +1470,18 @@ async def list_inbound_arrivals(
             "po_id": str(po.id) if po else None,
             "assigned_by": assignment.assigned_by if assignment else None,
             "assigned_at": assignment.assigned_at.isoformat() if assignment else None,
+            "allocation_request_id": str(allocation.id) if allocation else None,
             "movement_started_by": assignment.movement_started_by if assignment else None,
             "movement_started_at": assignment.movement_started_at.isoformat() if assignment and assignment.movement_started_at else None,
             "dock_checked_in_by": assignment.dock_checked_in_by if assignment else None,
-            "dock_arrival_at": assignment.dock_arrival_at.isoformat() if assignment and assignment.dock_arrival_at else None,
+            "dock_arrival_at": (
+                assignment.dock_arrival_at.isoformat()
+                if assignment and assignment.dock_arrival_at
+                else allocation.arrived_at.isoformat()
+                if allocation and allocation.arrived_at
+                else None
+            ),
+            "allocation_arrived_at": allocation.arrived_at.isoformat() if allocation and allocation.arrived_at else None,
             "unloading_started_by": assignment.unloading_started_by if assignment else None,
             "unloading_started_at": assignment.unloading_started_at.isoformat() if assignment and assignment.unloading_started_at else None,
             "quality_inspected_by": assignment.quality_inspected_by if assignment else None,

@@ -11,8 +11,8 @@ export const BUSINESS_API_URL =
   (typeof window !== "undefined"
     ? window.location.hostname.includes("loca.lt")
       ? "https://wms-mobile-backend-8000.loca.lt"
-      : `${window.location.protocol}//${window.location.hostname}:8001`
-    : "http://localhost:8001");
+      : `${window.location.protocol}//${window.location.hostname}:8000`
+    : "http://localhost:8000");
 import { clearAuthSession, getAuthToken, storeAuthSession, getUserInfo } from "./auth-utils";
 function getApiErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
@@ -450,6 +450,7 @@ export const api = {
     status?: string;
     is_active?: boolean;
     warehouse_id?: string;
+    store_type?: string;
     capacity?: number;
   }): Promise<any> {
     const code = (payload.dock_code || payload.dock_number || "").trim().toUpperCase();
@@ -1423,20 +1424,10 @@ export const api = {
   },
 
   async getAsn(id: string): Promise<any> {
-    try {
-      return await request<any>(`${BUSINESS_API_URL}/api/gate/asn/${encodeURIComponent(id)}`, { cache: "no-store" });
-    } catch {
-      return {
-        id,
-        asn_number: id.startsWith("ASN") ? id : "",
-        po_number: "",
-        supplier_name: "",
-        vehicle_number: "",
-        driver_name: "",
-        driver_contact: "",
-        status: "SUBMITTED",
-      };
-    }
+    // Do not turn a failed lookup into a fabricated empty ASN context. The
+    // GRN wizard needs the persisted ASN, gate entry, vehicle and dock data
+    // before it can save Step 1.
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asn/${encodeURIComponent(id)}`, { cache: "no-store" });
   },
 
   async getArrivalNotifications(): Promise<any[]> {
@@ -1466,37 +1457,25 @@ export const api = {
 
   async getNextAsnNumber(): Promise<{ asnNumber: string }> {
     const pendingKey = "kaizen-pending-asn-number-v2";
+    // A pending number may belong to a previous database lifecycle. Never use
+    // it to generate a new ASN after records have been cleared.
+    if (typeof window !== "undefined") window.localStorage.removeItem(pendingKey);
     try {
       // The database is authoritative. Do not reuse a cached pending number,
       // because it can survive a backend data reset and skip the new sequence.
-      const result = await request<any>(`${BUSINESS_API_URL}/api/v1/gate/asns/next-number`);
+      const result = await request<any>(`${BUSINESS_API_URL}/api/gate/asns/next-number`);
       if (typeof window !== "undefined" && result?.asnNumber) {
         window.localStorage.setItem(pendingKey, result.asnNumber);
       }
       return result;
     } catch {
-      // Keep the local/demo fallback sequential as well. The backend endpoint
-      // remains authoritative whenever it is available.
-      const key = "kaizen-next-asn-sequence-v2";
-      const pending = window.localStorage.getItem(pendingKey);
-      if (pending) return { asnNumber: pending };
-      const stored = Number.parseInt(window.localStorage.getItem(key) || "0", 10);
-      const next = Number.isFinite(stored) ? stored + 1 : 1;
-      const asnNumber = `ASN-${new Date().getFullYear()}-${next}`;
-      window.localStorage.setItem(pendingKey, asnNumber);
-      return {
-        asnNumber,
-      };
+      throw new Error("Unable to retrieve the next ASN number from the backend.");
     }
   },
 
   async getMaterialComponents(): Promise<any[]> {
-    try {
-      const res = await request<any[]>(`${BUSINESS_API_URL}/api/v1/gate/materials`);
-      if (Array.isArray(res) && res.length > 0) return res;
-    } catch {}
-
-    return [
+    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials`);
+    /*
       { code: "MAT-RAD-001", name: "SKID MOUNTED RADIATOR", category: "Heavy Components", uom: "PCS" },
       { code: "MAT-ECP-002", name: "ENGINE CONTROL PANEL", category: "Control Systems", uom: "PCS" },
       { code: "MAT-EXS-003", name: "EXHAUST SILENCER", category: "Exhaust Systems", uom: "PCS" },
@@ -1519,12 +1498,12 @@ export const api = {
       { code: "MAT-GWR-020", name: "Genset with radiator", category: "Gensets", uom: "SET" },
       { code: "MAT-GNR-021", name: "Genset without radiator", category: "Gensets", uom: "SET" },
       { code: "MAT-LSE-022", name: "Loose Item", category: "General Accessories", uom: "BOX" },
-    ];
+    ]; */
   },
 
   async createMaterialComponent(name: string, uom: string = "PCS"): Promise<any> {
     try {
-      return await request<any>(`${BUSINESS_API_URL}/api/v1/gate/materials`, {
+      return await request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, uom }),
@@ -1801,7 +1780,7 @@ export const api = {
 
     const query = params.toString();
 
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/materials${query ? `?${query}` : ""}`);
+    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials${query ? `?${query}` : ""}`);
   },
 
   async getMaterial(id: string): Promise<any> {
@@ -2103,6 +2082,7 @@ export const api = {
     store_name: string;
     description?: string;
     warehouse_id?: string;
+    store_type?: string;
     store_manager_id?: string;
     store_manager_name?: string;
     status?: string;
@@ -2759,7 +2739,19 @@ export const api = {
     });
   },
   async getGrnDetail(grnId: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/receiving/grn/${grnId}`);
+    try {
+      return await request<any>(`${BUSINESS_API_URL}/api/receiving/grn/${encodeURIComponent(grnId)}`);
+    } catch (error) {
+      // A deleted/stale local session is handled by the GRN screen. Do not
+      // surface it as an unhandled console error or resume invalid data.
+      if (error instanceof Error && /\b404\b|GRN not found/i.test(error.message)) return null;
+      throw error;
+    }
+  },
+  async deleteGrn(grnId: string): Promise<void> {
+    await request<void>(`${BUSINESS_API_URL}/api/receiving/grn/${encodeURIComponent(grnId)}`, {
+      method: "DELETE",
+    });
   },
   async getGrn(grnId: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/receiving/grn/${grnId}`);

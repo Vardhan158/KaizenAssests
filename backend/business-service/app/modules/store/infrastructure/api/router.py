@@ -76,7 +76,7 @@ bin_router = APIRouter(prefix="/api/v1/bins", tags=["store-bins"])
 def _is_warehouse_or_admin(user: CurrentUser) -> bool:
     """Check if the user has global warehouse/admin privileges."""
     roles = {r.upper() for r in (user.roles or [])}
-    return bool(roles.intersection({"ADMIN", "WAREHOUSE", "WAREHOUSE_MANAGER", "PROCUREMENT", "SUPERUSER"}))
+    return bool(roles.intersection({"ADMIN", "WAREHOUSE", "WAREHOUSE_MANAGER", "PROCUREMENT", "SUPPLIER", "SUPERUSER"}))
 
 
 def _to_store_response(store: StoreModel, zones_count: int = 0, bins_count: int = 0) -> StoreResponse:
