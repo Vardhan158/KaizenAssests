@@ -37,6 +37,7 @@ class AutoCreateAllocationRequest(BaseModel):
     material_reference: Optional[str] = None
     material_description: Optional[str] = None
     quantity: Optional[Decimal] = None
+    uom: Optional[str] = None
     priority: str = "NORMAL"
 
 
@@ -62,6 +63,7 @@ class AllocationRequestResponse(BaseModel):
     material_reference: Optional[str] = None
     material_description: Optional[str] = None
     quantity: Optional[Decimal] = None
+    uom: Optional[str] = None
     security_approved_at: datetime
     priority: str
     status: str

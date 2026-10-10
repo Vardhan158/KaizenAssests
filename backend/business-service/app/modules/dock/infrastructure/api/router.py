@@ -138,7 +138,7 @@ async def list_docks(
     dock_ids = [d.id for d in docks]
     alloc_map = await DockAllocationService.get_active_allocations_for_docks(uow.session, dock_ids)
 
-    from app.modules.gate.infrastructure.persistence.models import GateEntryModel, DockAssignmentModel
+    from app.modules.gate.infrastructure.persistence.models import GateEntryModel, DockAssignmentModel, DockModel
     from app.modules.store.infrastructure.persistence.models import StoreModel
 
     ge_res = await uow.session.execute(select(GateEntryModel))
@@ -151,6 +151,8 @@ async def list_docks(
     da_list = da_res.scalars().all()
     da_map_by_ge = {da.gate_entry_id: da for da in da_list if da.gate_entry_id}
     da_map_by_dock = {da.dock_number: da for da in da_list if da.dock_number}
+    wh_dock_res = await uow.session.execute(select(DockModel))
+    wh_dock_status = {dock.dock_number.upper(): dock.status for dock in wh_dock_res.scalars().all()}
 
     stores_res = await uow.session.execute(select(StoreModel))
     stores_list = stores_res.scalars().all()
@@ -176,6 +178,10 @@ async def list_docks(
             da = da_map_by_ge.get(ge.id) if ge else None
             if not da:
                 da = da_map_by_dock.get(d.dock_code)
+            # Legacy allocations can retain an old pass/vehicle reference,
+            # while DockAssignment still points at the persisted gate entry.
+            if not ge and da and da.gate_entry_id:
+                ge = ge_map_by_id.get(str(da.gate_entry_id))
 
             if getattr(alloc_req, "assigned_store_id", None):
                 assigned_sid = alloc_req.assigned_store_id
@@ -204,13 +210,21 @@ async def list_docks(
                 if ge and ge.ocr_supplier_name:
                     vendor_ref = ge.ocr_supplier_name
 
+            # Gate Entry is the source of truth for the vehicle and canonical
+            # gate-pass number. Older allocation rows may have a blank or
+            # stale vehicle value, so prefer the linked persisted entry.
+            canonical_vehicle_number = (
+                getattr(ge, "vehicle_number", None)
+                or alloc_req.vehicle_number
+            )
+
             current_alloc = AllocationRequestResponse(
                 id=alloc_req.id,
                 # Gate Security is authoritative for the pass number. The
                 # allocation request may contain a legacy/stale reference.
                 existing_gate_pass_id=ge.gate_entry_number if ge and ge.gate_entry_number else alloc_req.existing_gate_pass_id,
                 vendor_reference=vendor_ref,
-                vehicle_number=alloc_req.vehicle_number,
+                vehicle_number=canonical_vehicle_number,
                 material_reference=mat_ref,
                 material_description=alloc_req.material_description if (alloc_req.material_description and alloc_req.material_description not in ("Inbound Material Shipment", "General Material")) else mat_ref,
                 quantity=alloc_req.quantity,
@@ -233,6 +247,7 @@ async def list_docks(
                 created_at=alloc_req.created_at,
                 updated_at=alloc_req.updated_at,
             )
+        effective_status = wh_dock_status.get(d.dock_code.upper(), d.status)
         res.append(
             DockMasterResponse(
                 id=d.id,
@@ -241,7 +256,7 @@ async def list_docks(
                 dock_type=d.dock_type,
                 location=d.location,
                 description=d.description,
-                status=d.status,
+                status=effective_status,
                 is_active=d.is_active,
                 store_id=d_store_id or assigned_sid,
                 store_code=d_store_code or assigned_scode,
@@ -380,9 +395,9 @@ async def get_dock_by_id(
 
         current_alloc = AllocationRequestResponse(
             id=alloc_req.id,
-            existing_gate_pass_id=alloc_req.existing_gate_pass_id,
+            existing_gate_pass_id=ge.gate_entry_number if ge and ge.gate_entry_number else alloc_req.existing_gate_pass_id,
             vendor_reference=vendor_ref,
-            vehicle_number=alloc_req.vehicle_number,
+            vehicle_number=getattr(ge, "vehicle_number", None) or alloc_req.vehicle_number,
             material_reference=mat_ref,
             material_description=alloc_req.material_description if (alloc_req.material_description and alloc_req.material_description not in ("Inbound Material Shipment", "General Material")) else mat_ref,
             quantity=alloc_req.quantity,
@@ -552,16 +567,38 @@ async def list_pending_allocation_requests(uow: UnitOfWork = Depends(get_uow)):
     result = await uow.session.execute(query)
     reqs = result.scalars().all()
 
+    from app.common.persistence.models import AsnModel
     from app.modules.gate.infrastructure.persistence.models import GateEntryModel
     ge_res = await uow.session.execute(select(GateEntryModel))
-    ge_list = ge_res.scalars().all()
+    ge_list = sorted(ge_res.scalars().all(), key=lambda entry: entry.created_at or datetime.min, reverse=True)
+    asn_res = await uow.session.execute(select(AsnModel).options(selectinload(AsnModel.lines)))
+    asn_by_id = {str(asn.id): asn for asn in asn_res.scalars().all()}
     ge_map_by_pass = {ge.gate_entry_number: ge for ge in ge_list if ge.gate_entry_number}
     ge_map_by_id = {str(ge.id): ge for ge in ge_list}
     ge_map_by_veh = {ge.vehicle_number: ge for ge in ge_list if ge.vehicle_number}
 
     res_list = []
+    seen_gate_passes: set[str] = set()
     for r in reqs:
         ge = ge_map_by_pass.get(r.existing_gate_pass_id) or ge_map_by_id.get(r.existing_gate_pass_id) or ge_map_by_veh.get(r.vehicle_number)
+        if ge is None or not ge.gate_entry_number:
+            continue
+        if ge.assigned_dock_id or (ge.status or "").upper() in {
+            "DOCK_ASSIGNED",
+            "MOVING_TO_DOCK",
+            "AT_DOCK",
+            "UNLOADING_IN_PROGRESS",
+            "RECEIVING_COMPLETED",
+            "GATE_EXIT_COMPLETED",
+        }:
+            # Preserve the historical allocation request, but do not expose
+            # it as pending after its gate entry has progressed.
+            continue
+        canonical_gate_pass = ge.gate_entry_number
+        if canonical_gate_pass in seen_gate_passes:
+            continue
+        seen_gate_passes.add(canonical_gate_pass)
+        asn = asn_by_id.get(str(ge.asn_id)) if ge.asn_id else None
 
         mat_ref = r.material_reference
         if not mat_ref or mat_ref in ("General Material", "Material", "Inbound Goods"):
@@ -572,15 +609,26 @@ async def list_pending_allocation_requests(uow: UnitOfWork = Depends(get_uow)):
             if ge and ge.ocr_supplier_name:
                 vendor_ref = ge.ocr_supplier_name
 
+        asn_lines = list(asn.lines) if asn else []
+        if asn_lines:
+            mat_ref = ", ".join(dict.fromkeys(line.material_name or line.item_code for line in asn_lines))
+            quantity = sum((line.shipped_quantity or 0) for line in asn_lines)
+            uoms = list(dict.fromkeys(line.uom for line in asn_lines if line.uom))
+            uom = uoms[0] if len(uoms) == 1 else ("MIXED" if len(uoms) > 1 else None)
+        else:
+            quantity = r.quantity
+            uom = None
+
         res_list.append(
             AllocationRequestResponse(
                 id=r.id,
-                existing_gate_pass_id=r.existing_gate_pass_id,
+                existing_gate_pass_id=canonical_gate_pass,
                 vendor_reference=vendor_ref,
                 vehicle_number=r.vehicle_number,
                 material_reference=mat_ref,
                 material_description=r.material_description if (r.material_description and r.material_description not in ("Inbound Material Shipment", "General Material")) else mat_ref,
-                quantity=r.quantity,
+                quantity=quantity,
+                uom=uom,
                 security_approved_at=r.security_approved_at,
                 priority=r.priority,
                 status=r.status,
@@ -750,6 +798,20 @@ async def reassign_dock(
         reason=req.reason,
     )
     return await _build_allocation_response(uow.session, reassigned)
+
+
+@router.post("/dock-allocations/{id}/arrive", response_model=AllocationRequestResponse)
+async def mark_vehicle_arrived(
+    id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission("gate:write")),
+    uow: UnitOfWork = Depends(get_uow),
+):
+    arrived = await DockAllocationService.mark_vehicle_arrived(
+        session=uow.session,
+        allocation_request_id=id,
+        performed_by=user.username,
+    )
+    return await _build_allocation_response(uow.session, arrived)
 
 
 @router.post("/dock-allocations/{id}/start-receiving", response_model=AllocationRequestResponse)

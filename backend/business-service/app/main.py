@@ -1421,6 +1421,10 @@ async def lifespan(app: FastAPI):
             await run_ddl("ALTER TABLE grn_batch_qr ALTER COLUMN batch_id DROP NOT NULL;")
             await run_ddl("CREATE UNIQUE INDEX IF NOT EXISTS uq_grn_batch_qr_item_code ON grn_batch_qr (item_code);")
             await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS variant_code VARCHAR(128);")
+            await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS held_quantity NUMERIC(18,4) NOT NULL DEFAULT 0;")
+            await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS rejected_reason TEXT;")
+            await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS damage_reason TEXT;")
+            await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS held_reason TEXT;")
             logger.debug("Ensured GRN module tables exist")
         except Exception as e:
             logger.warning(f"Failed to create GRN module tables: {e}")

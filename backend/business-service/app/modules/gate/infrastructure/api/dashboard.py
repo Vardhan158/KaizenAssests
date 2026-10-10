@@ -5,16 +5,27 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends
 from typing import List
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.database.session import UnitOfWork, get_uow
+from app.common.persistence.models import AsnModel
 from app.modules.gate.infrastructure.persistence.models import GateEntryModel
 from app.security.dependencies import get_current_user, CurrentUser
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _format_ist_time(value: datetime | None) -> str:
+    if value is None:
+        return "—"
+    aware = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    return aware.astimezone(IST).strftime("%H:%M")
 
 
 @router.get("/stats")
@@ -33,6 +44,8 @@ async def get_dashboard_stats(
     )
     gate_models = gate_res.scalars().all()
     models = gate_models
+    asn_res = await uow.session.execute(select(AsnModel))
+    asn_by_id = {str(asn.id): asn for asn in asn_res.scalars().all()}
 
     total_arrivals = len(models)
 
@@ -124,8 +137,14 @@ async def get_dashboard_stats(
     combined_entries = []
     seen_vehicles = set()
     seen_gate_passes = set()
+    seen_asns = set()
 
     for m in gate_models:
+        if m.asn_id:
+            asn_key = str(m.asn_id)
+            if asn_key in seen_asns:
+                continue
+            seen_asns.add(asn_key)
         v_num = (m.vehicle_number or "").upper().strip()
         gp_no = (m.gate_entry_number or "").upper().strip()
         status_upper = (m.status or "").upper().strip()
@@ -147,15 +166,15 @@ async def get_dashboard_stats(
             "vehicle_number": m.vehicle_number,
             "gate_entry_no": m.gate_entry_number,
             "gate_pass_number": m.gate_entry_number,
-            "asn_number": m.asn_number or "",
+            "asn_number": (asn_by_id.get(str(m.asn_id)).asn_number if m.asn_id and asn_by_id.get(str(m.asn_id)) else ""),
             "driver_name": m.driver_name or "Driver",
             "po_number": m.po_number or "—",
-            "arrival_time": m.created_at.strftime("%H:%M") if m.created_at else "09:00",
+            "arrival_time": _format_ist_time(m.created_at),
             "dock_number": dock_no,
             "status": m.status or "PENDING_VERIFICATION",
-            "vendor": m.ocr_supplier_name or getattr(m, "supplier_name", None) or "Verified Supplier",
-            "supplier_name": m.ocr_supplier_name or getattr(m, "supplier_name", None) or "Verified Supplier",
-            "material": m.ocr_product_material or "General Materials",
+            "vendor": m.ocr_supplier_name or getattr(m, "supplier_name", None),
+            "supplier_name": m.ocr_supplier_name or getattr(m, "supplier_name", None),
+            "material": m.ocr_product_material,
             "quantity": float(m.ocr_quantity) if m.ocr_quantity is not None else 0,
             "truck_photo_base64": base64.b64encode(m.vehicle_photo_data).decode("ascii") if m.vehicle_photo_data else None,
             "exited_at": m.exited_at.isoformat() if getattr(m, "exited_at", None) else None,
@@ -211,13 +230,13 @@ async def get_dashboard_stats(
             ),
             "driver_name": "Driver",
             "po_number": req.material_reference or "",
-            "arrival_time": (req.arrived_at or req.created_at).strftime("%H:%M") if (req.arrived_at or req.created_at) else "09:00",
+            "arrival_time": _format_ist_time(req.arrived_at or req.created_at),
             "dock_number": dock_code,
             "status": req.status or "AWAITING_DOCK",
-            "vendor": req.vendor_reference or "Verified Supplier",
-            "supplier_name": req.vendor_reference or "Verified Supplier",
-            "material": req.material_description or req.material_reference or "Raw Material",
-            "quantity": float(req.quantity) if req.quantity else 100.0,
+            "vendor": req.vendor_reference,
+            "supplier_name": req.vendor_reference,
+            "material": req.material_description or req.material_reference,
+            "quantity": float(req.quantity) if req.quantity else 0,
             "truck_photo_base64": None,
             "created_at": req.created_at,
         })
@@ -372,7 +391,7 @@ async def get_dashboard_stats(
             "gate_entry_no": m.gate_entry_number,
             "driver_name": m.driver_name,
             "po_number": m.po_number,
-            "arrival_time": m.created_at.strftime("%H:%M"),
+            "arrival_time": _format_ist_time(m.created_at),
             "dock_number": dock_no,
             "status": m.status,
             "vendor": m.ocr_supplier_name or getattr(m, "supplier_name", None) or "Unknown Vendor",

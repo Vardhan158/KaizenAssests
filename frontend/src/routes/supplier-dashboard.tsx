@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
+import { getUserInfo } from "@/lib/auth-utils";
 
 export const Route = createFileRoute("/supplier-dashboard")({
   component: SupplierDashboard,
@@ -56,20 +57,33 @@ function SupplierDashboard() {
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
   const [supplierName, setSupplierName] = useState("");
+  const [supplierCompanyName, setSupplierCompanyName] = useState("");
   const [destinationWarehouse, setDestinationWarehouse] = useState("");
+  const [destinationWarehouseId, setDestinationWarehouseId] = useState("");
   const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
   const [lines, setLines] = useState<any[]>([
-    { item_code: "", material_name: "", shipped_quantity: "", uom: "KG" },
+    { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
   ]);
 
   const [materialCatalog, setMaterialCatalog] = useState<any[]>([]);
+  const [materialsLoading, setMaterialsLoading] = useState(false);
+  const [materialsError, setMaterialsError] = useState("");
+  const [materialSearch, setMaterialSearch] = useState("");
+  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
+  const [selectedPo, setSelectedPo] = useState<any>(null);
+  const currentUser = getUserInfo();
 
   useEffect(() => {
     loadAsns();
-    void api.getMaterialComponents().then((mats) => setMaterialCatalog(mats || []));
+    void (currentUser?.supplierId ? api.getSupplier(currentUser.supplierId) : api.getSuppliers({ search: currentUser?.username })).then((result: any) => { const rows = Array.isArray(result) ? result : result?.items || result?.suppliers || []; const supplier = rows.length ? rows.find((item: any) => String(item.id) === String(currentUser?.supplierId) || String(item.username || item.supplier_name || "").toLowerCase() === String(currentUser?.username || "").toLowerCase()) || rows[0] : result; const companyName = supplier?.registered_company_name || supplier?.company_name || supplier?.supplier_name || ""; setSupplierCompanyName(companyName); if (companyName) setSupplierName(companyName); }).catch(() => undefined);
+    setMaterialsLoading(true);
+    void api.getMaterialComponents().then((materials) => { setMaterialCatalog((materials || []).map((material: any) => ({ ...material, id: material.id || material.material_id, code: material.code || material.material_code, name: material.name || material.material_name, uom: material.uom || material.base_uom || material.unit_of_measure })).filter((material: any) => material.id && material.code && material.name && material.uom)); setMaterialsError(""); }).catch(() => { setMaterialCatalog([]); setMaterialsError("Unable to load Material Master records."); }).finally(() => setMaterialsLoading(false));
+    void Promise.all([api.getPurchaseOrders({ supplierId: currentUser?.supplierId }).catch(() => []), api.getStores({ status: "ALL" }).catch(() => [])])
+      .then(([pos, stores]) => { setPurchaseOrders(pos || []); setWarehouses((stores || []).filter((store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
   }, []);
 
   const handleAddNewCustomMaterial = async () => {
@@ -96,6 +110,7 @@ function SupplierDashboard() {
       const data = await api.getAsns();
       setAsns((data || []).map((asn: any) => ({
         ...asn,
+        expected_arrival_date: asn.expected_arrival_date || asn.delivery_date || asn.expected_arrival_at?.split("T")[0] || "",
         supplier_name: asn.supplier_name || asn.supplierName || asn.supplier_company_name || asn.supplier?.supplier_name || "",
         destination_warehouse: asn.destination_warehouse || asn.destinationWarehouse || asn.warehouse_name || asn.delivery_warehouse_name || "",
       })));
@@ -112,15 +127,31 @@ function SupplierDashboard() {
       setAsnNumber("");
     }
     setExpectedArrivalDate("");
+    setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
+    setDestinationWarehouse("");
+    setDestinationWarehouseId("");
+    setSelectedPo(null);
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
-    setLines([{ item_code: "", material_name: "", shipped_quantity: "", uom: "KG" }]);
+    setLines([{ material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }]);
     setIsModalOpen(true);
+  };
+
+  const selectPurchaseOrder = async (id: string) => {
+    if (!id) { setSelectedPo(null); setLines([]); return; }
+    const po = await api.getPurchaseOrder(id);
+    setSelectedPo(po);
+    const poLines = po?.lines || po?.items || po?.materials || po?.purchase_order_lines || [];
+    setLines(poLines.map((line: any) => ({ item_code: line.item_code || line.material_code || line.code || "", material_name: line.material_name || line.material?.name || line.name || "", shipped_quantity: "", remaining_quantity: Number(line.remaining_quantity ?? line.remaining ?? line.balance_quantity ?? line.ordered_quantity ?? line.quantity ?? 0), uom: line.uom || line.unit_of_measure || "PCS" })));
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!destinationWarehouse || !lines.length || lines.some((line) => !line.item_code || !line.material_name || Number(line.shipped_quantity) <= 0)) {
+      toast.error("Select a warehouse and material; shipped quantities must be greater than zero");
+      return;
+    }
     if (!expectedArrivalDate) {
       toast.error("Expected Arrival Date is mandatory *");
       return;
@@ -134,18 +165,21 @@ function SupplierDashboard() {
     try {
       const payload = {
         asn_number: asnNumber,
-        po_number: "PO-2026-008741",
+        po_number: undefined,
         supplier_name: supplierName,
+        supplier_id: currentUser?.supplierId,
         destination_warehouse: destinationWarehouse,
+        destination_warehouse_id: destinationWarehouseId,
         expected_arrival_at: expectedArrivalDate,
         vehicle_number: vehicleNumber.toUpperCase().trim(),
         driver_name: driverName.trim(),
         driver_contact: driverMobile.trim(),
         lines: lines.map((l) => ({
-          item_code: l.item_code || "MAT-001",
+          material_id: l.material_id,
+          item_code: l.item_code,
           material_name: l.material_name,
           shipped_quantity: Number(l.shipped_quantity) || 0,
-          uom: l.uom || "PCS",
+          uom: l.uom,
         })),
         status: "SUBMITTED",
       };
@@ -155,7 +189,7 @@ function SupplierDashboard() {
       const newRecord = {
         id: `asn-${Date.now()}`,
         asn_number: asnNumber,
-        po_number: "PO-2026-008741",
+        po_number: "",
         supplier_name: supplierName,
         supplier_company_name: supplierName,
         destination_warehouse: destinationWarehouse,
@@ -318,7 +352,7 @@ function SupplierDashboard() {
                   const status = String(asn.status || "SUBMITTED").toUpperCase();
                   return (
                     <tr key={key} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="px-3.5 py-2.5 font-bold font-mono text-sky-600">
+                      <td className="px-3.5 py-2.5 font-bold font-mono text-sky-600 cursor-pointer" onClick={() => showDetails(asn)}>
                         {asn.asn_number || "—"}
                       </td>
                       <td className="px-3.5 py-2.5 font-mono font-bold text-slate-900">
@@ -462,6 +496,7 @@ function SupplierDashboard() {
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Driver Name & Mobile</p><p className="mt-1 font-bold text-slate-900">{selected.driver_name || "—"} · {selected.driver_contact || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Expected Arrival Date</p><p className="mt-1 font-bold text-slate-900">{selected.expected_arrival_date || selected.expected_arrival_at?.split("T")[0] || selected.delivery_date || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Status</p><p className="mt-1 font-black text-slate-900">{String(selected.status || "SUBMITTED").replaceAll("_", " ")}</p></div>
+                <div className="rounded-xl border bg-muted/30 p-3 sm:col-span-2"><p className="font-bold uppercase text-muted-foreground">Shipped Materials</p>{selected.lines?.length ? <div className="mt-2 divide-y">{selected.lines.map((line: any, index: number) => <div key={`${line.item_code || line.material_name}-${index}`} className="flex justify-between gap-3 py-2"><span className="font-semibold">{line.material_name || line.item_code} <span className="font-mono text-muted-foreground">({line.item_code || "—"})</span></span><span className="font-bold">{line.shipped_quantity ?? line.quantity ?? 0} {line.uom || ""}</span></div>)}</div> : <p className="mt-1 text-muted-foreground">No shipment materials recorded.</p>}</div>
               </div>
             )}
           </DialogContent>
@@ -498,22 +533,16 @@ function SupplierDashboard() {
                       required
                       placeholder="e.g. Bharat Electronics Components Pvt. Ltd."
                       value={supplierName}
-                      onChange={(e) => setSupplierName(e.target.value)}
+                      readOnly
                       className={inputClass}
                     />
                   </div>
 
                   <div>
                     <Label htmlFor="dashboard-destination-warehouse" className="text-[10px] font-bold uppercase text-muted-foreground">Destination Warehouse</Label>
-                    <Input
-                      id="dashboard-destination-warehouse"
-                      required
-                      placeholder="e.g. Raw Material Warehouse"
-                      value={destinationWarehouse}
-                      onChange={(e) => setDestinationWarehouse(e.target.value)}
-                      className={inputClass}
-                    />
+                    <select id="dashboard-destination-warehouse" required value={destinationWarehouseId} onChange={(e) => { const w = warehouses.find((item) => String(item.id) === e.target.value); setDestinationWarehouseId(e.target.value); setDestinationWarehouse(w?.store_name || w?.name || w?.store_code || ""); }} className={`${inputClass} w-full px-3`}><option value="">Select warehouse</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.store_name || w.name} ({w.store_code})</option>)}</select>{!warehouses.length && <p className="mt-1 text-[10px] font-semibold text-amber-600">No active warehouses exist in the Warehouse Master.</p>}
                   </div>
+
 
                   <div>
                     <Label htmlFor="dashboard-expected-arrival-date" className="text-[10px] font-bold uppercase text-muted-foreground">
@@ -591,25 +620,7 @@ function SupplierDashboard() {
                     3. SHIPPED MATERIALS & QUANTITIES
                   </h3>
                   <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-[11px] font-bold rounded-lg border-sky-500/40 text-sky-600 hover:bg-sky-50"
-                      onClick={handleAddNewCustomMaterial}
-                    >
-                      + Add New Material Component to Database
-                    </Button>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-[11px] font-bold rounded-lg"
-                      onClick={() => setLines((prev) => [...prev, { item_code: "", material_name: "", shipped_quantity: "", uom: "PCS" }])}
-                    >
-                      + Add Row
-                    </Button>
+                    <div className="flex gap-2"><Input placeholder="Search material name or code" value={materialSearch} onChange={(e) => setMaterialSearch(e.target.value)} className="h-8 w-56 text-[11px]" /><Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setLines((rows) => [...rows, { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }])}>+ Add Row</Button></div>{materialsLoading && <span className="text-[11px] text-muted-foreground">Loading materials…</span>}{materialsError && <span className="text-[11px] text-red-600">{materialsError}</span>}{!materialsLoading && !materialsError && materialCatalog.length === 0 && <span className="text-[11px] text-amber-600">No active materials found.</span>}
                   </div>
                 </div>
 
@@ -627,7 +638,9 @@ function SupplierDashboard() {
                       {lines.map((line, idx) => (
                         <tr key={idx}>
                           <td className="p-2">
-                            <select
+                            <select required value={line.material_id || ""} onChange={(e) => { const material = materialCatalog.find((item) => String(item.id) === e.target.value); if (material && lines.some((item, i) => i !== idx && String(item.material_id) === String(material.id))) { toast.error("This material is already selected in the ASN."); return; } setLines((current) => current.map((item, i) => i === idx ? { ...item, material_id: material?.id || "", item_code: material?.code || "", material_name: material?.name || "", uom: material?.uom || "" } : item)); }} className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"><option value="">Select material</option>{materialCatalog.filter((material) => `${material.name || ""} ${material.code || ""}`.toLowerCase().includes(materialSearch.toLowerCase())).map((material) => <option key={material.id} value={material.id}>{material.name} ({material.code})</option>)}</select>{/* Material Master selection */}
+                            {/*
+                              <select
                               required
                               value={line.material_name}
                               onChange={(e) => {
@@ -654,13 +667,13 @@ function SupplierDashboard() {
                                   {mat.name} ({mat.category || "Component"})
                                 </option>
                               ))}
-                            </select>
+                            </select> */}
                           </td>
                           <td className="p-2">
                             <Input
                               required
                               type="number"
-                              placeholder="e.g. 500"
+                              placeholder="Enter quantity"
                               value={line.shipped_quantity}
                               onChange={(e) =>
                                 setLines((prev) =>
@@ -671,29 +684,14 @@ function SupplierDashboard() {
                             />
                           </td>
                           <td className="p-2">
-                            <select
-                              value={line.uom}
-                              onChange={(e) =>
-                                setLines((prev) =>
-                                  prev.map((item, i) => (i === idx ? { ...item, uom: e.target.value } : item))
-                                )
-                              }
-                              className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"
-                            >
-                              <option value="PCS">PCS</option>
-                              <option value="METER">METER</option>
-                              <option value="KG">KG</option>
-                              <option value="SET">SET</option>
-                              <option value="BOX">BOX</option>
-                              <option value="PALLET">PALLET</option>
-                            </select>
+                            <Input readOnly value={line.uom} className="h-8 bg-muted text-xs font-semibold" />
                           </td>
                           <td className="p-2 text-center">
                             <Button
                               type="button"
                               variant="ghost"
                               size="icon"
-                              disabled={lines.length === 1}
+                              disabled
                               onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
                               className="h-7 size-7 text-red-500 hover:bg-red-50"
                             >
@@ -719,7 +717,7 @@ function SupplierDashboard() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || !lines.length || lines.some((line) => !line.material_id || !line.uom || Number(line.shipped_quantity) <= 0)}
                   className="rounded-xl font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-md"
                 >
                   {submitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />}

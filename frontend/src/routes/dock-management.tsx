@@ -65,6 +65,7 @@ type AllocationRequest = {
   material_reference?: string | null;
   material_description?: string | null;
   quantity?: string | number | null;
+  uom?: string | null;
   security_approved_at: string;
   priority: string;
   status: string;
@@ -527,6 +528,10 @@ function DockManagement() {
       toast.error("Selected dock is not Available. Please choose an Available dock.");
       return;
     }
+    if (allocateModalPendingReq && targetDock && !isDockCompatible(allocateModalPendingReq, targetDock)) {
+      toast.error("Selected dock is incompatible with this material.");
+      return;
+    }
 
     setActionBusy(true);
     try {
@@ -545,9 +550,40 @@ function DockManagement() {
       toast.error("Allocation failed", {
         description: error instanceof Error ? error.message : undefined,
       });
+      await loadAll(true);
     } finally {
       setActionBusy(false);
     }
+  }
+
+  async function handleVehicleArrived(dock: Dock) {
+    const allocationId = dock.current_allocation?.id;
+    if (!allocationId) return;
+    setActionBusy(true);
+    try {
+      await api.markVehicleArrived(allocationId);
+      toast.success(`${dock.dock_code} arrival confirmed`, {
+        description: "Vehicle is now recorded at the dock and ready for unloading.",
+      });
+      await loadAll(true);
+    } catch (error) {
+      toast.error("Unable to confirm dock arrival", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+      await loadAll(true);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  function isDockCompatible(req: AllocationRequest, dock: Dock | undefined) {
+    if (!dock) return false;
+    const material = `${req.material_reference || ""} ${req.material_description || ""}`.toLowerCase();
+    const type = (dock.dock_type || "").toUpperCase();
+    const chemical = /chemical|hazard|solvent|flammable|fuel|paint|corrosive/.test(material);
+    if (chemical) return ["CHEMICAL_HAZARDOUS", "CHEMICAL", "HAZARDOUS_ITEMS"].includes(type);
+    if (["CHEMICAL_HAZARDOUS", "CHEMICAL", "HAZARDOUS_ITEMS"].includes(type)) return false;
+    return ["RAW_MATERIAL", "GENERAL", "MAIN_RECEIVING", "ELECTRICAL", "ELECTRONICS"].includes(type);
   }
 
   async function handleReleaseDock() {
@@ -715,7 +751,7 @@ function DockManagement() {
         />
         <SummaryCard
           label="PENDING ALLOCATIONS"
-          value={metrics.pending_allocations_count || pendingRequests.length}
+          value={pendingRequests.length}
           variant="pending"
           active={activeTab === "PENDING"}
           onClick={() => setActiveTab("PENDING")}
@@ -896,7 +932,7 @@ function DockManagement() {
                         </div>
                         {req.quantity && (
                           <div className="text-[11px] text-muted-foreground tabular-nums">
-                            Qty: {req.quantity}
+                            Qty: {req.quantity} {req.uom || ""}
                           </div>
                         )}
                       </td>
@@ -915,7 +951,7 @@ function DockManagement() {
                           onClick={() => {
                             const avail = docks.filter((d) => d.status === "AVAILABLE");
                             setAllocateModalPendingReq(req);
-                            setSelectedDockIdToAllocate(avail[0]?.id || "");
+                            setSelectedDockIdToAllocate("");
                           }}
                         >
                           <ArrowRight className="size-3.5" /> ALLOCATE DOCK
@@ -955,6 +991,7 @@ function DockManagement() {
                     toast.error("Unauthorized: Only the assigned Store Manager can release this dock.");
                   }
                 }}
+                onConfirmArrival={() => void handleVehicleArrived(dock)}
               />
             ))}
           </div>
@@ -1384,6 +1421,15 @@ function DockManagement() {
                 </div>
               )}
 
+              {(() => {
+                const selectedDock = docks.find((dock) => dock.id === selectedDockIdToAllocate);
+                return selectedDock && !isDockCompatible(allocateModalPendingReq, selectedDock) ? (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                    This dock is incompatible with {allocateModalPendingReq.material_reference || allocateModalPendingReq.material_description || "the selected material"}. Choose a General, Raw Material, or other suitable dock.
+                  </div>
+                ) : null;
+              })()}
+
               {/* Assigned Store Selection */}
               <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
@@ -1427,7 +1473,14 @@ function DockManagement() {
                 Cancel
               </Button>
               <Button
-                disabled={!selectedDockIdToAllocate || actionBusy}
+                disabled={
+                  !selectedDockIdToAllocate ||
+                  actionBusy ||
+                  !isDockCompatible(
+                    allocateModalPendingReq,
+                    docks.find((dock) => dock.id === selectedDockIdToAllocate) as Dock,
+                  )
+                }
                 className="rounded-xl shadow-glow bg-purple-600 hover:bg-purple-700 text-white font-semibold"
                 onClick={() => void handleAllocateDock()}
               >
@@ -1820,6 +1873,7 @@ function DockCard({
   onEdit,
   onMaintenanceToggle,
   onRelease,
+  onConfirmArrival,
 }: {
   dock: Dock;
   canRelease: boolean;
@@ -1827,6 +1881,7 @@ function DockCard({
   onEdit: () => void;
   onMaintenanceToggle: () => void;
   onRelease: () => void;
+  onConfirmArrival: () => void;
 }) {
   const isAvailable = dock.status === "AVAILABLE";
   const isOccupied = dock.status === "OCCUPIED" || dock.status === "RESERVED";
@@ -1854,6 +1909,7 @@ function DockCard({
 
   const vehicleNo = dock.current_allocation?.vehicle_number;
   const gatePassNo = dock.current_allocation?.existing_gate_pass_id;
+  const awaitingPhysicalArrival = isOccupied && dock.current_allocation?.status === "DOCK_ASSIGNED";
 
   return (
     <Card
@@ -1967,6 +2023,15 @@ function DockCard({
             onClick={onRelease}
           >
             <CheckCircle2 className="size-4" /> RELEASE DOCK
+          </Button>
+        )}
+
+        {awaitingPhysicalArrival && (
+          <Button
+            className="w-full rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700"
+            onClick={onConfirmArrival}
+          >
+            <CheckCircle2 className="size-4" /> CONFIRM ARRIVAL AT DOCK
           </Button>
         )}
 

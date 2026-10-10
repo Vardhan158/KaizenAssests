@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
+import { getUserInfo } from "@/lib/auth-utils";
 
 export const Route = createFileRoute("/supplier/asns/new")({
   beforeLoad: () => {},
@@ -60,20 +61,38 @@ function NewAsnPage() {
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
     const [supplierName, setSupplierName] = useState("");
+  const [supplierCompanyName, setSupplierCompanyName] = useState("");
     const [destinationWarehouse, setDestinationWarehouse] = useState("");
+  const [destinationWarehouseId, setDestinationWarehouseId] = useState("");
   const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
   const [lines, setLines] = useState<any[]>([
-    { item_code: "", material_name: "", shipped_quantity: "", uom: "KG" },
+    { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
   ]);
 
+  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [materialCatalog, setMaterialCatalog] = useState<any[]>([]);
+  const [materialSearch, setMaterialSearch] = useState("");
+  const [warehouses, setWarehouses] = useState<any[]>([]);
+  const [selectedPo, setSelectedPo] = useState<any>(null);
+  const currentUser = getUserInfo();
 
   useEffect(() => {
     loadAsnData();
-    void api.getMaterialComponents().then((mats) => setMaterialCatalog(mats || []));
+    void (currentUser?.supplierId ? api.getSupplier(currentUser.supplierId) : api.getSuppliers({ search: currentUser?.username }))
+      .then((result: any) => {
+        const supplierRows = Array.isArray(result) ? result : result?.items || result?.suppliers || [];
+        const supplier = supplierRows.length ? supplierRows.find((item: any) => String(item.id) === String(currentUser?.supplierId) || String(item.username || item.supplier_name || "").toLowerCase() === String(currentUser?.username || "").toLowerCase()) || supplierRows[0] : result;
+        const companyName = supplier?.registered_company_name || supplier?.company_name || supplier?.supplier_name || "";
+        setSupplierCompanyName(companyName);
+        if (companyName) setSupplierName(companyName);
+      }).catch(() => undefined);
+    void Promise.all([
+      api.getStores({ status: "ALL" }).catch(() => []),
+    ]).then(([stores]) => { setWarehouses((stores || []).filter((store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
+    void api.getMaterials({ status: "ACTIVE" }).then((materials) => setMaterialCatalog((materials || []).map((material: any) => ({ ...material, id: material.id || material.material_id, code: material.code || material.material_code, name: material.name || material.material_name, uom: material.uom || material.base_uom || material.unit_of_measure })))).catch(() => setMaterialCatalog([]));
   }, []);
 
   const loadAsnData = async () => {
@@ -87,7 +106,7 @@ function NewAsnPage() {
         const mapped = remoteAsns.map((a: any) => ({
           id: a.id || a.asn_number,
           asn_number: a.asn_number || "",
-          po_number: a.po_number || "PO-2026-008741",
+          po_number: a.po_number || "",
           supplier_name: a.supplier_name || "Bharat Electronics Components Pvt. Ltd.",
           destination_warehouse: a.warehouse_name || "Raw Material Warehouse",
           vehicle_number: a.vehicle_number || "KA 01 AB 4582",
@@ -110,11 +129,15 @@ function NewAsnPage() {
     const next = await api.getNextAsnNumber();
     setAsnNumber(next.asnNumber);
     setExpectedArrivalDate("");
+    setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
+    setDestinationWarehouse("");
+    setDestinationWarehouseId("");
+    setSelectedPo(null);
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
     setLines([
-      { item_code: "", material_name: "", shipped_quantity: "", uom: "KG" },
+      { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
     ]);
     setIsModalOpen(true);
   };
@@ -125,7 +148,7 @@ function NewAsnPage() {
 
     try {
       const created = await api.createMaterialComponent(compName.trim(), "PCS");
-      setMaterialCatalog((prev) => [created, ...prev]);
+      void created;
       toast.success(`Component '${created.name}' saved to Database ✓`, {
         description: `Code: ${created.code} · Now available in dropdown`,
       });
@@ -138,8 +161,26 @@ function NewAsnPage() {
     }
   };
 
+  const selectPurchaseOrder = async (id: string) => {
+    if (!id) { setSelectedPo(null); setLines([]); return; }
+    const po = await api.getPurchaseOrder(id);
+    setSelectedPo(po);
+    const poLines = po?.lines || po?.items || po?.materials || po?.purchase_order_lines || [];
+    setLines(poLines.map((line: any) => ({
+      item_code: line.item_code || line.material_code || line.code || "",
+      material_name: line.material_name || line.material?.name || line.name || "",
+      shipped_quantity: "",
+      remaining_quantity: Number(line.remaining_quantity ?? line.remaining ?? line.balance_quantity ?? line.ordered_quantity ?? line.quantity ?? 0),
+      uom: line.uom || line.unit_of_measure || "PCS",
+    })));
+  };
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!destinationWarehouse || !lines.length || lines.some((line) => !line.item_code || !line.material_name)) {
+      toast.error("Select a warehouse and material before submitting the ASN");
+      return;
+    }
     if (!expectedArrivalDate) {
       toast.error("Expected Arrival Date is mandatory *");
       return;
@@ -148,20 +189,27 @@ function NewAsnPage() {
       toast.error("Please fill in Vehicle Number, Driver Name, and Mobile Number *");
       return;
     }
+    if (lines.some((line) => Number(line.shipped_quantity) <= 0)) {
+      toast.error("Shipped quantity must be greater than zero");
+      return;
+    }
 
     setSubmitting(true);
     try {
       const payload = {
         asn_number: asnNumber,
-        po_number: "PO-2026-008741",
+        po_number: undefined,
         supplier_name: supplierName,
+        supplier_id: currentUser?.supplierId,
         destination_warehouse: destinationWarehouse,
+        destination_warehouse_id: destinationWarehouseId,
         expected_arrival_at: expectedArrivalDate,
         vehicle_number: vehicleNumber.toUpperCase().trim(),
         driver_name: driverName.trim(),
         driver_contact: driverMobile.trim(),
         lines: lines.map((l) => ({
-          item_code: l.item_code || "MAT-001",
+          material_id: l.material_id,
+          item_code: l.item_code,
           material_name: l.material_name,
           shipped_quantity: Number(l.shipped_quantity) || 0,
           uom: l.uom || "PCS",
@@ -174,7 +222,7 @@ function NewAsnPage() {
       const newRecord: AsnRecord = {
         id: `asn-${Date.now()}`,
         asn_number: asnNumber,
-        po_number: "PO-2026-008741",
+        po_number: "",
         supplier_name: supplierName,
         destination_warehouse: destinationWarehouse,
         vehicle_number: vehicleNumber.toUpperCase().trim(),
@@ -334,12 +382,16 @@ function NewAsnPage() {
 
                   <div>
                     <Label htmlFor="supplier-name" className="text-[10px] font-bold uppercase text-muted-foreground">Supplier Name</Label>
-                    <Input id="supplier-name" required placeholder="e.g. Bharat Electronics Components Pvt. Ltd." value={supplierName} onChange={(e) => setSupplierName(e.target.value)} className={inputClass} />
+                    <Input id="supplier-name" readOnly required value={supplierName} className={`${inputClass} bg-muted`} />
                   </div>
 
                   <div>
-                    <Label htmlFor="destination-warehouse" className="text-[10px] font-bold uppercase text-muted-foreground">Destination Warehouse</Label>
-                    <Input id="destination-warehouse" required placeholder="e.g. Raw Material Warehouse" value={destinationWarehouse} onChange={(e) => setDestinationWarehouse(e.target.value)} className={inputClass} />
+                    <Label htmlFor="destination-warehouse" className="text-[10px] font-bold uppercase text-muted-foreground">Destination Warehouse *</Label>
+                    <select id="destination-warehouse" required value={destinationWarehouseId} onChange={(e) => { const warehouse = warehouses.find((item) => String(item.id) === e.target.value); setDestinationWarehouseId(e.target.value); setDestinationWarehouse(warehouse?.store_name || warehouse?.name || warehouse?.store_code || ""); }} className={`${inputClass} w-full px-3`}>
+                      <option value="">Select warehouse</option>
+                      {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.store_name || warehouse.name} ({warehouse.store_code})</option>)}
+                    </select>
+                    {!warehouses.length && <p className="mt-1 text-[10px] font-semibold text-amber-600">No active warehouses exist in the Warehouse Master.</p>}
                   </div>
 
                   <div>
@@ -413,31 +465,11 @@ function NewAsnPage() {
 
               {/* MATERIAL LINE ITEMS TABLE */}
               <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
-                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <div className="flex justify-between items-center flex-wrap gap-2">
                   <h3 className="text-xs font-black uppercase tracking-wider text-primary">
                     3. SHIPPED MATERIALS & QUANTITIES
                   </h3>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-[11px] font-bold rounded-lg border-sky-500/40 text-sky-600 hover:bg-sky-50"
-                      onClick={handleAddNewCustomMaterial}
-                    >
-                      + Add New Material Component to Database
-                    </Button>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-[11px] font-bold rounded-lg"
-                      onClick={() => setLines((prev) => [...prev, { item_code: "", material_name: "", shipped_quantity: "", uom: "PCS" }])}
-                    >
-                      + Add Row
-                    </Button>
-                  </div>
+                  <div className="flex gap-2"><Input placeholder="Search material name or code" value={materialSearch} onChange={(e) => setMaterialSearch(e.target.value)} className="h-8 w-56 text-[11px]" /><Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setLines((rows) => [...rows, { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }])}>+ Add Row</Button></div>
                 </div>
 
                 <div className="overflow-x-auto rounded-xl border bg-background">
@@ -454,40 +486,13 @@ function NewAsnPage() {
                       {lines.map((line, idx) => (
                         <tr key={idx}>
                           <td className="p-2">
-                            <select
-                              required
-                              value={line.material_name}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                const matched = materialCatalog.find((m) => m.name === val);
-                                setLines((prev) =>
-                                  prev.map((item, i) =>
-                                    i === idx
-                                      ? {
-                                          ...item,
-                                          material_name: val,
-                                          item_code: matched?.code || item.item_code,
-                                          uom: matched?.uom || item.uom || "PCS",
-                                        }
-                                      : item
-                                  )
-                                );
-                              }}
-                              className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"
-                            >
-                              <option value="">-- Select Material Component from Database --</option>
-                              {materialCatalog.map((mat, mIdx) => (
-                                <option key={mat.code || mIdx} value={mat.name}>
-                                  {mat.name} ({mat.category || "Component"})
-                                </option>
-                              ))}
-                            </select>
+                            <select required value={line.item_id || line.material_id || ""} onChange={(e) => { const material = materialCatalog.find((item) => String(item.id) === e.target.value); if (material && lines.some((item, i) => i !== idx && String(item.material_id) === String(material.id))) { toast.error("This material is already selected in the ASN."); return; } setLines((current) => current.map((item, i) => i === idx ? { ...item, material_id: material?.id || "", item_code: material?.code || "", material_name: material?.name || "", uom: material?.uom || "" } : item)); }} className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"><option value="">Select material</option>{materialCatalog.filter((material) => `${material.name || ""} ${material.code || ""}`.toLowerCase().includes(materialSearch.toLowerCase())).map((material) => <option key={material.id} value={material.id}>{material.name} ({material.code})</option>)}</select>
                           </td>
                           <td className="p-2">
                             <Input
                               required
                               type="number"
-                              placeholder="e.g. 500"
+                              placeholder="Enter quantity"
                               value={line.shipped_quantity}
                               onChange={(e) =>
                                 setLines((prev) =>
@@ -498,29 +503,14 @@ function NewAsnPage() {
                             />
                           </td>
                           <td className="p-2">
-                            <select
-                              value={line.uom}
-                              onChange={(e) =>
-                                setLines((prev) =>
-                                  prev.map((item, i) => (i === idx ? { ...item, uom: e.target.value } : item))
-                                )
-                              }
-                              className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"
-                            >
-                              <option value="PCS">PCS</option>
-                              <option value="METER">METER</option>
-                              <option value="KG">KG</option>
-                              <option value="SET">SET</option>
-                              <option value="BOX">BOX</option>
-                              <option value="PALLET">PALLET</option>
-                            </select>
+                            <Input readOnly value={line.uom} className="h-8 bg-muted text-xs font-semibold" />
                           </td>
                           <td className="p-2 text-center">
                             <Button
                               type="button"
                               variant="ghost"
                               size="icon"
-                              disabled={lines.length === 1}
+                              disabled
                               onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
                               className="h-7 size-7 text-red-500 hover:bg-red-50"
                             >

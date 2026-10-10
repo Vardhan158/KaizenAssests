@@ -337,6 +337,11 @@ class GrnLineReceivingRequest(ApiModel):
 
     good_quantity: NonNegativeQuantity = Decimal("0")
     damaged_quantity: NonNegativeQuantity = Decimal("0")
+    rejected_quantity: NonNegativeQuantity = Decimal("0")
+    held_quantity: NonNegativeQuantity = Decimal("0")
+    rejected_reason: str | None = None
+    damage_reason: str | None = None
+    held_reason: str | None = None
     allow_over_receipt: bool = False
     over_receipt_reason: str | None = None
 
@@ -447,6 +452,10 @@ class QualityInspectionLineRequest(ApiModel):
 
     accepted_quantity: NonNegativeQuantity = Decimal("0")
     rejected_quantity: NonNegativeQuantity = Decimal("0")
+    held_quantity: NonNegativeQuantity = Decimal("0")
+    rejected_reason: str | None = None
+    damage_reason: str | None = None
+    held_reason: str | None = None
     quality_approved_quantity: NonNegativeQuantity = Decimal("0")
     good_quantity: NonNegativeQuantity | None = None
     damaged_quantity: NonNegativeQuantity | None = None

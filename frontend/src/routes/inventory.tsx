@@ -112,8 +112,8 @@ function SimpleWarehouseModule() {
   const [assignQuantity, setAssignQuantity] = useState("");
 
   // Location Creation Modals
-  const [createLocationType, setCreateLocationType] = useState<"store" | "zone" | "bin" | null>(null);
-  const [newStoreForm, setNewStoreForm] = useState({ store_code: "", store_name: "", description: "" });
+  const [createLocationType, setCreateLocationType] = useState<"store" | "zone" | "rack" | "bin" | null>(null);
+  const [newStoreForm, setNewStoreForm] = useState({ store_code: "", store_name: "", description: "", store_type: "RAW_MATERIAL", status: "ACTIVE", warehouse_id: "" });
   const [newZoneForm, setNewZoneForm] = useState({ store_id: "", zone_code: "", zone_name: "" });
   const [newBinForm, setNewBinForm] = useState({
     store_id: "",
@@ -520,9 +520,12 @@ function SimpleWarehouseModule() {
           store_name: storeName,
           store_code: generatedStoreCode,
           description: undefined,
+          store_type: newStoreForm.store_type,
+          status: "ACTIVE",
+          warehouse_id: newStoreForm.warehouse_id || "Main Warehouse",
         });
         toast.success(`Warehouse created: ${createdStore?.store_name || storeName} (${createdStore?.store_code || generatedStoreCode || "auto-generated"})`);
-        setNewStoreForm({ store_code: "", store_name: "", description: "" });
+        setNewStoreForm({ store_code: "", store_name: "", description: "", store_type: "RAW_MATERIAL", status: "ACTIVE", warehouse_id: "" });
       } else if (createLocationType === "zone") {
         const targetStoreId = newZoneForm.store_id;
         if (!targetStoreId) {
@@ -538,7 +541,7 @@ function SimpleWarehouseModule() {
         const createdZone = await api.createZone(targetStoreId, { zone_name: newZoneForm.zone_name.trim(), zone_code: generatedZoneCode });
         setNewZoneForm({ store_id: "", zone_code: "", zone_name: "" });
         toast.success(`Zone created: ${createdZone?.zone_name || newZoneForm.zone_name} (${createdZone?.zone_code || generatedZoneCode || "auto-generated"})`);
-      } else if (createLocationType === "bin") {
+      } else if (createLocationType === "rack") {
         const targetStoreId = newBinForm.store_id;
         const targetZoneId = newBinForm.zone_id;
         if (!targetStoreId || !targetZoneId) {
@@ -573,6 +576,14 @@ function SimpleWarehouseModule() {
         })));
         setNewBinRows([{ rack: "", position: "", bin_code: "" }]);
         toast.success(`✓ Storage Bin created: ${newBinForm.bin_code} (Rack: ${newBinForm.rack}, Shelf: ${newBinForm.position}) with Auto QR Code!`);
+      } else if (createLocationType === "bin") {
+        const row = newBinRows[0];
+        if (!newBinForm.store_id || !newBinForm.zone_id || !row.rack.trim() || !row.position.trim() || !row.bin_code.trim()) { toast.error("Select warehouse, zone, rack, shelf/position, and bin code."); return; }
+        const existingBins = await api.getZoneBins(newBinForm.zone_id);
+        if ((existingBins || []).some((b: any) => String(b.bin_code).toUpperCase() === row.bin_code.trim().toUpperCase())) { toast.error(`Bin code '${row.bin_code}' already exists in this zone.`); return; }
+        const store = stores.find((s) => s.id === newBinForm.store_id); const zone = zones.find((z) => z.id === newBinForm.zone_id);
+        await api.createBin(newBinForm.zone_id, { bin_code: row.bin_code.trim(), bin_name: row.bin_code.trim(), rack: row.rack.trim(), position: row.position.trim(), qr_identifier: `QR-BIN-${store?.store_code}-${zone?.zone_code}-${row.bin_code.trim()}` });
+        toast.success(`Bin ${row.bin_code} created with a unique QR.`);
       }
       setCreateLocationType(null);
       await fetchData(true);
@@ -1124,6 +1135,9 @@ function SimpleWarehouseModule() {
                 <Button size="sm" onClick={() => setCreateLocationType("bin")} className="gap-1 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-sm">
                   <Plus className="h-3.5 w-3.5" /> Add Bin
                 </Button>
+                <Button size="sm" variant="outline" onClick={() => setCreateLocationType("rack")} className="gap-1 text-xs">
+                  <Plus className="h-3.5 w-3.5 text-indigo-600" /> Add Rack
+                </Button>
               </div>
             </div>
 
@@ -1164,12 +1178,25 @@ function SimpleWarehouseModule() {
               </div>
             </Card>}
 
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Card className="p-4">
+                <p className="text-[11px] font-bold uppercase text-slate-500">Warehouses</p>
+                <p className="mt-1 text-xl font-black text-slate-900">{stores.length}</p>
+                <p className="text-xs text-slate-500">{stores.length ? "Warehouse master records loaded." : "No warehouse records found in the master."}</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-[11px] font-bold uppercase text-slate-500">Zones</p>
+                <p className="mt-1 text-xl font-black text-slate-900">{zones.length}</p>
+                <p className="text-xs text-slate-500">{zones.length ? "Zones loaded from the selected warehouses." : "No zones configured for the loaded warehouses."}</p>
+              </Card>
+            </div>
+
             {/* Bins List Table */}
             <Card className="p-5 overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase">
-                    <th className="py-2.5 px-3">Bin Code</th>
+                    <th className="py-2.5 px-3">Location Code</th>
                     <th className="py-2.5 px-3">Rack</th>
                     <th className="py-2.5 px-3">Shelf / Position</th>
                     <th className="py-2.5 px-3">Status</th>
@@ -1181,7 +1208,11 @@ function SimpleWarehouseModule() {
                   {allFlattenedBins.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center py-6 text-slate-500">
-                        No storage bins configured in database. Click "Add Bin" above to create a location.
+                        {stores.length === 0
+                          ? "No warehouses configured in the Warehouse Master."
+                          : zones.length === 0
+                            ? "Warehouses exist, but no zones are configured."
+                            : "Warehouses and zones exist, but no storage bins are configured. Click \"Add Bin\" above to create a location."}
                       </td>
                     </tr>
                   ) : (
@@ -1481,12 +1512,14 @@ function SimpleWarehouseModule() {
               <QrCode className="h-5 w-5" /> Storage Location & Placed Material Inspector
             </DialogTitle>
             <DialogDescription>
-              Scanned location details and real-time physical stock placed in this bin.
+              Scanned location details and real-time physical stock placed in this location.
             </DialogDescription>
           </DialogHeader>
 
           {viewBinQrModal && (() => {
             const bCode = viewBinQrModal.bin_code;
+            const locationStore = stores.find((store) => String(store.id) === String(viewBinQrModal.store_id));
+            const locationZone = zones.find((zone) => String(zone.id) === String(viewBinQrModal.zone_id));
             const placedItems = inventorySummary.filter((item) => {
               const itemLoc = (item.bin_code || item.location || "").toLowerCase();
               return itemLoc.includes(bCode.toLowerCase());
@@ -1503,6 +1536,8 @@ function SimpleWarehouseModule() {
                   <div className="space-y-1 flex-1 text-center sm:text-left">
                     <div className="text-[11px] font-bold text-indigo-600 font-mono">{qrCodeVal}</div>
                     <h4 className="font-extrabold text-base text-slate-900 dark:text-slate-100">{viewBinQrModal.bin_code}</h4>
+                    <p className="text-slate-500 font-medium">Warehouse: <span className="font-semibold text-slate-800 dark:text-slate-200">{locationStore?.store_name || locationStore?.store_code || "—"}</span></p>
+                    <p className="text-slate-500 font-medium">Zone: <span className="font-semibold text-slate-800 dark:text-slate-200">{locationZone?.zone_name || locationZone?.zone_code || "—"}</span></p>
                     <p className="text-slate-500 font-medium">
                       Rack: <span className="font-semibold text-slate-800 dark:text-slate-200">{viewBinQrModal.rack || "—"}</span> | Shelf: <span className="font-semibold text-slate-800 dark:text-slate-200">{viewBinQrModal.position || "—"}</span>
                     </p>
@@ -1515,14 +1550,14 @@ function SimpleWarehouseModule() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Boxes className="h-4 w-4 text-indigo-600" /> Placed Materials in Bin ({placedItems.length})
+                      <Boxes className="h-4 w-4 text-indigo-600" /> Placed Materials in Location ({placedItems.length})
                     </h4>
                     {placedItems.length > 0 ? (
                       <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
                         {placedItems.reduce((acc, i) => acc + Number(i.available ?? i.total_quantity ?? 0), 0)} {placedItems[0]?.uom || ""} STORED
                       </Badge>
                     ) : (
-                      <Badge variant="outline" className="text-slate-500 text-[10px]">BIN IS EMPTY</Badge>
+                      <Badge variant="outline" className="text-slate-500 text-[10px]">LOCATION IS EMPTY</Badge>
                     )}
                   </div>
 
@@ -1541,7 +1576,7 @@ function SimpleWarehouseModule() {
                         {placedItems.length === 0 ? (
                           <tr>
                             <td colSpan={5} className="text-center py-6 text-slate-400">
-                              No materials currently placed in this bin location. Ready for Putaway.
+                              No materials currently placed in this location. Ready for Putaway.
                             </td>
                           </tr>
                         ) : (
@@ -1578,12 +1613,14 @@ function SimpleWarehouseModule() {
               <Building2 className="h-5 w-5 text-indigo-600" />
               {createLocationType === "store" && "Add New Warehouse / Store"}
               {createLocationType === "zone" && "Add New Storage Zone"}
+              {createLocationType === "rack" && "Bulk Create Racks"}
               {createLocationType === "bin" && "Add Storage Bin (Rack, Shelf & Auto QR)"}
             </DialogTitle>
             <DialogDescription>
               {createLocationType === "store" && "Create an authoritative warehouse storage unit in database."}
               {createLocationType === "zone" && "Define a zone within an existing warehouse."}
-              {createLocationType === "bin" && "Configure a physical bin with Rack, Shelf/Position, and auto-generated QR code."}
+              {createLocationType === "rack" && "Create sequential racks with unique QR labels in a warehouse zone."}
+              {createLocationType === "bin" && "Configure one physical bin with Rack, Shelf/Position, and auto-generated QR code."}
             </DialogDescription>
           </DialogHeader>
 
@@ -1598,6 +1635,23 @@ function SimpleWarehouseModule() {
                     value={newStoreForm.store_name}
                     onChange={(e) => setNewStoreForm({ ...newStoreForm, store_name: e.target.value })}
                   />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Warehouse Code</label>
+                    <Input readOnly value={newStoreForm.store_code || "Auto-generated on save"} className="bg-slate-100 font-mono" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Warehouse Type</label>
+                    <select value={newStoreForm.store_type} onChange={(e) => setNewStoreForm({ ...newStoreForm, store_type: e.target.value })} className="h-10 rounded-md border bg-background px-3">
+                      <option value="RAW_MATERIAL">Raw Material</option><option value="GENERAL">General</option><option value="OTHER">Other</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Location / Plant</label>
+                  <Input placeholder="Existing plant master code" value={newStoreForm.warehouse_id} onChange={(e) => setNewStoreForm({ ...newStoreForm, warehouse_id: e.target.value })} />
+                  <p className="text-[10px] text-slate-500">Active by default. The plant master integration will use this warehouse ID.</p>
                 </div>
               </>
             )}
@@ -1634,7 +1688,7 @@ function SimpleWarehouseModule() {
               </>
             )}
 
-            {createLocationType === "bin" && (
+            {createLocationType === "rack" && (
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -1748,12 +1802,21 @@ function SimpleWarehouseModule() {
               </>
             )}
 
+            {createLocationType === "bin" && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <Select value={newBinForm.store_id} onValueChange={(value) => setNewBinForm({ ...newBinForm, store_id: value, zone_id: "" })}><SelectTrigger><SelectValue placeholder="Select Warehouse" /></SelectTrigger><SelectContent>{stores.map((s) => <SelectItem key={s.id} value={s.id}>{s.store_code} - {s.store_name}</SelectItem>)}</SelectContent></Select>
+                  <Select value={newBinForm.zone_id} onValueChange={(value) => setNewBinForm({ ...newBinForm, zone_id: value })}><SelectTrigger><SelectValue placeholder="Select Zone" /></SelectTrigger><SelectContent>{zones.filter((z) => z.store_id === newBinForm.store_id).map((z) => <SelectItem key={z.id} value={z.id}>{z.zone_code} - {z.zone_name}</SelectItem>)}</SelectContent></Select>
+                </div>
+                <div className="grid grid-cols-3 gap-3"><Input placeholder="Rack" value={newBinRows[0].rack} onChange={(e) => setNewBinRows([{ ...newBinRows[0], rack: e.target.value }])} /><Input placeholder="Shelf / Position" value={newBinRows[0].position} onChange={(e) => setNewBinRows([{ ...newBinRows[0], position: e.target.value }])} /><Input placeholder="Bin Code" value={newBinRows[0].bin_code} onChange={(e) => setNewBinRows([{ ...newBinRows[0], bin_code: e.target.value }])} /></div>
+              </div>
+            )}
             <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setCreateLocationType(null)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting} className="bg-indigo-600 text-white">
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : createLocationType === "bin" ? "Bulk Create Racks" : `Create ${createLocationType?.toUpperCase()}`}
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : createLocationType === "rack" ? "Bulk Create Racks" : createLocationType === "bin" ? "Create BIN" : `Create ${createLocationType?.toUpperCase()}`}
               </Button>
             </DialogFooter>
           </form>

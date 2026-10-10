@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import QRCode from "qrcode";
 import {
   ArrowRight,
   Clock3,
@@ -14,6 +15,7 @@ import {
   Search,
   ShieldCheck,
   Truck,
+  Trash2,
   Warehouse,
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
@@ -36,6 +38,7 @@ function GateDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPassModal, setSelectedPassModal] = useState<any | null>(null);
   const [selectedDetailsDrawer, setSelectedDetailsDrawer] = useState<any | null>(null);
+  const [gatePassQr, setGatePassQr] = useState<string | null>(null);
 
   const loadDashboard = async () => {
     try {
@@ -52,6 +55,27 @@ function GateDashboard() {
     const timer = window.setInterval(loadDashboard, 5_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const gatePassId = selectedPassModal?.gate_entry_no || selectedPassModal?.gate_entry_number || selectedPassModal?.gate_pass_number || selectedPassModal?.id;
+    if (!gatePassId) {
+      setGatePassQr(null);
+      return;
+    }
+
+    let active = true;
+    void QRCode.toDataURL(String(gatePassId), { width: 240, margin: 1 })
+      .then((dataUrl) => {
+        if (active) setGatePassQr(dataUrl);
+      })
+      .catch(() => {
+        if (active) setGatePassQr(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedPassModal]);
 
   const entries = Array.isArray(dashboardData?.gateEntries) ? dashboardData.gateEntries : []; /*
     {
@@ -101,7 +125,7 @@ function GateDashboard() {
   const filteredEntries = entries.filter((e: any) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    const gp = String(e.gate_pass_number || e.gate_entry_no || e.id || "").toLowerCase();
+    const gp = String(e.gate_entry_no || e.gate_entry_number || e.gate_pass_number || e.id || "").toLowerCase();
     const veh = String(e.vehicle_number || "").toLowerCase();
     const sup = String(e.supplier_name || e.vendor || "").toLowerCase();
     const asn = String(e.asn_number || "").toLowerCase();
@@ -115,10 +139,24 @@ function GateDashboard() {
   const todayExits = metrics.todayExits ?? entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
 
   const handlePrintPass = (pass: any) => {
-    toast.success(`Print job sent for Gate Pass ${pass.gate_pass_number || pass.gate_entry_no || pass.id}`, {
+    toast.success(`Print job sent for Gate Pass ${pass.gate_entry_no || pass.gate_entry_number || pass.gate_pass_number || pass.id}`, {
       description: "Opening print preview...",
     });
     window.print();
+  };
+
+  const handleDeleteGateEntryData = async () => {
+    if (!window.confirm("Delete all gate entry records and related gate activity? This cannot be undone.")) return;
+
+    try {
+      await api.resetGateEntries();
+      setSelectedPassModal(null);
+      setSelectedDetailsDrawer(null);
+      toast.success("Gate entry data deleted successfully");
+      await loadDashboard();
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to delete gate entry data");
+    }
   };
 
   return (
@@ -126,11 +164,21 @@ function GateDashboard() {
       title="Gate Entry Security Dashboard (FR-01)"
       subtitle="FR-01: Live gate metrics, searchable recent gate pass activity, and vehicle tracking"
       actions={
-        <Button asChild className="rounded-xl font-bold shadow-sm">
-          <Link to="/vehicle-queue" search={{ action: "new" }}>
-            <PlusCircle className="mr-2 size-4" /> New Gate Entry
-          </Link>
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button asChild className="rounded-xl font-bold shadow-sm">
+            <Link to="/vehicle-queue" search={{ action: "new" }}>
+              <PlusCircle className="mr-2 size-4" /> New Gate Entry
+            </Link>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl font-bold text-destructive hover:bg-destructive/10"
+            onClick={() => void handleDeleteGateEntryData()}
+          >
+            <Trash2 className="mr-2 size-4" /> Delete Data
+          </Button>
+        </div>
       }
     >
       <div className="space-y-6">
@@ -208,12 +256,12 @@ function GateDashboard() {
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {filteredEntries.map((e: any, idx: number) => {
-                    const passNo = e.gate_pass_number || e.gate_entry_no || `GP-BLR-20261008-00${idx + 48}`;
-                    const vehNo = e.vehicle_number || "KA 01 AB 4582";
-                    const suppName = e.supplier_name || e.vendor || "Bharat Electronics Components Pvt. Ltd.";
+                    const passNo = e.gate_entry_no || e.gate_entry_number || e.gate_pass_number || "—";
+                    const vehNo = e.vehicle_number || "—";
+                    const suppName = e.supplier_name || e.vendor || "—";
                     const asnNumber = e.asn_number || "—";
-                    const entryTime = e.entry_time || e.arrival_time || "10:42 AM";
-                    const dockNo = e.dock_number || e.dock_name || "Dock D-04";
+                    const entryTime = e.entry_time || e.arrival_time || "—";
+                    const dockNo = e.dock_number || e.dock_name || "—";
 
                     return (
                       <tr key={e.id || idx} className="hover:bg-muted/30 transition-colors">
@@ -243,7 +291,10 @@ function GateDashboard() {
                               size="sm"
                               variant="ghost"
                               className="h-7 px-2 text-xs font-bold text-sky-600"
-                              onClick={() => setSelectedPassModal(e)}
+                              onClick={() => setSelectedPassModal({
+                                ...e,
+                                gate_pass_number: e.gate_entry_no || e.gate_entry_number || e.gate_pass_number,
+                              })}
                             >
                               <QrCode className="mr-1 size-3.5" /> Gate Pass
                             </Button>
@@ -295,12 +346,22 @@ function GateDashboard() {
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-muted-foreground font-semibold">Allocated Dock:</span>
-                    <span className="font-bold text-emerald-600">{selectedPassModal.dock_number || "Dock D-04"}</span>
+                    <span className="font-bold text-emerald-600">{selectedPassModal.dock_number || selectedPassModal.dock_name || "—"}</span>
                   </div>
                 </div>
 
                 <div className="rounded-2xl border-2 border-dashed border-primary/40 bg-muted/20 p-4 text-center">
-                  <QrCode className="mx-auto size-28 text-primary" />
+                  {gatePassQr ? (
+                    <img
+                      src={gatePassQr}
+                      alt={`Scannable QR code for ${selectedPassModal.gate_pass_number || selectedPassModal.gate_entry_no || selectedPassModal.id}`}
+                      className="mx-auto size-40 rounded-lg bg-white p-2"
+                    />
+                  ) : (
+                    <div className="mx-auto flex size-40 items-center justify-center rounded-lg bg-white text-xs text-muted-foreground">
+                      Generating QR code...
+                    </div>
+                  )}
                   <p className="font-mono text-xs font-bold mt-2 text-primary">
                     {selectedPassModal.gate_pass_number || selectedPassModal.gate_entry_no || "—"}
                   </p>
@@ -333,7 +394,7 @@ function GateDashboard() {
                   <p className="flex justify-between"><span className="text-muted-foreground">Vehicle Number:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.vehicle_number}</span></p>
                   <p className="flex justify-between"><span className="text-muted-foreground">Driver Name:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.driver_name || "Suresh Gowda"} ({selectedDetailsDrawer.driver_contact || "+91 98450 12345"})</span></p>
                   <p className="flex justify-between"><span className="text-muted-foreground">Invoice Number:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.invoice_number || "INV-2026-9901"}</span></p>
-                  <p className="flex justify-between"><span className="text-muted-foreground">Assigned Dock:</span> <span className="font-bold text-emerald-600">{selectedDetailsDrawer.dock_number || "Dock D-04"}</span></p>
+                  <p className="flex justify-between"><span className="text-muted-foreground">Assigned Dock:</span> <span className="font-bold text-emerald-600">{selectedDetailsDrawer.dock_number || selectedDetailsDrawer.dock_name || "—"}</span></p>
                   <p className="flex justify-between"><span className="text-muted-foreground">Status:</span> <span className="font-bold uppercase text-emerald-600">{selectedDetailsDrawer.status || "INSIDE_FACILITY"}</span></p>
                 </div>
 
