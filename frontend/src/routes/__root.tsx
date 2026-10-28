@@ -101,7 +101,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     // List of routes that don't require authentication
     const publicRoutes = new Set(["/login", "/"]);
 
-    if (!publicRoutes.has(location.pathname)) requireRouteAccess(location.pathname);
+    if (!publicRoutes.has(location.pathname))
+      requireRouteAccess(location.pathname, location.searchStr);
   },
   shellComponent: RootShell,
   component: RootComponent,

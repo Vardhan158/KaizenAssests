@@ -302,10 +302,37 @@ export function JourneyCanvas({
     forkliftRot = [0, Math.PI / 2, 0];
     forkLiftProgress = lerp(raisedLift, placementLift, smoothstep(0.385, 0.39, scrollProgress));
   } else {
-    // Leave this same pallet in its bin. Withdraw fully before lowering the forks.
-    forkliftPos = [lerp(6.35, 4.2, smoothstep(0.39, 0.41, scrollProgress)), 0, -68];
-    forkliftRot = [0, Math.PI / 2, 0];
-    forkLiftProgress = lerp(placementLift, 0.12, smoothstep(0.41, 0.425, scrollProgress));
+    // Clear the target rack before turning, then weave through the open gaps
+    // in the two inventory rows instead of driving through their frames.
+    const clearRack = smoothstep(0.39, 0.415, scrollProgress);
+    const forwardTurn = smoothstep(0.415, 0.44, scrollProgress);
+    let onwardX = lerp(6.35, 3.5, clearRack);
+    let onwardZ = -68;
+    if (scrollProgress >= 0.44 && scrollProgress < 0.48) {
+      onwardX = 3.5;
+      onwardZ = lerp(-68, -90, smoothstep(0.44, 0.48, scrollProgress));
+    } else if (scrollProgress < 0.51 && scrollProgress >= 0.48) {
+      const gapApproach = smoothstep(0.48, 0.51, scrollProgress);
+      onwardX = lerp(3.5, 8, gapApproach);
+      onwardZ = lerp(-90, -104, gapApproach);
+    } else if (scrollProgress < 0.53 && scrollProgress >= 0.51) {
+      onwardX = 8;
+      onwardZ = lerp(-104, -112, smoothstep(0.51, 0.53, scrollProgress));
+    } else if (scrollProgress < 0.56 && scrollProgress >= 0.53) {
+      const laneChange = smoothstep(0.53, 0.56, scrollProgress);
+      onwardX = lerp(8, 0, laneChange);
+      onwardZ = lerp(-112, -121, laneChange);
+    } else if (scrollProgress >= 0.56 && scrollProgress < 0.6) {
+      onwardX = 0;
+      onwardZ = lerp(-121, -145, smoothstep(0.56, 0.6, scrollProgress));
+    } else if (scrollProgress >= 0.6) {
+      const assemblyApproach = smoothstep(0.6, 0.625, scrollProgress);
+      onwardX = lerp(0, 3.5, assemblyApproach);
+      onwardZ = lerp(-145, -157, assemblyApproach);
+    }
+    forkliftPos = [onwardX, 0, onwardZ];
+    forkliftRot = [0, lerp(Math.PI / 2, Math.PI, forwardTurn), 0];
+    forkLiftProgress = lerp(placementLift, 0.12, smoothstep(0.415, 0.45, scrollProgress));
     palletPos = [8, shelfPalletY, -68];
     palletRot = [0, Math.PI / 2, 0];
   }
@@ -323,23 +350,40 @@ export function JourneyCanvas({
     palletRot = [...forkliftRot];
   }
 
+  // After putaway, the next warehouse-issued material load travels with the
+  // forklift to assembly. The received pallet remains stored in its bin.
+  const issuedMaterialVisible = scrollProgress >= 0.415 && scrollProgress < 0.75;
+  const issuedHeading = forkliftRot[1];
+  const issuedPalletOnForks: [number, number, number] = [
+    forkliftPos[0] + Math.sin(issuedHeading) * forkLoadOffset,
+    0.15 + forkLiftProgress * 2.65 + palletCarriageOffset,
+    forkliftPos[2] + Math.cos(issuedHeading) * forkLoadOffset,
+  ];
+  const assemblyHandoff = smoothstep(0.625, 0.64, scrollProgress);
+  const issuedPalletPos: [number, number, number] = [
+    lerp(issuedPalletOnForks[0], 1.8, assemblyHandoff),
+    lerp(issuedPalletOnForks[1], 1.05, assemblyHandoff),
+    lerp(issuedPalletOnForks[2], -160.5, assemblyHandoff),
+  ];
+  const issuedPalletRot: [number, number, number] = [0, lerp(issuedHeading, 0, assemblyHandoff), 0];
+
   // 3. Scene 5: Robotic assembly kinematics (progress 0.64 to 0.76)
   const robotProgress = clamp((scrollProgress - 0.64) / 0.11, 0, 1);
 
   // One outbound truck: close doors, pull clear, turn into the exit lane,
   // wait for the boom, then depart. All transforms reverse with scrolling.
-  const departureDoors = 1 - smoothstep(0.825, 0.84, scrollProgress);
+  const departureDoors = 1 - smoothstep(0.925, 0.938, scrollProgress);
   let truckExitPos: [number, number, number] = [-8.5, 0, -204.5];
   let departureHeading = 0;
   let departureDistance = 0;
   const turnRadius = 4.65;
-  const barrier2Open = smoothstep(0.92, 0.94, scrollProgress);
-  if (scrollProgress < 0.855) {
-    const distance = 7.5 * smoothstep(0.84, 0.855, scrollProgress);
+  const barrier2Open = smoothstep(0.978, 0.986, scrollProgress);
+  if (scrollProgress < 0.95) {
+    const distance = 7.5 * smoothstep(0.938, 0.95, scrollProgress);
     truckExitPos = [-8.5, 0, -204.5 + distance];
     departureDistance = distance;
-  } else if (scrollProgress < 0.885) {
-    const angle = Math.PI * smoothstep(0.855, 0.885, scrollProgress);
+  } else if (scrollProgress < 0.965) {
+    const angle = Math.PI * smoothstep(0.95, 0.965, scrollProgress);
     truckExitPos = [
       -8.5 + turnRadius * (1 - Math.cos(angle)),
       0,
@@ -349,11 +393,44 @@ export function JourneyCanvas({
     departureDistance = 7.5 + turnRadius * angle;
   } else {
     departureHeading = Math.PI;
-    const approach = 47 * smoothstep(0.885, 0.92, scrollProgress);
-    const exit = 26 * smoothstep(0.94, 1, scrollProgress);
+    const approach = 47 * smoothstep(0.965, 0.98, scrollProgress);
+    const exit = 26 * smoothstep(0.986, 1, scrollProgress);
     truckExitPos = [0.8, 0, -197 - approach - exit];
     departureDistance = 7.5 + Math.PI * turnRadius + approach + exit;
   }
+
+  // Show the dispatch loading operation before the doors close. Once loaded,
+  // both pallets use truck-local offsets so they travel with the trailer.
+  const outboundLoad1 = smoothstep(0.895, 0.91, scrollProgress);
+  const outboundLoad2 = smoothstep(0.91, 0.925, scrollProgress);
+  const truckLocalPoint = (
+    localX: number,
+    localY: number,
+    localZ: number,
+  ): [number, number, number] => [
+    truckExitPos[0] + localX * Math.cos(departureHeading) + localZ * Math.sin(departureHeading),
+    localY,
+    truckExitPos[2] - localX * Math.sin(departureHeading) + localZ * Math.cos(departureHeading),
+  ];
+  const loadedPallet1 = truckLocalPoint(-0.42, 1.05, -2.8);
+  const loadedPallet2 = truckLocalPoint(0.42, 1.05, -0.8);
+  const outboundPallet1Pos: [number, number, number] = [
+    lerp(-8.5, loadedPallet1[0], outboundLoad1),
+    lerp(1.25, loadedPallet1[1], outboundLoad1),
+    lerp(-210, loadedPallet1[2], outboundLoad1),
+  ];
+  const outboundPallet2Pos: [number, number, number] = [
+    lerp(-6, loadedPallet2[0], outboundLoad2),
+    lerp(1.25, loadedPallet2[1], outboundLoad2),
+    lerp(-210, loadedPallet2[2], outboundLoad2),
+  ];
+  const dispatchLoading = scrollProgress >= 0.89 && scrollProgress < 0.928;
+  const activeOutboundPallet = scrollProgress < 0.91 ? outboundPallet1Pos : outboundPallet2Pos;
+  const dispatchLoaderPos: [number, number, number] = [
+    activeOutboundPallet[0],
+    0,
+    Math.min(activeOutboundPallet[2] - 1.65, -211.2),
+  ];
 
   return (
     <div className="absolute inset-0 -z-10 bg-[#e7e9e5] overflow-hidden">
@@ -553,6 +630,15 @@ export function JourneyCanvas({
             rotation={forkliftRot}
             forkLiftProgress={forkLiftProgress}
           />
+          {issuedMaterialVisible && (
+            <PalletAndCargo
+              position={issuedPalletPos}
+              rotation={issuedPalletRot}
+              hasCargo
+              boxCount={6}
+              showQr
+            />
+          )}
 
           {/* Holographic Laser Scanner & Putaway Verification HUD at Rack Bay 1 */}
           {scrollProgress >= 0.365 && (
@@ -614,9 +700,17 @@ export function JourneyCanvas({
             doorsOpenProgress={departureDoors}
             wheelRotation={departureDistance / 0.49}
           />
-          {/* Outbound Wrapped Pallets ready for trailer */}
-          <PalletAndCargo position={[-8.5, 1.25, -210]} isWrapped={true} boxCount={8} />
-          <PalletAndCargo position={[-6.0, 1.25, -210]} isWrapped={true} boxCount={8} />
+          {/* Outbound wrapped pallets are loaded in sequence and then remain
+              locked inside the trailer while it travels to gate exit. */}
+          <PalletAndCargo position={outboundPallet1Pos} isWrapped boxCount={8} />
+          <PalletAndCargo position={outboundPallet2Pos} isWrapped boxCount={8} />
+          {dispatchLoading && (
+            <WarehouseForklift
+              position={dispatchLoaderPos}
+              rotation={[0, 0, 0]}
+              forkLiftProgress={0.34}
+            />
+          )}
 
           {/* ─── SCENE 7: DEPARTURE GATE EXIT ─── */}
           <GateBarrier position={[0, 0, -252]} barrierOpenProgress={barrier2Open} gateType="exit" />

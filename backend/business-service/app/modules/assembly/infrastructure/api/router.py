@@ -28,7 +28,7 @@ from app.modules.assembly.infrastructure.persistence.models import (
     BillOfMaterialsItemModel,
     BillOfMaterialsModel,
 )
-from app.modules.store.infrastructure.persistence.models import StoreBinModel
+from app.modules.store.infrastructure.persistence.models import StoreBinModel, StoreManagerUserModel
 from app.modules.storage.infrastructure.persistence.models import (
     InventoryLocationBalanceModel,
     InventoryMovementHistoryModel,
@@ -420,6 +420,8 @@ def _dashboard_material_supply(item: dict, warehouse_available: float, receipt_c
 
 @router.get("/dashboard")
 async def get_assembly_dashboard(
+    admin_user: Optional[uuid.UUID] = Query(default=None),
+    assembly_unit: Optional[str] = Query(default=None, max_length=64),
     uow: UnitOfWork = Depends(get_uow),
     current_user: Optional[CurrentUser] = Depends(get_current_user),
 ):
@@ -431,9 +433,38 @@ async def get_assembly_dashboard(
     - Recent Activity timeline
     """
     async with uow:
+        viewed_account = None
+        order_filters = []
+        if admin_user is not None:
+            roles = {role.strip().upper() for role in current_user.roles}
+            if not roles.intersection({"ADMIN", "SUPERUSER", "SUPER_ADMIN"}):
+                raise HTTPException(status_code=403, detail="Administrator access required for user reports")
+            viewed_account = await uow.session.get(StoreManagerUserModel, admin_user)
+            if viewed_account is None or viewed_account.role.strip().upper().replace(" ", "_") != "ASSEMBLY_MANAGER":
+                raise HTTPException(status_code=404, detail="Assembly manager not found")
+            identities = [viewed_account.username.lower(), viewed_account.employee_id.lower()]
+            order_filters.append(or_(
+                func.lower(AssemblyOrderModel.created_by).in_(identities),
+                func.lower(AssemblyOrderModel.assigned_operator).in_(identities),
+            ))
+        elif assembly_unit:
+            roles = {role.strip().upper() for role in current_user.roles}
+            if not roles.intersection({"ADMIN", "SUPERUSER", "SUPER_ADMIN"}):
+                raise HTTPException(status_code=403, detail="Administrator access required for assembly-unit reports")
+            unit_accounts = (await uow.session.execute(
+                select(StoreManagerUserModel).where(
+                    func.upper(StoreManagerUserModel.role) == "ASSEMBLY_MANAGER",
+                    func.upper(StoreManagerUserModel.assembly_unit_code) == assembly_unit.strip().upper(),
+                )
+            )).scalars().all()
+            identities = [identity.lower() for account in unit_accounts for identity in (account.username, account.employee_id)]
+            order_filters.append(or_(
+                func.lower(AssemblyOrderModel.created_by).in_(identities),
+                func.lower(AssemblyOrderModel.assigned_operator).in_(identities),
+            ))
         # Fetch all orders
         res = await uow.session.execute(
-            select(AssemblyOrderModel).order_by(AssemblyOrderModel.created_at.desc())
+            select(AssemblyOrderModel).where(*order_filters).order_by(AssemblyOrderModel.created_at.desc())
         )
         orders = list(res.scalars().all())
         rejected_order_ids = await _rejected_order_ids(uow.session, orders)
@@ -580,6 +611,12 @@ async def get_assembly_dashboard(
         recent_activity.sort(key=lambda x: x["timestamp"], reverse=True)
 
         return {
+            "viewed_user": ({
+                "id": str(viewed_account.id),
+                "full_name": viewed_account.full_name,
+                "employee_id": viewed_account.employee_id,
+            } if viewed_account else None),
+            "assembly_unit": assembly_unit.strip().upper() if assembly_unit else None,
             "kpis": {
                 "open_orders": open_orders,
                 "material_pending": material_pending,

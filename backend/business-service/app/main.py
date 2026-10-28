@@ -4,15 +4,12 @@ FastAPI entrypoint for ams-wms-business-service.
 # Reload triggered for Notification router, Assembly, and seed-test-data registration
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import get_settings
-from app.kafka.producer import start_producer, stop_producer
 from app.logging.logger import configure_logging, get_logger
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.request_context import RequestContextMiddleware
@@ -36,25 +33,18 @@ from app.modules.storage.infrastructure.api.assembly_requisition_router import r
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.security.router import router as auth_router
 from app.modules.assistant.infrastructure.api.router import router as assistant_router
+from app.modules.admin.infrastructure.api.router import router as admin_router
 from app.modules.store.infrastructure.api.location_router import (
     store_router as store_location_router,
     zone_router as zone_location_router,
 )
-from app.workers.notification_consumer import start_notification_consumer
-from app.workers.outbox_relay import relay_once
 
 configure_logging()
 logger = get_logger(__name__)
 
-scheduler = AsyncIOScheduler()
-_consumer_task: asyncio.Task | None = None
-_producer_task: asyncio.Task | None = None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    global _consumer_task, _producer_task
 
     try:
         from app.database.session import engine
@@ -75,29 +65,9 @@ async def lifespan(app: FastAPI):
         await connection.run_sync(install_rack_capacity)
 
     if not settings.startup_schema_compatibility:
-        async def start_kafka_background() -> None:
-            try:
-                await start_producer()
-            except Exception as exc:
-                logger.debug(f"Kafka producer start skipped (Kafka offline or unavailable): {exc}")
-        _producer_task = asyncio.create_task(start_kafka_background())
-        scheduler.add_job(relay_once, "interval", seconds=settings.outbox_poll_interval_seconds, id="outbox-relay", max_instances=1, coalesce=True)
-        scheduler.start()
-        try:
-            _consumer_task = asyncio.create_task(start_notification_consumer())
-        except Exception as exc:
-            logger.debug(f"Notification consumer task failed to start: {exc}")
         logger.info("business-service started", extra={"extra_fields": {"environment": settings.environment, "startup_schema_compatibility": False}})
         yield
-        scheduler.shutdown(wait=False)
-        if _consumer_task is not None:
-            _consumer_task.cancel()
-        if _producer_task is not None and not _producer_task.done():
-            _producer_task.cancel()
-        try:
-            await stop_producer()
-        except Exception:
-            pass
+        await engine.dispose()
         logger.info("business-service stopped")
         return
 
@@ -169,6 +139,7 @@ async def lifespan(app: FastAPI):
     # procurement ORM.  Use PostgreSQL's idempotent form rather than catching
     # duplicate-column errors: after a PostgreSQL statement fails, the whole
     # transaction is aborted and every later migration statement would fail.
+    migration_session = None
     try:
         from sqlalchemy import text
         from app.database.session import AsyncSessionFactory
@@ -272,14 +243,49 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
 
-        # Allow nullable PO columns in inventory_receipt_posting for Unexpected Delivery
+        # Keep legacy receiving tables aligned with the current ORM. Some older
+        # databases created these tables without PO/ASN reference columns.
+        for table_name in ("grn", "inventory_receipt_posting"):
+            for column_name, column_type in (
+                ("po_id", "UUID"),
+                ("po_number", "VARCHAR(64)"),
+                ("asn_id", "UUID"),
+                ("asn_number", "VARCHAR(64)"),
+            ):
+                try:
+                    await run_ddl(
+                        f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS "
+                        f"{column_name} {column_type}"
+                    )
+                    await run_ddl(
+                        f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP NOT NULL"
+                    )
+                except Exception:
+                    pass
+
         try:
-            await run_ddl("ALTER TABLE inventory_receipt_posting ALTER COLUMN po_id DROP NOT NULL")
-            await run_ddl("ALTER TABLE inventory_receipt_posting ALTER COLUMN po_number DROP NOT NULL")
-            await run_ddl("ALTER TABLE inventory_receipt_posting ALTER COLUMN asn_id DROP NOT NULL")
-            await run_ddl("ALTER TABLE inventory_receipt_posting ALTER COLUMN asn_number DROP NOT NULL")
+            await run_ddl(
+                "ALTER TABLE inventory_location_balance ADD COLUMN IF NOT EXISTS "
+                "batch_number VARCHAR(128) NOT NULL DEFAULT 'UNTRACKED'"
+            )
+            await run_ddl(
+                "CREATE INDEX IF NOT EXISTS ix_inventory_location_balance_batch_number "
+                "ON inventory_location_balance (batch_number)"
+            )
         except Exception:
             pass
+
+        for column_name, column_type in (
+            ("inspected_by_user_id", "VARCHAR(255)"),
+            ("authorized_person_confirmed", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ):
+            try:
+                await run_ddl(
+                    "ALTER TABLE assembly_quality_inspection ADD COLUMN IF NOT EXISTS "
+                    f"{column_name} {column_type}"
+                )
+            except Exception:
+                pass
 
         # Ensure finished_goods_request has requested_date
         try:
@@ -529,8 +535,11 @@ async def lifespan(app: FastAPI):
             except Exception: pass
 
         for col in [
-            ("role", "VARCHAR(64) NOT NULL DEFAULT 'Store Manager'"),
+            ("role", "VARCHAR(64) NOT NULL DEFAULT 'WAREHOUSE_MANAGER'"),
+            ("shift_name", "VARCHAR(64)"),
+            ("assembly_unit_code", "VARCHAR(64)"),
             ("applications", "JSONB NOT NULL DEFAULT '[\"WMS\"]'::jsonb"),
+            ("page_permissions", "JSONB NOT NULL DEFAULT '{}'::jsonb"),
             ("auth_token_hash", "VARCHAR(128)"),
             ("last_login", "TIMESTAMP WITH TIME ZONE"),
         ]:
@@ -1597,11 +1606,11 @@ async def lifespan(app: FastAPI):
             )
             logger.info("Ensured table 'store_zone' exists")
 
-            # Phase 3: Store Manager User Accounts DDL
+            # Warehouse-wide managed user accounts (legacy table name retained
+            # for in-place upgrades).
             await run_ddl("""
                 CREATE TABLE IF NOT EXISTS store_manager_user (
                     id UUID PRIMARY KEY,
-                    store_id UUID NOT NULL REFERENCES store(id) ON DELETE RESTRICT,
                     employee_id VARCHAR(64) UNIQUE NOT NULL,
                     username VARCHAR(64) UNIQUE NOT NULL,
                     full_name VARCHAR(128) NOT NULL,
@@ -1611,7 +1620,6 @@ async def lifespan(app: FastAPI):
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE INDEX IF NOT EXISTS ix_store_manager_user_store_id ON store_manager_user (store_id);
                 CREATE INDEX IF NOT EXISTS ix_store_manager_user_employee_id ON store_manager_user (employee_id);
                 CREATE INDEX IF NOT EXISTS ix_store_manager_user_username ON store_manager_user (username);
                 CREATE INDEX IF NOT EXISTS ix_store_manager_user_email ON store_manager_user (email);
@@ -1653,40 +1661,15 @@ async def lifespan(app: FastAPI):
             logger.debug(f"Store / Zone / Manager / Reservation table DDL note: {exc}")
         await migration_session.close()
     except Exception as e:
+        if migration_session is not None:
+            await migration_session.close()
         logger.warning(f"Auto-migration failed: {e}", exc_info=True)
-
-    try:
-        await start_producer()
-    except Exception as exc:
-        logger.debug(f"Kafka producer start skipped (Kafka offline or unavailable): {exc}")
-
-    scheduler.add_job(
-        relay_once,
-        "interval",
-        seconds=settings.outbox_poll_interval_seconds,
-        id="outbox-relay",
-        max_instances=1,
-        coalesce=True,
-    )
-
-    scheduler.start()
-
-    try:
-        _consumer_task = asyncio.create_task(start_notification_consumer())
-    except Exception as exc:
-        logger.debug(f"Notification consumer task failed to start: {exc}")
 
     logger.info("business-service started", extra={"extra_fields": {"environment": settings.environment}})
 
     yield
 
-    scheduler.shutdown(wait=False)
-    if _consumer_task is not None:
-        _consumer_task.cancel()
-    try:
-        await stop_producer()
-    except Exception:
-        pass
+    await engine.dispose()
     logger.info("business-service stopped")
 
 
@@ -1755,6 +1738,7 @@ def create_app() -> FastAPI:
     app.include_router(dispatch_router)
     app.include_router(search_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(admin_router)
     app.include_router(assistant_router)
     app.include_router(store_location_router)
     app.include_router(zone_location_router)

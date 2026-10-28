@@ -9,6 +9,7 @@ transaction boundaries in the application layer, matching where
 """
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -43,20 +44,30 @@ class UnitOfWork:
 
     def __init__(self) -> None:
         self.session: AsyncSession | None = None
+        self._context_depth = 0
 
     async def __aenter__(self) -> "UnitOfWork":
-        self.session = AsyncSessionFactory()
+        # FastAPI's get_uow dependency enters the UoW before calling a route.
+        # Some legacy routes also use ``async with uow`` internally. Reuse the
+        # active session instead of replacing it and leaking its connection.
+        if self.session is None:
+            self.session = AsyncSessionFactory()
+        self._context_depth += 1
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         assert self.session is not None
+        self._context_depth = max(0, self._context_depth - 1)
+        if self._context_depth > 0:
+            return
         try:
             if exc_type is None:
                 await self.session.commit()
             else:
                 await self.session.rollback()
         finally:
-            await self.session.close()
+            await asyncio.shield(self.session.close())
+            self.session = None
 
     async def commit(self) -> None:
         assert self.session is not None
@@ -75,17 +86,22 @@ async def get_uow() -> AsyncIterator[UnitOfWork]:
 
 async def get_db() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency: yields an AsyncSession scoped to one request."""
-    async with AsyncSessionFactory() as session:
+    session = AsyncSessionFactory()
+    try:
         yield session
+    finally:
+        await asyncio.shield(session.close())
 
 
 @asynccontextmanager
 async def session_scope() -> AsyncIterator[AsyncSession]:
     """Plain session context manager for non-request contexts (workers, scripts)."""
-    async with AsyncSessionFactory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+    session = AsyncSessionFactory()
+    try:
+        yield session
+        await session.commit()
+    except BaseException:
+        await asyncio.shield(session.rollback())
+        raise
+    finally:
+        await asyncio.shield(session.close())

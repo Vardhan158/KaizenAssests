@@ -161,7 +161,7 @@ function SupplierDashboard() {
     setAsnsLoading(true);
     setAsnsError("");
     try {
-      const data = await api.getAsns();
+      const data = await api.getAsns(currentUser?.supplierId);
       setAsns((data || []).map((asn: any) => ({
         ...asn,
         expected_arrival_date: asn.expected_arrival_date || asn.delivery_date || asn.expected_arrival_at?.split("T")[0] || "",

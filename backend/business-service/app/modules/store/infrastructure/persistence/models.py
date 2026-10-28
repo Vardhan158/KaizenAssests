@@ -55,11 +55,6 @@ class StoreModel(Base):
         order_by="StoreBinModel.bin_code.asc()",
     )
 
-    managers: Mapped[List[StoreManagerUserModel]] = relationship(
-        "StoreManagerUserModel",
-        back_populates="store",
-        cascade="all, delete-orphan",
-    )
 
 
 class StoreZoneModel(Base):
@@ -154,19 +149,16 @@ class StoreManagerUserModel(Base):
     __tablename__ = "store_manager_user"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    store_id: Mapped[uuid.UUID] = mapped_column(
-        GUID,
-        ForeignKey("store.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
     employee_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(128), nullable=False)
     email: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     role: Mapped[str] = mapped_column(String(64), nullable=False, default="Store Manager")
+    shift_name: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    assembly_unit_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     applications: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=lambda: ["WMS"])
+    page_permissions: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     auth_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
@@ -182,7 +174,15 @@ class StoreManagerUserModel(Base):
         nullable=False,
     )
 
-    store: Mapped[StoreModel] = relationship("StoreModel", back_populates="managers")
+    # Compatibility only while legacy integrations are migrated. Accounts are
+    # warehouse-wide and are never scoped to a Store.
+    @property
+    def store_id(self):
+        return None
+
+    @property
+    def store(self):
+        return None
 
 
 class StoreRackModel(Base):

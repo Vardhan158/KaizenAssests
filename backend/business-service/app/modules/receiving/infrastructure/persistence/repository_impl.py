@@ -2055,11 +2055,18 @@ class SqlAlchemyGrnRepository(GrnRepository):
         self,
         status: str | None = None,
         search: str | None = None,
+        actor_identities: list[str] | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[GrnModel], int]:
         stmt = select(GrnModel).options(selectinload(GrnModel.lines))
         conditions = []
+        if actor_identities:
+            normalized_identities = [value.strip().lower() for value in actor_identities if value.strip()]
+            conditions.append(or_(
+                func.lower(GrnModel.received_by).in_(normalized_identities),
+                func.lower(GrnModel.posted_by).in_(normalized_identities),
+            ))
         if status and status.strip() and status.strip().upper() != "ALL":
             s = status.strip().upper().replace(" ", "_").replace("-", "_")
             if s in ["COMPLETED", "POSTED", "APPROVED", "ACCEPTED"]:

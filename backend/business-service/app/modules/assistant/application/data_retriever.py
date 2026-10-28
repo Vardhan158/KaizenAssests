@@ -975,35 +975,36 @@ class AssistantDataRetriever:
             return None
 
         # 1. Purchase orders
-        if re.search(r"\b(pos|po|purchase[\s_-]?orders?|po[\s_-]?numbers?|rfqs?|vendor[\s_-]?orders?)\b", q) or extract_identifier(query, r"\bPO-[A-Z0-9-]+\b"):
+        if re.search(r"\b(pos|po|purchase[\s_-]?orders?|po[\s_-]?numbers?|rfqs?|procurement|sourcing|vendor[\s_-]?orders?|supplier[\s_-]?orders?)\b", q) or extract_identifier(query, r"\bPO-[A-Z0-9-]+\b"):
             return "purchase_orders"
 
         # 2. Putaway
-        if re.search(r"\b(putaways?|put[\s_-]?aways?|bin[\s_-]?placements?)\b", q) or extract_identifier(query, r"\b(TASK|PUT|PT)-[A-Z0-9-]+\b"):
+        if re.search(r"\b(putaways?|put[\s_-]?aways?|bin[\s_-]?placements?|stow(?:ing)?|storage[\s_-]?assignments?|pending[\s_-]?placements?)\b", q) or extract_identifier(query, r"\b(TASK|PUT|PT)-[A-Z0-9-]+\b"):
             return "putaway"
 
         # 3. Gate entries / Inbound
-        if re.search(r"\b(gate|gates|gate[\s_-]?entries|gate[\s_-]?entry|gate[\s_-]?passes|gate[\s_-]?pass|inbound|arriv(al|als|ed|ing)|truck|asns?|dock[\s_-]?arrivals?)\b", q) or extract_identifier(query, r"\b(GE|GATE|ASN)-[A-Z0-9-]+\b"):
+        if re.search(r"\b(gate|gates|security|gate[\s_-]?entries|gate[\s_-]?entry|gate[\s_-]?passes|gate[\s_-]?pass|vehicle[\s_-]?(?:entry|exit|queue|check[\s_-]?in|check[\s_-]?out)|inbound|arriv(al|als|ed|ing)|truck|asns?|advance[\s_-]?shipping[\s_-]?notices?|dock[\s_-]?arrivals?)\b", q) or extract_identifier(query, r"\b(GE|GATE|ASN)-[A-Z0-9-]+\b"):
             return "gate_entries"
 
-        # 4. Assembly
-        if re.search(r"\b(assembly|assemblies|assembly[\s_-]?orders?|work[\s_-]?orders?|boms?|production[\s_-]?orders?|production[\s_-]?lines?|assembly[\s_-]?builds?)\b", q) or extract_identifier(query, r"\b(AO|ASSY|WO)-[A-Z0-9-]+\b"):
+        # 4. Dock master and operational availability. Keep loading bays ahead
+        # of dispatch loading so the physical location intent wins.
+        if re.search(r"\b(docks?|loading[\s_-]?bays?|unloading[\s_-]?bays?)\b", q):
+            return "docks"
+
+        # 5. Assembly
+        if re.search(r"\b(assembly|assemblies|manufacturing|shop[\s_-]?floor|wip|assembly[\s_-]?orders?|work[\s_-]?orders?|boms?|production|production[\s_-]?orders?|production[\s_-]?lines?|assembly[\s_-]?builds?)\b", q) or extract_identifier(query, r"\b(AO|ASSY|WO)-[A-Z0-9-]+\b"):
             return "assembly"
 
-        # 5. Dispatch
-        if re.search(r"\b(dispatches|dispatch|customer[\s_-]?orders?|outbound|shipments?|shipment[\s_-]?status|delivery[\s_-]?routes?|consignment)\b", q) or extract_identifier(query, r"\b(DISP|DO)-[A-Z0-9-]+\b"):
+        # 6. Dispatch
+        if re.search(r"\b(dispatches|dispatch|customer[\s_-]?orders?|outbound|shipments?|shipment[\s_-]?status|delivery|delivery[\s_-]?routes?|consignment|transport|logistics|picking[\s_-]?packing|loading|gate[\s_-]?out)\b", q) or extract_identifier(query, r"\b(DISP|DSP|DO)-[A-Z0-9-]+\b"):
             return "dispatch"
 
-        # 6. Inventory & Stock
-        if re.search(r"\b(stocks?|inventory|on[\s_-]?hands?|available|availability|reorders?|material[\s_-]?stocks?|bin[\s_-]?balances?)\b", q) or extract_identifier(query, r"\b(MAT|RM|PKG|FG)-[A-Z0-9-]+\b"):
+        # 7. Inventory & Stock
+        if re.search(r"\b(stocks?|inventory|stock[\s_-]?ledger|stock[\s_-]?balance|on[\s_-]?hands?|available|availability|reorders?|shortages?|skus?|items?|batches?|lots?|material[\s_-]?stocks?|bin[\s_-]?balances?)\b", q) or extract_identifier(query, r"\b(MAT|RM|PKG|FG|ITEM|SKU)-[A-Z0-9-]+\b"):
             return "inventory"
 
-        # 7. Warehouse layout / zone and bin master
-        if re.search(r"\b(zones?|bins?|storage[\s_-]?locations?|location[\s_-]?hierarchy|warehouse[\s_-]?layout)\b", q):
+        # 8. Warehouse layout / zone and bin master
+        if re.search(r"\b(zones?|bins?|racks?|shelves?|aisles?|storage[\s_-]?locations?|location[\s_-]?hierarchy|warehouse[\s_-]?layout)\b", q):
             return "locations"
-
-        # 8. Dock master and operational availability
-        if re.search(r"\bdocks?\b", q):
-            return "docks"
 
         return None

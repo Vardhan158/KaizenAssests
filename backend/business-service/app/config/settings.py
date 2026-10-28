@@ -46,19 +46,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="RS256")
     jwks_cache_ttl_seconds: int = Field(default=300)
 
-    # --- Kafka ---------------------------------------------------------------
-    kafka_bootstrap_servers: str = Field(default="localhost:9092")
-    kafka_client_id: str = Field(default="business-service")
-    kafka_topic_prefix: str = Field(default="ams")
-    kafka_consumer_group: str = Field(default="business-service-notification")
-    kafka_security_protocol: str = Field(default="PLAINTEXT")
 
     # --- Redis (caching, rate limiting, idempotency keys) ---------------------
     redis_url: str = Field(default="redis://localhost:6379/0")
-
-    # --- Outbox relay ----------------------------------------------------------
-    outbox_poll_interval_seconds: int = Field(default=2)
-    outbox_batch_size: int = Field(default=100)
 
     # --- Gemini document extraction ------------------------------------------
     gemini_api_key: str = Field(default="")
@@ -72,21 +62,9 @@ class Settings(BaseSettings):
     otel_enabled: bool = Field(default=False)
     prometheus_enabled: bool = Field(default=True)
 
-    # --- Role Credentials ---------------------------------------------------------
-    warehouse_username: str = Field(default="warehouse")
-    warehouse_password: str = Field(default="")
-    manager_username: str = Field(default="manager")
-    manager_password: str = Field(default="", description="Manager login secret.")
-    assembly_manager_username: str = Field(default="assembly_manager")
-    assembly_manager_password: str = Field(default="")
-    gate_security_username: str = Field(default="gate_entry")
-    gate_security_password: str = Field(default="")
-    gate_entry_username: str = Field(default="gate_entry")
-    gate_entry_password: str = Field(default="")
-    supplier_username: str = Field(default="supplier")
-    supplier_password: str = Field(default="")
-    grn_username: str = Field(default="grn")
-    grn_password: str = Field(default="")
+    # --- Bootstrap administrator --------------------------------------------------
+    admin_username: str = Field(default="admin")
+    admin_password: str = Field(default="")
     magic_link_secret: str = Field(default="")
 
     # --- Email SMTP Settings ----------------------------------------------------

@@ -236,10 +236,14 @@ def _asn_response(asn: AsnModel) -> dict:
 @preview_router.get("/expected-deliveries")
 async def list_expected_deliveries(
     supplier_id: str | None = Query(default=None),
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
     query = select(AsnModel).options(selectinload(AsnModel.lines), selectinload(AsnModel.documents), selectinload(AsnModel.supplier)).order_by(AsnModel.created_at.desc())
-    if supplier_id:
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        authenticated_supplier_id = await _authenticated_supplier_id(user, uow)
+        query = query.where(AsnModel.supplier_id == authenticated_supplier_id)
+    elif supplier_id:
         try:
             query = query.where(AsnModel.supplier_id == uuid.UUID(supplier_id))
         except ValueError:
@@ -3291,53 +3295,6 @@ async def complete_receiving(
                 tasks_created += 1
                 existing_task_items.add((grn.id, grn_line.item_code.upper()))
             unit.updated_at = completed_at
-
-        # Phase 6: Automatic Quarantine record creation for damaged quantity
-        if (grn_line.damaged_quantity or 0) > 0:
-            rec_line = receiving_by_code.get(grn_line.item_code)
-            rec_line_id = rec_line.id if rec_line else None
-            # Check idempotency to prevent duplicates on retry
-            q_exists_stmt = select(QuarantineRecordModel.id).where(
-                or_(
-                    QuarantineRecordModel.grn_line_id == grn_line.id,
-                    (QuarantineRecordModel.receiving_line_id == rec_line_id) if rec_line_id else False,
-                )
-            )
-            q_exists = await uow.session.execute(q_exists_stmt)
-            if q_exists.first() is None:
-                q_num = f"QRN-{completed_at.year}-{uuid.uuid4().hex[:8].upper()}"
-                q_record = QuarantineRecordModel(
-                    id=uuid.uuid4(),
-                    quarantine_number=q_num,
-                    grn_id=grn.id,
-                    grn_number=grn_number,
-                    grn_line_id=grn_line.id,
-                    receiving_line_id=rec_line_id,
-                    dock_assignment_id=assignment.id,
-                    item_code=grn_line.item_code,
-                    material_name=grn_line.material_name or grn_line.item_code,
-                    damaged_quantity=grn_line.damaged_quantity,
-                    uom=grn_line.uom or "PCS",
-                    supplier_name=grn.supplier_name,
-                    po_number=grn.po_number,
-                    asn_number=grn.asn_number,
-                    warehouse_id=grn.warehouse_id or "Main Warehouse",
-                    reason="Flagged as damaged during receiving inspection",
-                    receiving_notes=rec_line.condition_notes if rec_line and hasattr(rec_line, "condition_notes") else None,
-                    status="PENDING_REVIEW",
-                    created_by=user.username,
-                    created_at=completed_at,
-                    updated_at=completed_at,
-                )
-                uow.session.add(q_record)
-                uow.session.add(
-                    NotificationModel(
-                        user_role="WAREHOUSE",
-                        title="Material Quarantined",
-                        message=f"{grn_line.damaged_quantity} {grn_line.uom or 'PCS'} of {grn_line.item_code} from {grn_number} routed to Quarantine ({q_num}).",
-                        link="/warehouse/quarantine",
-                    )
-                )
 
     assignment.prepared_grn_id = grn_id
     damage_reports = (await uow.session.execute(

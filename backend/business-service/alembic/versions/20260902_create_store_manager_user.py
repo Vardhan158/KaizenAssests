@@ -49,7 +49,6 @@ def upgrade() -> None:
         store_map = {row[1]: row[0] for row in store_res.fetchall()}
 
         initial_managers = [
-            ("STR-001", "EMP-STORE-001", "store_manager_elec", "John Doe (Electrical)", "john.electrical@wms.local"),
             ("STR-002", "EMP-STORE-002", "store_manager_mech", "Sarah Jenkins (Mechanical)", "sarah.mechanical@wms.local"),
             ("STR-003", "EMP-STORE-003", "store_manager_inst", "Robert Chen (Instrumentation)", "robert.chen@wms.local"),
             ("STR-004", "EMP-STORE-004", "store_manager_spare", "Emily Davis (Spare Parts)", "emily.davis@wms.local"),

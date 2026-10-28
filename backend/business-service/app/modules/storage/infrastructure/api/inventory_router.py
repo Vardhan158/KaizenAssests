@@ -1434,67 +1434,6 @@ async def get_stock_ledger(
             "notes": f"Requisition: {iss.requisition_number or 'N/A'}",
         })
 
-    # 4. Quarantine Records (QUARANTINE)
-    if not target_store_id:
-        q_query = select(QuarantineRecordModel)
-        if material_code:
-            q_query = q_query.where(
-                func.lower(QuarantineRecordModel.item_code) == material_code.lower()
-            )
-        q_res = await uow.session.execute(q_query)
-        for q in q_res.scalars().all():
-            ledger_entries.append({
-                "id": str(q.id),
-                "timestamp": q.created_at.isoformat() if q.created_at else datetime.now(timezone.utc).isoformat(),
-                "transaction_type": "QUARANTINE",
-                "material_code": q.item_code,
-                "material_name": q.material_name,
-                "quantity": float(q.damaged_quantity),
-                "uom": q.uom,
-                "store_id": None,
-                "store_code": "QUARANTINE",
-                "store_name": "Quarantine Area",
-                "zone_id": None,
-                "zone_code": "QC-HOLD",
-                "zone_name": "QC Hold Area",
-                "reference_number": q.quarantine_number,
-                "source": "RECEIVING_INSPECTION",
-                "destination": "QUARANTINE",
-                "stock_before": 0.0,
-                "stock_after": 0.0,
-                "performed_by": q.created_by,
-                "notes": f"Reason: {q.reason or 'Damaged on arrival'} Â· Status: {q.status}",
-            })
-
-    # 5. Quarantine Audits / Dispositions (SCRAP / ACCEPTED_WITH_DEVIATION)
-    if not target_store_id:
-        qa_query = select(QuarantineAuditModel)
-        qa_res = await uow.session.execute(qa_query)
-        for qa in qa_res.scalars().all():
-            tx_type = "SCRAP" if (qa.disposition or "").upper() in ["SCRAP", "SCRAPPED"] else "ACCEPTED_WITH_DEVIATION"
-            ledger_entries.append({
-                "id": str(qa.id),
-                "timestamp": qa.performed_at.isoformat() if qa.performed_at else datetime.now(timezone.utc).isoformat(),
-                "transaction_type": tx_type,
-                "material_code": "QUARANTINE-ITEM",
-                "material_name": f"Disposition: {qa.disposition}",
-                "quantity": 0.0,
-                "uom": "PCS",
-                "store_id": None,
-                "store_code": "QUARANTINE",
-                "store_name": "Quarantine Area",
-                "zone_id": None,
-                "zone_code": "QC-DISPOSAL",
-                "zone_name": "QC Disposal",
-                "reference_number": str(qa.quarantine_id),
-                "source": "QUARANTINE",
-                "destination": "SCRAP_DISPOSAL" if tx_type == "SCRAP" else "STORE_AVAILABLE",
-                "stock_before": None,
-                "stock_after": None,
-                "performed_by": qa.performed_by,
-                "notes": qa.remarks or f"Disposition applied: {qa.disposition}",
-            })
-
     # Filter by transaction type if specified
     if transaction_type and transaction_type != "ALL":
         ledger_entries = [e for e in ledger_entries if e["transaction_type"].upper() == transaction_type.upper()]
@@ -1570,7 +1509,6 @@ async def get_inventory_stats(
         return {
             "total_skus": total_skus,
             "total_available_units": total_available,
-            "total_quarantined_units": 0.0,
             "total_units": total_available,
             "low_stock_skus": len(low_codes),
             "out_of_stock_skus": len(out_codes),
@@ -1580,12 +1518,6 @@ async def get_inventory_stats(
     stock_res = await uow.session.execute(select(MaterialStockModel))
     all_stocks = stock_res.scalars().all()
 
-    quar_res = await uow.session.execute(
-        select(QuarantineRecordModel).where(
-            QuarantineRecordModel.status.in_(["PENDING_REVIEW", "QUARANTINED"])
-        )
-    )
-    total_quar = sum(float(q.damaged_quantity) for q in quar_res.scalars().all())
     total_avail = sum(float(s.available) for s in all_stocks)
 
     low_stock_count = sum(1 for s in all_stocks if float(s.on_hand) < float(s.reorder_point) and float(s.on_hand) > 0)
@@ -1594,8 +1526,7 @@ async def get_inventory_stats(
     return {
         "total_skus": len(all_stocks),
         "total_available_units": total_avail,
-        "total_quarantined_units": total_quar,
-        "total_units": total_avail + total_quar,
+        "total_units": total_avail,
         "low_stock_skus": low_stock_count,
         "out_of_stock_skus": out_of_stock_count,
     }
@@ -1644,14 +1575,6 @@ async def get_warehouse_dashboard_metrics(
     )
     all_mrs = mr_res.scalars().all()
     pending_mr_count = sum(1 for mr in all_mrs if (mr.status or "").upper() in ("SUBMITTED", "PENDING"))
-
-    # 5. Quarantine Records
-    quar_res = await uow.session.execute(
-        select(QuarantineRecordModel).order_by(QuarantineRecordModel.created_at.desc())
-    )
-    all_quar = quar_res.scalars().all()
-    active_quar = [q for q in all_quar if (q.status or "").upper() in ("PENDING_REVIEW", "QUARANTINED")]
-    total_quar_qty = sum(float(q.damaged_quantity) for q in active_quar)
 
     # 6. Material Stock
     stock_res = await uow.session.execute(select(MaterialStockModel))
@@ -1735,17 +1658,6 @@ async def get_warehouse_dashboard_metrics(
             "tone": "purple" if (p.status or "").upper() == "ASSIGNED_TO_STORE" else "success",
         })
 
-    # Recent Quarantine
-    for q in active_quar[:5]:
-        activity.append({
-            "id": f"qr-{q.id}",
-            "timestamp": q.created_at.isoformat(),
-            "type": "QUARANTINE",
-            "title": f"Quarantine Segregation Â· {q.quarantine_number}",
-            "detail": f"{q.material_name} ({q.item_code}) Â· Damaged Qty: {float(q.damaged_quantity)} {q.uom} Â· GRN: {q.grn_number}",
-            "tone": "warning",
-        })
-
     # Sort activity descending by timestamp
     activity.sort(key=lambda x: x["timestamp"], reverse=True)
     activity = activity[:8]
@@ -1787,23 +1699,6 @@ async def get_warehouse_dashboard_metrics(
             ],
             "pending_requisition_count": pending_req_count,
             "pending_material_request_count": pending_mr_count,
-            "active_quarantine_count": len(active_quar),
-            "active_quarantine_qty": total_quar_qty,
-            "quarantine_records": [
-                {
-                    "id": str(q.id),
-                    "quarantine_number": q.quarantine_number,
-                    "item_code": q.item_code,
-                    "material_name": q.material_name,
-                    "damaged_quantity": float(q.damaged_quantity),
-                    "uom": q.uom,
-                    "grn_number": q.grn_number,
-                    "reason": q.reason,
-                    "status": q.status,
-                    "created_at": q.created_at.isoformat(),
-                }
-                for q in active_quar[:5]
-            ],
             "low_stock_count": len(low_store_items),
             "low_stock_items": [
                 {
@@ -1827,7 +1722,6 @@ async def get_warehouse_dashboard_metrics(
             "total_on_hand": total_on_hand,
             "total_available": total_available,
             "total_allocated": total_allocated,
-            "total_quarantined": total_quar_qty,
             "low_stock_count": len(low_store_items),
             "out_of_stock_count": len(out_store_items),
         },
@@ -2487,7 +2381,7 @@ async def create_material_return(
     Dispositions:
     - GOOD -> RETURN_TO_INVENTORY (Adds back to store stock)
     - DAMAGED -> BLOCKED (Transfers to blocked stock)
-    - UNKNOWN -> QC_HOLD (Creates Quarantine Record)
+    - UNKNOWN/QC_HOLD -> BLOCKED
     """
     if req.returned_quantity <= Decimal("0.0"):
         raise HTTPException(
@@ -2506,7 +2400,7 @@ async def create_material_return(
     if cond_upper in ("DAMAGED", "BLOCKED"):
         disposition = "BLOCKED"
     elif cond_upper in ("UNKNOWN", "QC_HOLD", "QUARANTINED"):
-        disposition = "QC_HOLD"
+        disposition = "BLOCKED"
 
     m_code = req.material_code.strip()
     ret_qty = req.returned_quantity
@@ -2565,25 +2459,6 @@ async def create_material_return(
                 performed_at=now_utc,
             )
         )
-    elif disposition == "QC_HOLD":
-        count_q = await uow.session.execute(select(func.count(QuarantineRecordModel.id)))
-        q_num = f"QR-RET-{ (count_q.scalar() or 0) + 1:04d}"
-        uow.session.add(
-            QuarantineRecordModel(
-                quarantine_number=q_num,
-                grn_number=req.issue_number or return_number,
-                item_code=m_code,
-                material_name=req.material_name,
-                received_quantity=req.issued_quantity,
-                damaged_quantity=ret_qty,
-                uom=req.uom,
-                status="PENDING_REVIEW",
-                reason=f"Returned from {req.assembly_line} under UNKNOWN condition",
-                created_by=user.username,
-                created_at=now_utc,
-            )
-        )
-
     ret_rec = MaterialReturnModel(
         return_number=return_number,
         issue_number=req.issue_number,
@@ -3237,7 +3112,7 @@ async def get_mobile_tasks_summary(
 
     return {
         "operator": user.username,
-        "role": user.role,
+        "role": user.roles[0] if user.roles else None,
         "my_tasks": {
             "PUTAWAY": putaway_cnt.scalar() or 0,
             "PICKING": picking_cnt.scalar() or 0,

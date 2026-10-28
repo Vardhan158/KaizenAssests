@@ -21,12 +21,15 @@ import { api, type AssistantChatMessage } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 
 const suggestedQuestions = [
-  "How many zones and bins are configured?",
-  "How many docks are in the warehouse?",
+  "Show today’s inbound arrivals",
   "Show available inventory",
-  "What does available stock mean?",
-  "How does FIFO picking work?",
   "Show pending putaway tasks",
+  "Explain the GRN workflow",
+  "How does FIFO picking work?",
+  "Explain damaged material claims",
+  "Show active assembly orders",
+  "Show dispatch status",
+  "How many zones, bins, and docks are configured?",
 ];
 
 const roleModules: Record<string, { label: string; links: { label: string; to: string }[] }> = {
@@ -61,15 +64,74 @@ const roleModules: Record<string, { label: string; links: { label: string; to: s
   ADMIN: {
     label: "Administration",
     links: [
-      { label: "Material Master", to: "/master-data?module=materials" },
-      { label: "Settings", to: "/settings" },
+      { label: "Admin dashboard", to: "/admin" },
+      { label: "User management", to: "/admin/users" },
+      { label: "Suppliers", to: "/admin/suppliers" },
+      { label: "Inventory", to: "/inventory" },
+    ],
+  },
+  SUPPLIER: {
+    label: "Supplier",
+    links: [
+      { label: "Supplier dashboard", to: "/supplier-dashboard" },
+      { label: "ASN management", to: "/supplier/asns" },
+      { label: "FG dispatch requests", to: "/supplier/dispatch" },
+      { label: "Damage claims", to: "/damage-claims" },
+    ],
+  },
+  GATE_SECURITY: {
+    label: "Gate Security",
+    links: [
+      { label: "Gate dashboard", to: "/gate-dashboard" },
+      { label: "Vehicle entry & exit", to: "/vehicle-queue" },
+      { label: "FG pickup entry & exit", to: "/gate/finished-goods-pickup" },
+    ],
+  },
+  GRN: {
+    label: "GRN / Receiving",
+    links: [
+      { label: "GRN dashboard", to: "/grn?tab=dashboard" },
+      { label: "Create GRN", to: "/grn?tab=wizard" },
+      { label: "GRN history", to: "/grn?tab=records" },
+      { label: "Dock management", to: "/dock-management" },
+    ],
+  },
+  ASSEMBLY_MANAGER: {
+    label: "Assembly",
+    links: [
+      { label: "Assembly dashboard", to: "/assembly-dashboard" },
+      { label: "Material requests", to: "/assembly/material-requests" },
+      { label: "Production", to: "/assembly/production" },
+      { label: "Quality check", to: "/assembly/quality" },
+    ],
+  },
+  DISPATCH_MANAGER: {
+    label: "Dispatch",
+    links: [
+      { label: "Dispatch orders", to: "/dispatch-orders" },
+      { label: "Picking & packing", to: "/dispatch-picking-packing" },
+      { label: "Loading", to: "/dispatch-loading" },
+      { label: "Gate out", to: "/dispatch-gate-out" },
     ],
   },
 };
 
 function getModule() {
   const roles = getUserInfo()?.roles || [];
-  return roles.map((role) => roleModules[role]).find(Boolean) || roleModules.WAREHOUSE;
+  const aliases: Record<string, string> = {
+    SUPERUSER: "ADMIN",
+    SUPER_ADMIN: "ADMIN",
+    GATE_OPERATOR: "GATE_SECURITY",
+    GRN_MANAGER: "GRN",
+    RECEIVING: "GRN",
+    ASSEMBLY: "ASSEMBLY_MANAGER",
+    DISPATCH: "DISPATCH_MANAGER",
+    STORE_KEEPER: "STORE_MANAGER",
+  };
+  return (
+    roles.map((role) => roleModules[role] || roleModules[aliases[role]]).find(Boolean) ||
+    roleModules.WAREHOUSE
+  );
 }
 
 function getShortcutIcon(label: string) {
@@ -85,10 +147,12 @@ function getShortcutIcon(label: string) {
 
 function getShortcutTone(label: string) {
   if (/dashboard/i.test(label)) return "bg-blue-100 text-blue-700 group-hover:bg-blue-200";
-  if (/inventory|material/i.test(label)) return "bg-emerald-100 text-emerald-700 group-hover:bg-emerald-200";
+  if (/inventory|material/i.test(label))
+    return "bg-emerald-100 text-emerald-700 group-hover:bg-emerald-200";
   if (/putaway/i.test(label)) return "bg-amber-100 text-amber-700 group-hover:bg-amber-200";
   if (/dock|inbound/i.test(label)) return "bg-orange-100 text-orange-700 group-hover:bg-orange-200";
-  if (/zone|bin|store/i.test(label)) return "bg-indigo-100 text-indigo-700 group-hover:bg-indigo-200";
+  if (/zone|bin|store/i.test(label))
+    return "bg-indigo-100 text-indigo-700 group-hover:bg-indigo-200";
   if (/setting/i.test(label)) return "bg-slate-200 text-slate-700 group-hover:bg-slate-300";
   return "bg-violet-100 text-violet-700 group-hover:bg-violet-200";
 }
@@ -174,7 +238,10 @@ export function SecureAssistant() {
         <Bot className="size-5" />
       </button>
       {open && (
-        <div className="fixed inset-0 z-50 bg-slate-950/25 backdrop-blur-[2px]" onClick={() => setOpen(false)}>
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/25 backdrop-blur-[2px]"
+          onClick={() => setOpen(false)}
+        >
           <section
             role="dialog"
             aria-label="KaizenAssests Assistant"
@@ -183,10 +250,15 @@ export function SecureAssistant() {
           >
             <header className="flex items-center justify-between border-b border-white/15 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 px-4 py-3.5 text-white">
               <div className="flex items-center gap-3">
-                <span className="grid size-10 place-items-center rounded-xl border border-white/20 bg-white/15 shadow-inner"><Bot className="size-5" /></span>
+                <span className="grid size-10 place-items-center rounded-xl border border-white/20 bg-white/15 shadow-inner">
+                  <Bot className="size-5" />
+                </span>
                 <div>
                   <p className="text-sm font-bold tracking-tight">KaizenAssests Assistant</p>
-                  <p className="flex items-center gap-1.5 text-[11px] text-blue-100"><span className="size-1.5 rounded-full bg-emerald-300" />{module.label} workspace · Read-only help</p>
+                  <p className="flex items-center gap-1.5 text-[11px] text-blue-100">
+                    <span className="size-1.5 rounded-full bg-emerald-300" />
+                    {module.label} workspace · Read-only help
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-1">
@@ -216,18 +288,33 @@ export function SecureAssistant() {
               {messages.length === 0 ? (
                 <div className="space-y-5">
                   <div className="relative overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 shadow-sm">
-                    <div aria-hidden="true" className="absolute -right-8 -top-8 size-28 rounded-full bg-blue-100/60" />
+                    <div
+                      aria-hidden="true"
+                      className="absolute -right-8 -top-8 size-28 rounded-full bg-blue-100/60"
+                    />
                     <div className="relative flex items-start gap-3">
-                      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-900/20"><Bot className="size-4" /></span>
+                      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-900/20">
+                        <Bot className="size-4" />
+                      </span>
                       <div>
-                        <p className="font-semibold tracking-tight text-slate-900">How can I help?</p>
-                        <p className="mt-1 text-xs leading-relaxed text-slate-600">Ask about stock, zones and bins, receiving, putaway, assembly, or dispatch. I can look up records you’re allowed to see and explain common workflows.</p>
+                        <p className="font-semibold tracking-tight text-slate-900">
+                          How can I help?
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                          Ask about stock, zones and bins, receiving, putaway, assembly, or
+                          dispatch. I can look up records you’re allowed to see and explain common
+                          workflows.
+                        </p>
                       </div>
                     </div>
-                    <div className="relative mt-3 flex items-center gap-1.5 text-[11px] font-medium text-blue-800"><ShieldCheck className="size-3.5" /> Permission-aware · Read-only</div>
+                    <div className="relative mt-3 flex items-center gap-1.5 text-[11px] font-medium text-blue-800">
+                      <ShieldCheck className="size-3.5" /> Permission-aware · Read-only
+                    </div>
                   </div>
                   <div>
-                    <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Try asking</p>
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                      Try asking
+                    </p>
                     <div className="flex flex-wrap gap-2">
                       {suggestedQuestions.map((suggestion) => (
                         <button
@@ -244,7 +331,9 @@ export function SecureAssistant() {
                   </div>
                   <div>
                     <div className="mb-2.5 flex items-center justify-between">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{module.label} shortcuts</p>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                        {module.label} shortcuts
+                      </p>
                       <span className="text-[11px] text-slate-400">Quick access</span>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -259,8 +348,14 @@ export function SecureAssistant() {
                             className="group flex min-h-[72px] items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2.5 text-left shadow-sm transition duration-150 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
                           >
                             <span className="flex min-w-0 items-center gap-2.5">
-                              <span className={`grid size-9 shrink-0 place-items-center rounded-lg transition-colors ${tone}`}><Icon className="size-4" /></span>
-                              <span className="text-xs font-semibold leading-snug text-slate-700">{link.label}</span>
+                              <span
+                                className={`grid size-9 shrink-0 place-items-center rounded-lg transition-colors ${tone}`}
+                              >
+                                <Icon className="size-4" />
+                              </span>
+                              <span className="text-xs font-semibold leading-snug text-slate-700">
+                                {link.label}
+                              </span>
                             </span>
                             <ChevronRight className="size-3.5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-blue-600" />
                           </button>
@@ -349,4 +444,3 @@ export function SecureAssistant() {
     </>
   );
 }
-

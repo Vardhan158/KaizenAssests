@@ -203,21 +203,6 @@ async def _build_requisition_responses_with_availability(
         for m_code, total_bal in loc_res.all():
             loc_bal_map[m_code] = Decimal(str(total_bal or 0))
 
-        # Fetch Quarantined items
-        quar_res = await session.execute(
-            select(
-                QuarantineRecordModel.item_code,
-                func.sum(QuarantineRecordModel.damaged_quantity),
-            )
-            .where(
-                QuarantineRecordModel.item_code.in_(material_codes),
-                QuarantineRecordModel.status.in_(["PENDING_REVIEW", "QUARANTINED"]),
-            )
-            .group_by(QuarantineRecordModel.item_code)
-        )
-        for m_code, total_quar in quar_res.all():
-            quar_map[m_code] = Decimal(str(total_quar or 0))
-
         # Fetch active reservations across all requisitions for these materials
         res_stmt = (
             select(
@@ -1234,14 +1219,7 @@ async def reserve_assembly_requisition_stock(
         stk_obj = stk_res.scalar_one_or_none()
         stk_avail = Decimal(str(stk_obj.available or 0)) if stk_obj else Decimal("0.0")
 
-        # Quarantined
-        quar_stmt = select(func.coalesce(func.sum(QuarantineRecordModel.damaged_quantity), Decimal("0.0"))).where(
-            QuarantineRecordModel.item_code == it.material_code,
-            func.lower(QuarantineRecordModel.warehouse_id) == req.warehouse_id.strip().lower(),
-            QuarantineRecordModel.status.in_(["PENDING_REVIEW", "QUARANTINED"]),
-        )
-        quar_res = await uow.session.execute(quar_stmt)
-        quar_qty = Decimal(str(quar_res.scalar() or 0))
+        quar_qty = Decimal("0.0")
 
         # Location balance
         loc_lock_stmt = select(InventoryLocationBalanceModel).where(
@@ -1510,11 +1488,7 @@ async def create_material_request_for_shortage(
             stk_obj = stk_res.scalar_one_or_none()
             stk_avail = Decimal(str(stk_obj.available or 0)) if stk_obj else Decimal("0.0")
 
-            quar_stmt = select(func.coalesce(func.sum(QuarantineRecordModel.damaged_quantity), Decimal("0.0"))).where(
-                QuarantineRecordModel.item_code == it.material_code,
-                QuarantineRecordModel.status.in_(["PENDING_REVIEW", "QUARANTINED"]),
-            )
-            quar_qty = Decimal(str((await uow.session.execute(quar_stmt)).scalar() or 0))
+            quar_qty = Decimal("0.0")
 
             loc_bal_stmt = select(func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0.0"))).where(
                 InventoryLocationBalanceModel.material_code == it.material_code
@@ -1833,12 +1807,7 @@ async def assign_store_to_assembly_requisition(
         )
         stock = stock_res.scalar_one_or_none()
 
-        quar_stmt = select(func.coalesce(func.sum(QuarantineRecordModel.damaged_quantity), Decimal("0.0"))).where(
-            QuarantineRecordModel.item_code == item.material_code,
-            QuarantineRecordModel.status.in_(["PENDING_REVIEW", "QUARANTINED"]),
-        )
-        quar_res = await uow.session.execute(quar_stmt)
-        quarantined_qty = quar_res.scalar() or Decimal("0.0")
+        quarantined_qty = Decimal("0.0")
 
         loc_bal_stmt = select(func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0.0"))).where(
             InventoryLocationBalanceModel.material_code == item.material_code

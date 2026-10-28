@@ -47,6 +47,7 @@ import { api } from "@/lib/api-client";
 import logoUrl from "@/assets/Logo.png";
 import { toast } from "sonner";
 import { getUserInfo, type UserInfo } from "@/lib/auth-utils";
+import { getPageAccess } from "@/lib/page-permissions";
 import { SecureAssistant } from "@/components/wms/secure-assistant";
 
 function getUserDisplayName(user: UserInfo | null): string {
@@ -92,10 +93,10 @@ function getUserRoleLabel(user: UserInfo | null): string {
     return "GRN / Operations Manager";
   }
   if (roles.includes("STORE_MANAGER")) {
-    return "Store Manager";
+    return "Warehouse Manager";
   }
   if (roles.includes("STORE_KEEPER") || roles.includes("STORE_OPERATOR")) {
-    return "Store Keeper";
+    return "Warehouse Operator";
   }
   if (roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_MANAGER")) {
     return "Assembly Manager";
@@ -116,7 +117,8 @@ function getSearchPlaceholder(path: string, searchStr: string): string {
   const route = `${path}${searchStr}`.toLowerCase();
   if (route.startsWith("/supplier/asns")) return "Search ASN, vehicle, driver, or status...";
   if (route.startsWith("/supplier-materials")) return "Search material code or name...";
-  if (route.startsWith("/supplier/dispatch")) return "Search dispatch request, product, or status...";
+  if (route.startsWith("/supplier/dispatch"))
+    return "Search dispatch request, product, or status...";
   if (route.startsWith("/supplier-dashboard")) return "Search ASN, vehicle, or shipment status...";
   if (route.startsWith("/dock-management")) return "Search vehicle, gate pass, or vendor...";
   if (route.startsWith("/vehicle-queue")) return "Search gate pass, vehicle, supplier, or ASN...";
@@ -130,10 +132,21 @@ function getSearchPlaceholder(path: string, searchStr: string): string {
     if (route.includes("tab=requests")) return "Search request, material, or status...";
     return "Search material, SKU, batch, or location...";
   }
-  if (route.startsWith("/assembly/material-requests") || route.startsWith("/warehouse/assembly-requisitions")) return "Search request, production order, or material...";
-  if (route.startsWith("/assembly/production") || route.startsWith("/assembly/orders") || route.startsWith("/assembly-dashboard")) return "Search production order, product, or work order...";
-  if (route.startsWith("/assembly/quality")) return "Search inspection, product, or serial number...";
-  if (route.startsWith("/assembly/finished-goods")) return "Search product, order, or serial number...";
+  if (
+    route.startsWith("/assembly/material-requests") ||
+    route.startsWith("/warehouse/assembly-requisitions")
+  )
+    return "Search request, production order, or material...";
+  if (
+    route.startsWith("/assembly/production") ||
+    route.startsWith("/assembly/orders") ||
+    route.startsWith("/assembly-dashboard")
+  )
+    return "Search production order, product, or work order...";
+  if (route.startsWith("/assembly/quality"))
+    return "Search inspection, product, or serial number...";
+  if (route.startsWith("/assembly/finished-goods"))
+    return "Search product, order, or serial number...";
   if (route.startsWith("/dispatch")) return "Search dispatch order, customer, or vehicle...";
   if (route.startsWith("/notifications")) return "Search notifications by title or message...";
   return "Search ASN, vehicle, vendor, gate pass, or material...";
@@ -144,6 +157,8 @@ type NavItem = {
   to: string;
   icon: any;
   count?: number;
+  isUser?: boolean;
+  isUnit?: boolean;
 };
 
 const grnNav: NavItem[] = [
@@ -209,6 +224,17 @@ const supplierNav = [
 ];
 
 const managerNav: any[] = [];
+
+const adminNav: NavItem[] = [
+  { label: "Dashboard", to: "/admin", icon: LayoutDashboard },
+  { label: "User Management", to: "/admin/users", icon: Users },
+  { label: "Suppliers", to: "/admin/suppliers", icon: Truck },
+  { label: "Gate Security", to: "/gate-dashboard", icon: ShieldCheck },
+  { label: "GRN / Receiving", to: "/grn?tab=dashboard", icon: FileCheck2 },
+  { label: "Warehouse", to: "/inventory?tab=dashboard", icon: Warehouse },
+  { label: "Assembly", to: "/assembly-dashboard", icon: Factory },
+  { label: "Dispatch", to: "/dispatch-orders", icon: PackageCheck },
+];
 
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
@@ -288,13 +314,19 @@ function getNotificationRole(user: { username?: string; roles?: string[] } | nul
 
 function getStrictRoleNav(user: { username?: string; roles?: string[] } | null): NavItem[] {
   if (!user) return [];
+  if (
+    hasUserRole(user, "ADMIN") ||
+    hasUserRole(user, "SUPERUSER") ||
+    hasUserRole(user, "SUPER_ADMIN")
+  )
+    return adminNav;
   if (hasUserRole(user, "SUPPLIER")) return supplierNav;
   if (hasUserRole(user, "GATE_SECURITY") || hasUserRole(user, "GATE_OPERATOR"))
     return gateSecurityNav;
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return qualityNav;
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER")) return assemblyNav;
   if (hasUserRole(user, "STORE_MANAGER") || hasUserRole(user, "STORE_KEEPER"))
-    return storeManagerNav;
+    return warehouseNav;
   if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "STORE_OPERATOR"))
     return warehouseOperatorNav;
   if (isDispatchSession(user)) return dispatchNav;
@@ -308,10 +340,10 @@ function getRoleLabel(user: { username?: string; roles?: string[] } | null): str
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return "Quality Inspector";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
     return "Assembly Manager";
-  if (hasUserRole(user, "STORE_MANAGER")) return "Store Manager";
+  if (hasUserRole(user, "STORE_MANAGER")) return "Warehouse Manager";
   if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "STORE_OPERATOR"))
     return "Warehouse Operator";
-  if (hasUserRole(user, "STORE_KEEPER")) return "Store Keeper";
+  if (hasUserRole(user, "STORE_KEEPER")) return "Warehouse Operator";
   if (isDispatchSession(user)) return "Dispatch Manager";
   if (isGrnSession(user)) return "GRN / Operations Manager";
   return "Operations Manager";
@@ -344,7 +376,24 @@ export function AppShell({
   const fullHref = path + searchStr;
   const navigate = useNavigate();
   const [user, setUser] = useState<UserInfo | null>(null);
-  const { unreadCount: unreadNotifications, alert: notificationAlert, dismissAlert } = useNotificationAlerts(user ? getNotificationRole(user) : null, user?.username);
+  const [adminModules, setAdminModules] = useState<any[]>([]);
+  const isAdmin = Boolean(user?.roles?.some((role) =>
+    ["ADMIN", "SUPERUSER", "SUPER_ADMIN"].includes(role.toUpperCase()),
+  ));
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdminModules([]);
+      return;
+    }
+    void api.getAdminOverview()
+      .then((overview) => setAdminModules(overview?.modules || []))
+      .catch(() => setAdminModules([]));
+  }, [isAdmin]);
+  const {
+    unreadCount: unreadNotifications,
+    alert: notificationAlert,
+    dismissAlert,
+  } = useNotificationAlerts(user ? getNotificationRole(user) : null, user?.username);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -472,31 +521,75 @@ export function AppShell({
       "/arrival-success",
     ].some((route) => path.startsWith(route)) ||
     (isGateSecurityUser && (isSharedOperationsRoute || isNotificationsRoute));
-  const resolvedNav = isSupplierRoute
+  const adminNavWithUsers = adminNav.flatMap((item) => {
+    const itemPath = item.to.split("?")[0];
+    const module = adminModules.find((candidate) => candidate.route?.split("?")[0] === itemPath);
+    if (!module) return [item];
+    if ((module.assembly_units || []).length) {
+      return [
+        item,
+        ...module.assembly_units.flatMap((unit: any) => [
+          {
+            label: unit.name,
+            to: unit.route,
+            icon: Factory,
+            isUnit: true,
+          },
+          ...(unit.users || []).map((moduleUser: any) => ({
+            label: moduleUser.full_name,
+            to: `${unit.route}${unit.route.includes("?") ? "&" : "?"}admin_user=${encodeURIComponent(moduleUser.id)}&admin_user_name=${encodeURIComponent(moduleUser.full_name)}`,
+            icon: Users,
+            isUser: true,
+          })),
+        ]),
+      ];
+    }
+    return [
+      item,
+      ...(module.users || []).map((moduleUser: any) => ({
+        label: moduleUser.full_name,
+        to: `${module.route}${module.route.includes("?") ? "&" : "?"}admin_user=${encodeURIComponent(moduleUser.id)}&admin_user_name=${encodeURIComponent(moduleUser.full_name)}`,
+        icon: Users,
+        isUser: true,
+      })),
+    ];
+  });
+  const resolvedNav = isAdmin
+    ? adminNavWithUsers
+    : isSupplierRoute
     ? supplierNav
-    : isAssemblyUser || isAssemblyRoute
-      ? assemblyNav
-      : isStoreUser || isStoreRoute
-        ? storeManagerNav
-        : isGrnUser || isGrnRoute
-          ? grnNav
-          : isSupplierRoute
-            ? supplierNav
-            : isGateSecurityRoute
-              ? gateSecurityNav
-              : isWarehouseRoute
-                ? warehouseNav
-                : mounted && user?.roles?.includes("DISPATCH")
-                  ? dispatchNav
-                  : mounted && user?.roles?.includes("ASSEMBLY")
-                    ? assemblyNav
-                    : mounted && user?.roles?.includes("SUPPLIER")
-                      ? supplierNav
-                      : isGateSecurityUser
-                        ? gateSecurityNav
-                        : warehouseNav;
+    : path.startsWith("/admin")
+      ? adminNav
+      : isAssemblyUser || isAssemblyRoute
+        ? assemblyNav
+        : isStoreUser || isStoreRoute
+          ? warehouseNav
+          : isGrnUser || isGrnRoute
+            ? grnNav
+            : isSupplierRoute
+              ? supplierNav
+              : isGateSecurityRoute
+                ? gateSecurityNav
+                : isWarehouseRoute
+                  ? warehouseNav
+                  : mounted && user?.roles?.includes("DISPATCH")
+                    ? dispatchNav
+                    : mounted && user?.roles?.includes("ASSEMBLY")
+                      ? assemblyNav
+                      : mounted && user?.roles?.includes("SUPPLIER")
+                        ? supplierNav
+                        : isGateSecurityUser
+                          ? gateSecurityNav
+                          : warehouseNav;
   const navigationPending = !mounted && isSharedOperationsRoute;
-  const nav = navigationPending ? [] : resolvedNav;
+  const nav = navigationPending
+    ? []
+    : resolvedNav.filter((item) => {
+        const [itemPath, itemSearch = ""] = item.to.split("?");
+        return getPageAccess(user?.page_permissions, itemPath, itemSearch) !== null;
+      });
+  const currentPageAccess = getPageAccess(user?.page_permissions, path, searchStr);
+  const isReadOnlyPage = currentPageAccess === "READ";
   useEffect(() => {
     setMobileSidebarOpen(false);
   }, [fullHref]);
@@ -612,10 +705,11 @@ export function AppShell({
                     className={cn(
                       "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-sidebar-foreground transition-all",
                       "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                      item.isUser && "ml-6 py-2 text-xs text-muted-foreground",
                       active && "bg-primary-soft text-primary shadow-soft",
                     )}
                   >
-                    <item.icon className={cn("size-[18px] shrink-0", active && "text-primary")} />
+                    <item.icon className={cn(item.isUser ? "size-3.5" : "size-[18px]", "shrink-0", active && "text-primary")} />
                     <span className="truncate">{item.label}</span>
                     {(item as any).badge && (
                       <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
@@ -626,8 +720,6 @@ export function AppShell({
                 );
               })}
             </nav>
-
-
           </aside>
         </div>
       )}
@@ -683,6 +775,7 @@ export function AppShell({
               <div key={index} className="h-10 animate-pulse rounded-xl bg-sidebar-accent/60" />
             ))}
           {nav.map((item) => {
+            if (desktopSidebarCollapsed && item.isUser) return null;
             const active = isActiveNavItem(item.to);
             return (
               <Link
@@ -696,10 +789,11 @@ export function AppShell({
                 className={cn(
                   "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all",
                   "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  item.isUser && "ml-6 py-2 text-xs text-muted-foreground",
                   active && "bg-primary-soft text-primary shadow-soft",
                 )}
               >
-                <item.icon className={cn("size-[18px] shrink-0", active && "text-primary")} />
+                <item.icon className={cn(item.isUser ? "size-3.5" : "size-[18px]", "shrink-0", active && "text-primary")} />
                 {!desktopSidebarCollapsed && <span className="truncate">{item.label}</span>}
                 {!desktopSidebarCollapsed && (item as any).badge && (
                   <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
@@ -710,11 +804,21 @@ export function AppShell({
             );
           })}
         </nav>
-
       </aside>
 
-      <div className={cn("flex min-w-0 flex-1 flex-col", isWarehouseWorkspace && "bg-[#eef5fd] dark:bg-[#151d2a]")}>
-        <header className={cn("sticky top-0 z-30 glass-strong", isWarehouseWorkspace && "border-b border-[#d7e5f7] bg-white/95 dark:border-slate-700 dark:bg-slate-900/95")}>
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 flex-col",
+          isWarehouseWorkspace && "bg-[#eef5fd] dark:bg-[#151d2a]",
+        )}
+      >
+        <header
+          className={cn(
+            "sticky top-0 z-30 glass-strong",
+            isWarehouseWorkspace &&
+              "border-b border-[#d7e5f7] bg-white/95 dark:border-slate-700 dark:bg-slate-900/95",
+          )}
+        >
           <div className="flex h-16 items-center gap-3 px-4 lg:px-7">
             <button
               type="button"
@@ -855,18 +959,18 @@ export function AppShell({
             </form>
 
             <div className="ml-auto flex items-center gap-1.5">
-                    <Link
-                      to="/notifications"
-                      aria-label="Notifications"
-                      className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
-                    >
-                      <Bell className="size-[18px]" />
-                      {unreadNotifications > 0 && (
-                        <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
-                          {unreadNotifications}
-                        </span>
-                      )}
-                    </Link>
+              <Link
+                to="/notifications"
+                aria-label="Notifications"
+                className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
+              >
+                <Bell className="size-[18px]" />
+                {unreadNotifications > 0 && (
+                  <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
+                    {unreadNotifications}
+                  </span>
+                )}
+              </Link>
               <div className="group relative ml-1 flex items-center gap-2.5 rounded-xl border border-border bg-card py-1.5 pl-1.5 pr-3 transition-colors hover:bg-accent/50">
                 <span
                   suppressHydrationWarning
@@ -886,7 +990,6 @@ export function AppShell({
                   suppressHydrationWarning
                   onClick={handleLogout}
                   className="ml-2 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-
                 >
                   <LogOut className="size-4" />
                 </button>
@@ -896,7 +999,11 @@ export function AppShell({
         </header>
 
         {notificationAlert && (
-          <div role="status" aria-live="polite" className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl">
+          <div
+            role="status"
+            aria-live="polite"
+            className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl"
+          >
             <div className="flex items-start gap-3">
               <Bell className="mt-0.5 size-5 text-primary" />
               <div className="min-w-0 flex-1">
@@ -906,7 +1013,13 @@ export function AppShell({
                     notificationAlert.body ||
                     "Open Notification Center to view this update."}
                 </p>
-                <Link to="/notifications" onClick={dismissAlert} className="mt-2 inline-block text-xs font-semibold text-primary">View notifications</Link>
+                <Link
+                  to="/notifications"
+                  onClick={dismissAlert}
+                  className="mt-2 inline-block text-xs font-semibold text-primary"
+                >
+                  View notifications
+                </Link>
               </div>
               <button
                 type="button"
@@ -919,18 +1032,49 @@ export function AppShell({
             </div>
           </div>
         )}
-        <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
-          <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
+        <main
+          className={cn(
+            "page-enter flex-1 px-4 py-6 lg:px-7",
+            isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6",
+          )}
+        >
+          <div
+            className={cn(
+              "mx-auto w-full max-w-[1360px]",
+              isWarehouseWorkspace && "max-w-[1680px]",
+            )}
+          >
             {(title || subtitle || actions) && (
               <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                  {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
+                  {title && (
+                    <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">
+                      {title}
+                      {pageHelp[path] && (
+                        <InformationTooltip help={pageHelp[path]} placement="title" />
+                      )}
+                    </h1>
+                  )}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
                 </div>
-                {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+                {actions && (
+                  <fieldset
+                    disabled={isReadOnlyPage}
+                    className="flex flex-wrap items-center gap-2 border-0 p-0"
+                  >
+                    {actions}
+                  </fieldset>
+                )}
               </div>
             )}
-            {children}
+            {isReadOnlyPage && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                Read-only access: you can view this page but cannot perform actions.
+              </div>
+            )}
+            <fieldset disabled={isReadOnlyPage} className="min-w-0 border-0 p-0">
+              {children}
+            </fieldset>
           </div>
         </main>
       </div>

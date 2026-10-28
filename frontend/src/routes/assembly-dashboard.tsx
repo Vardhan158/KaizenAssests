@@ -141,6 +141,15 @@ function formatRelativeTime(dateStr: string | null | undefined): string {
 
 function AssemblyDashboard() {
   const navigate = useNavigate();
+  const adminUser = typeof window === "undefined"
+    ? null
+    : new URLSearchParams(window.location.search).get("admin_user");
+  const adminUserName = typeof window === "undefined"
+    ? null
+    : new URLSearchParams(window.location.search).get("admin_user_name");
+  const assemblyUnit = typeof window === "undefined"
+    ? null
+    : new URLSearchParams(window.location.search).get("assembly_unit");
   const [data, setData] = useState<AssemblyDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -157,20 +166,22 @@ function AssemblyDashboard() {
   const loadDashboard = useCallback(async (isManual = false) => {
     if (isManual) setRefreshing(true);
     const [dashboard, requests, inventory] = await Promise.allSettled([
-      api.getAssemblyDashboard(),
-      api.getAssemblyMaterialRequests(),
-      api.getAssemblyFinishedGoodsInventorySummary(),
+      api.getAssemblyDashboard(adminUser, assemblyUnit),
+      adminUser || assemblyUnit ? Promise.resolve([]) : api.getAssemblyMaterialRequests(),
+      adminUser || assemblyUnit ? Promise.resolve({ available: 0 }) : api.getAssemblyFinishedGoodsInventorySummary(),
     ]);
     const failed: string[] = [];
     if (dashboard.status === "fulfilled") {
       setData(dashboard.value);
     } else failed.push("production status, activity and attention items");
-    if (requests.status === "fulfilled") setMaterialRequestCount(requests.value.length);
+    if (adminUser || assemblyUnit) setMaterialRequestCount(null);
+    else if (requests.status === "fulfilled") setMaterialRequestCount(requests.value.length);
     else {
       setMaterialRequestCount(null);
       failed.push("material request count");
     }
-    if (inventory.status === "fulfilled") setFgAvailable(inventory.value.available);
+    if (adminUser || assemblyUnit) setFgAvailable(null);
+    else if (inventory.status === "fulfilled") setFgAvailable(inventory.value.available);
     else {
       setFgAvailable(null);
       failed.push("finished goods availability");
@@ -180,7 +191,7 @@ function AssemblyDashboard() {
     if (message) toast.error(message);
     setLoading(false);
     setRefreshing(false);
-  }, []);
+  }, [adminUser, assemblyUnit]);
 
   useEffect(() => {
     void loadDashboard();
@@ -260,6 +271,17 @@ function AssemblyDashboard() {
       }
     >
       <div className="space-y-6">
+        {(adminUser || assemblyUnit) && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm">
+            <div>
+              <span className="font-semibold">{adminUser ? "Admin user report" : "Assembly unit workspace"}</span>
+              <span className="text-muted-foreground"> · Showing orders and KPIs for {adminUserName || assemblyUnit || "the selected assembly manager"}</span>
+            </div>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/admin">Back to admin</Link>
+            </Button>
+          </div>
+        )}
         {loadError && (
           <div
             role="alert"

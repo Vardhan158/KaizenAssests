@@ -29,13 +29,15 @@ UNSUPPORTED_REPLY = (
 )
 
 DOMAIN_TERMS = re.compile(
-    r"\b(warehouses?|inventory|stocks?|materials?|skus?|bins?|zones?|locations?|putaway|"
-    r"purchase\s*orders?|\bpos?\b|\brfq\b|vendor|supplier|gate|inbound|"
+    r"\b(warehouses?|inventory|stocks?|materials?|skus?|items?|batches?|lots?|bins?|zones?|"
+    r"racks?|shelves?|aisles?|locations?|putaway|stow|storage|"
+    r"purchase\s*orders?|procurement|\bpos?\b|\brfqs?\b|vendors?|suppliers?|gate|security|inbound|"
     r"arrival|truck|asn|docks?|grns?|goods\s+receipt|receiving|quarantine|"
-    r"assembly|work\s+orders?|bom|production|dispatch|shipment|outbound|"
-    r"delivery|picking|packing|requisition|fifo|aging|ageing|allocation|allocated|"
+    r"assembly|manufacturing|work\s+orders?|bom|production|wip|finished\s+goods|dispatch|"
+    r"shipment|outbound|transport|logistics|delivery|picking|packing|loading|gate\s*out|"
+    r"requisition|fifo|fefo|aging|ageing|allocation|allocated|"
     r"reservation|reserved|quantity|capacity|"
-    r"qc|quality|hold|holds|returns?|cycle.count|stock.take|shortage|"
+    r"qc|quality|inspection|damage|claims?|hold|holds|returns?|cycle.count|stock.take|shortage|"
     r"receipt|receipts|issue|issued|issue.stock|material.request|assembly.request)\b",
     re.IGNORECASE,
 )
@@ -47,6 +49,31 @@ MUTATION_REQUEST = re.compile(
 )
 GREETING = re.compile(r"^(hi|hello|hey|good morning|good afternoon|good evening)[!. ]*$", re.I)
 THANKS = re.compile(r"^(thanks|thank you|thx|appreciate it)[!. ]*$", re.I)
+
+SPELLING_VARIANTS = {
+    "inventry": "inventory",
+    "invntory": "inventory",
+    "warehosue": "warehouse",
+    "recieving": "receiving",
+    "receving": "receiving",
+    "putway": "putaway",
+    "put-away": "putaway",
+    "assambly": "assembly",
+    "asemmbly": "assembly",
+    "despatch": "dispatch",
+    "dispach": "dispatch",
+    "suplier": "supplier",
+    "suppplier": "supplier",
+    "vehical": "vehicle",
+}
+
+
+def normalize_query(query: str) -> str:
+    """Normalize common operational spelling variants before intent matching."""
+    normalized = query
+    for variant, replacement in SPELLING_VARIANTS.items():
+        normalized = re.sub(rf"\b{re.escape(variant)}\b", replacement, normalized, flags=re.I)
+    return normalized
 
 
 class AssistantService:
@@ -276,6 +303,16 @@ class AssistantService:
              "Purchase orders record supplier orders and their fulfillment status. Ask with a PO number for a specific lookup. Supplier pricing and other restricted fields are hidden according to your role."),
             (r"\b(gate\s+entry|gate\s+pass|asn|inbound|truck\s+arrival)\b",
              "Inbound and gate-entry records track expected or arrived vehicles and their receiving progress. Include the gate-entry, ASN, or vehicle number to look up a specific arrival."),
+            (r"\b(damage|damaged|shortage|excess|discrepancy|claim|replacement|return)\b",
+             "Record damaged, short, or excess quantities during receiving or quality inspection. Attach evidence where required, then use the damage-claim or return workflow for supplier response, replacement, and closure."),
+            (r"\b(cycle\s*count|stock\s*take|physical\s+count|stock\s+audit)\b",
+             "A cycle count compares physical stock with the recorded balance for selected materials or locations. Investigate differences and post approved adjustments through the inventory workflow."),
+            (r"\b(material\s+issue|issue\s+material|issue\s+stock)\b",
+             "Material issue records stock handed to an approved request or production order. Confirm the request, eligible batch, quantity, and destination before posting the issue."),
+            (r"\b(finished\s+goods|fg\s+store|fg\s+pickup)\b",
+             "Finished goods move from completed assembly and quality checks into finished-goods storage, then into an approved dispatch or supplier pickup workflow."),
+            (r"\b(vehicle\s+(?:entry|exit)|check[ -]?in|check[ -]?out|gate\s*out)\b",
+             "Vehicle entry verifies the expected delivery or pickup, driver, vehicle, and documents. Vehicle exit is completed only after the related receiving or dispatch checks are satisfied."),
             (r"\b(zone|bin|storage\s+location)s?\s+(?:setup|configuration|creation)|"
              r"\b(?:create|configure|set\s+up|add)\s+(?:a\s+)?(?:zone|bin|storage\s+location)\b",
              "Warehouse locations are organized by zone and bin. Create or maintain zones and bins in Warehouse Location Hierarchy, use a clear zone name and unique location code, and assign stock to a bin within its zone. I can explain the setup, but record changes must be made in that module."),
@@ -297,7 +334,7 @@ class AssistantService:
         user: CurrentUser,
         session: Optional[AsyncSession] = None,
     ) -> AssistantChatResponse:
-        query = request.message.strip()
+        query = normalize_query(request.message.strip())
         if MUTATION_REQUEST.search(query):
             reply = READ_ONLY_REPLY
         elif GREETING.fullmatch(query):

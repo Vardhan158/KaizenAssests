@@ -70,6 +70,7 @@ from app.modules.receiving.infrastructure.persistence.models import (
     GrnModel,
 )
 from app.modules.gate.infrastructure.persistence.models import SupplierDamageClaimModel
+from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel
 from app.common.persistence.models import (
     AsnModel,
     MaterialModel,
@@ -117,11 +118,27 @@ async def list_grns(
     search: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    admin_user: uuid.UUID | None = Query(default=None),
     uow: UnitOfWork = Depends(get_uow),
-    _user=Depends(require_permission("receiving:read")),
+    current_user: CurrentUser = Depends(require_permission("receiving:read")),
 ) -> GrnListResponse:
+    actor_identities = None
+    if admin_user is not None:
+        roles = {role.strip().upper() for role in current_user.roles}
+        if not roles.intersection({"ADMIN", "SUPERUSER", "SUPER_ADMIN"}):
+            raise HTTPException(status_code=403, detail="Administrator access required for user activity")
+        selected_user = await uow.session.get(StoreManagerUserModel, admin_user)
+        if selected_user is None or selected_user.role.strip().upper().replace(" ", "_") != "GRN":
+            raise HTTPException(status_code=404, detail="GRN user not found")
+        actor_identities = [selected_user.username, selected_user.employee_id]
     repo = SqlAlchemyGrnRepository(uow.session)
-    items, total = await repo.list_grns(status=status, search=search, limit=limit, offset=offset)
+    items, total = await repo.list_grns(
+        status=status,
+        search=search,
+        actor_identities=actor_identities,
+        limit=limit,
+        offset=offset,
+    )
 
     return GrnListResponse(
         total=total,

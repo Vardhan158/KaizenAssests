@@ -326,11 +326,7 @@ function NewAsnPage() {
     setLoading(true);
     setLoadError("");
     try {
-      // Use the same role-scoped endpoint as the Supplier Dashboard. The
-      // backend applies supplier visibility from the authenticated session;
-      // passing a possibly stale client supplier id can incorrectly return an
-      // empty list while the dashboard still shows the records.
-      const remoteAsns = await api.getAsns();
+      const remoteAsns = await api.getAsns(currentUser?.supplierId);
       const mapped = (Array.isArray(remoteAsns) ? remoteAsns : []).map((a: any) => ({
         id: String(a.id || a.asn_number || ""),
         asn_number: a.asn_number || "",

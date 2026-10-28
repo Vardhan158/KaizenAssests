@@ -29,10 +29,12 @@ export function supplierJourney(progress: number) {
   const truck = route.getPointAt(travel);
   const tangent = route.getTangentAt(travel);
   const emergence = phase(progress, 0, 0.12);
-  const handoff = phase(progress, 0.65, 0.76);
+  // Keep the ASN with the vehicle through the city approach. Once the truck
+  // reaches the gate, hand the document directly to the entry-side guard.
+  const handoff = phase(progress, 0.72, 0.9);
   const envelope = new Vector3(-96, 2.8, 17)
-    .lerp(new Vector3(truck.x - 1.5, 4.5, truck.z), emergence)
-    .lerp(new Vector3(-4.35, 2.6, 17), handoff);
+    .lerp(new Vector3(truck.x - 2.4, 5.4, truck.z), emergence)
+    .lerp(new Vector3(-1.8, 3, 14.1), handoff);
   return {
     truck,
     envelope,

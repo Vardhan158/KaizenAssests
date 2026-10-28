@@ -41,7 +41,7 @@ def upgrade() -> None:
 
         # Seed initial default stores
         initial_stores = [
-            ("STR-001", "Electrical Store", "Electrical components, cables, switchgears, and wiring", "EMP-STORE-001", "John Doe (Electrical)"),
+            ("STR-001", "Electrical Store", "Electrical components, cables, switchgears, and wiring", None, None),
             ("STR-002", "Mechanical Store", "Mechanical parts, motors, pumps, bearings, and fasteners", "EMP-STORE-002", "Sarah Jenkins (Mechanical)"),
             ("STR-003", "Instrumentation Store", "Sensors, gauges, transmitters, and analytical instruments", "EMP-STORE-003", "Robert Chen (Instrumentation)"),
             ("STR-004", "Spare Parts Store", "Critical maintenance spares, replacement kits, and consumables", "EMP-STORE-004", "Emily Davis (Spare Parts)"),

@@ -115,7 +115,6 @@ async def get_current_user(
             async with AsyncSessionFactory() as session:
                 result = await session.execute(
                     select(StoreManagerUserModel)
-                    .options(selectinload(StoreManagerUserModel.store))
                     .where(
                         StoreManagerUserModel.auth_token_hash == hashlib.sha256(session_token.encode()).hexdigest(),
                         StoreManagerUserModel.status == "ACTIVE",
@@ -123,6 +122,28 @@ async def get_current_user(
                 )
                 account = result.scalar_one_or_none()
             if account:
+                page_permissions = account.page_permissions or {}
+                if page_permissions:
+                    page_key = request.headers.get("X-Page-Key", "")
+                    page_access = page_permissions.get(page_key)
+                    if page_access is None:
+                        parent_matches = [
+                            (key, access)
+                            for key, access in page_permissions.items()
+                            if "?" not in key and page_key.startswith(f"{key}/")
+                        ]
+                        if parent_matches:
+                            page_access = max(parent_matches, key=lambda item: len(item[0]))[1]
+                    if page_access is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You do not have access to this page",
+                        )
+                    if request.method.upper() not in {"GET", "HEAD", "OPTIONS"} and page_access != "WRITE":
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="This page is read-only for your account",
+                        )
                 role_key = account.role.strip().upper().replace(" ", "_")
                 role = {
                     "SUPER_ADMIN": "ADMIN",
@@ -149,10 +170,18 @@ async def get_current_user(
                 claims = {
                     "employee_id": account.employee_id,
                     "applications": account.applications or [],
-                    "store_id": str(account.store_id) if account.store_id else None,
-                    "store_code": account.store.store_code if account.store else None,
-                    "store_name": account.store.store_name if account.store else None,
+                    "page_permissions": account.page_permissions or {},
                 }
+                if role == "SUPPLIER":
+                    from app.common.persistence.models import SupplierUserModel
+
+                    supplier_id = (await session.execute(
+                        select(SupplierUserModel.supplier_id).where(
+                            SupplierUserModel.username == account.username
+                        )
+                    )).scalar_one_or_none()
+                    if supplier_id:
+                        claims["supplier_id"] = str(supplier_id)
                 return CurrentUser(
                     subject=account.employee_id,
                     username=account.username,
@@ -161,59 +190,11 @@ async def get_current_user(
                     raw_claims=claims,
                 )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
-        if token == "mock-jwt-supplier-token":
+        if token == "mock-jwt-admin-token":
             return CurrentUser(
-                subject="supplier",
-                username="supplier_partner",
-                roles=["SUPPLIER"],
-                permissions=[],
-                raw_claims={"supplier_id": "sup-00001"},
-            )
-        elif token == "mock-jwt-warehouse-token":
-            return CurrentUser(
-                subject="warehouse_manager",
-                username="warehouse_manager",
-                roles=["WAREHOUSE", "ADMIN"],
-                permissions=["gate:read", "gate:entry:create", "gate:entry:read", "gate:entry:verify", "gate:write", "warehouse:write"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-gate-entry-token":
-            return CurrentUser(
-                subject="gate_security",
-                username="gate_security",
-                roles=["GATE_SECURITY"],
-                permissions=["gate:read", "gate:write", "gate:verify", "gate:entry:create", "gate:entry:read", "gate:entry:verify", "dispatch:read", "dispatch:execute"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-grn-token":
-            return CurrentUser(
-                subject="grn_officer",
-                username="grn_officer",
-                roles=["GRN", "WAREHOUSE"],
-                permissions=["gate:read", "gate:entry:create", "gate:entry:read", "gate:entry:verify", "gate:write", "warehouse:write"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-warehouse-token":
-            return CurrentUser(
-                subject="warehouse",
-                username="warehouse",
-                roles=["WAREHOUSE", "ADMIN"],
-                permissions=["gate:write", "gate:entry:create", "gate:entry:read", "gate:entry:verify"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-gate-entry-token" or token == "mock-jwt-grn-token":
-            return CurrentUser(
-                subject="gate_operator",
-                username="gate_operator",
-                roles=["GATE_OPERATOR", "ADMIN"],
-                permissions=["gate:write", "gate:entry:create", "gate:entry:read", "gate:entry:verify"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-warehouse-token":
-            return CurrentUser(
-                subject="warehouse",
-                username="warehouse",
-                roles=["WAREHOUSE"],
+                subject="ADMIN",
+                username=settings.admin_username,
+                roles=["ADMIN"],
                 permissions=[
                     "gate:read",
                     "gate:write",
@@ -229,77 +210,13 @@ async def get_current_user(
                     "returns:write",
                     "store:read",
                     "store:write",
+                    "dispatch:read",
+                    "dispatch:write",
+                    "dispatch:execute",
                 ],
-                raw_claims={},
+                raw_claims={"employee_id": "ADMIN", "applications": ["WMS"]},
             )
-        elif token == "mock-jwt-warehouse-token":
-            return CurrentUser(
-                subject="warehouse",
-                username="warehouse",
-                roles=["WAREHOUSE"],
-                permissions=[
-                    "gate:read",
-                    "gate:write",
-                    "gate:verify",
-                    "gate:approve",
-                    "receiving:read",
-                ],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-gate-entry-token":
-            return CurrentUser(
-                subject="gate_security",
-                username="gate_security",
-                roles=["GATE_SECURITY"],
-                permissions=["gate:read", "gate:write", "gate:verify", "receiving:read"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-store-keeper-token":
-            return CurrentUser(
-                subject="EMP-KEEPER-001",
-                username="store_keeper_mech",
-                roles=["STORE_KEEPER"],
-                permissions=["store:read", "storage:read", "putaway:execute", "pickup:execute"],
-                raw_claims={"store_code": "STR-002", "employee_id": "EMP-KEEPER-001"},
-            )
-        elif token == "mock-jwt-store-manager-token":
-            claims = {"store_code": "STR-001", "employee_id": "EMP-STORE-001", "username": "store_manager_elec"}
-            try:
-                from sqlalchemy import select, or_, func
-                from sqlalchemy.orm import selectinload
-                from app.database.session import AsyncSessionFactory
-                from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel
-
-                async with AsyncSessionFactory() as session:
-                    stmt = (
-                        select(StoreManagerUserModel)
-                        .options(selectinload(StoreManagerUserModel.store))
-                        .where(
-                            or_(
-                                StoreManagerUserModel.employee_id == "EMP-STORE-001",
-                                StoreManagerUserModel.username == "store_manager_elec",
-                            )
-                        )
-                    )
-                    res = await session.execute(stmt)
-                    mgr = res.scalars().first()
-                    if mgr:
-                        claims["store_id"] = str(mgr.store_id)
-                        claims["employee_id"] = mgr.employee_id
-                        claims["full_name"] = mgr.full_name
-                        if mgr.store:
-                            claims["store_code"] = mgr.store.store_code
-            except Exception:
-                pass
-
-            return CurrentUser(
-                subject=claims.get("employee_id", "EMP-STORE-001"),
-                username="store_manager_elec",
-                roles=["STORE_MANAGER"],
-                permissions=["store:read", "store:write", "storage:read", "putaway:execute", "pickup:execute"],
-                raw_claims=claims,
-            )
-        elif token.startswith("mock-jwt-store-keeper-") or token.startswith("mock-jwt-store-manager-"):
+        if token.startswith("mock-jwt-store-keeper-") or token.startswith("mock-jwt-store-manager-"):
             is_keeper = token.startswith("mock-jwt-store-keeper-")
             prefix = "mock-jwt-store-keeper-" if is_keeper else "mock-jwt-store-manager-"
             mgr_key = token.removeprefix(prefix)
@@ -321,7 +238,6 @@ async def get_current_user(
                     key_lower = mgr_key.strip().lower()
                     stmt = (
                         select(StoreManagerUserModel)
-                        .options(selectinload(StoreManagerUserModel.store))
                         .where(
                             or_(
                                 func.lower(StoreManagerUserModel.employee_id) == key_lower,
@@ -339,7 +255,6 @@ async def get_current_user(
                     mgr = res.scalars().first()
                     if mgr:
                         username = mgr.username
-                        claims["store_id"] = str(mgr.store_id)
                         claims["employee_id"] = mgr.employee_id
                         claims["full_name"] = mgr.full_name
                         if mgr.store:
@@ -358,23 +273,6 @@ async def get_current_user(
                 permissions=permissions,
                 raw_claims=claims,
             )
-        elif token in ("mock-jwt-assembly-token", "mock-jwt-assembly-manager-token"):
-            return CurrentUser(
-                subject="EMP-ASSEMBLY-001",
-                username="assembly_manager",
-                roles=["ASSEMBLY_MANAGER", "ASSEMBLY"],
-                permissions=["material_request:create", "material_request:read", "assembly:read", "assembly:write"],
-                raw_claims={"department": "Assembly", "employee_id": "EMP-ASSEMBLY-001"},
-            )
-        elif token in ("mock-jwt-dispatch-token", "mock-jwt-dispatch-manager-token"):
-            return CurrentUser(
-                subject="EMP-DISPATCH-001",
-                username="dispatch_manager",
-                roles=["DISPATCH", "DISPATCH_MANAGER", "WAREHOUSE"],
-                permissions=["dispatch:read", "dispatch:write", "dispatch:execute", "gate:read"],
-                raw_claims={"department": "Dispatch", "employee_id": "EMP-DISPATCH-001"},
-            )
-
     try:
         claims = await decode_and_validate(token)
         user = CurrentUser(

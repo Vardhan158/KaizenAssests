@@ -1,6 +1,5 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { CityTraffic } from "./CityTraffic";
 
 type Part = { position: [number, number, number]; scale: [number, number, number]; color: string };
 
@@ -186,7 +185,6 @@ export function CityBuildings() {
       <BuildingParts parts={batches.glass} glass />
       <BuildingParts parts={batches.lit} glass lit />
       <StreetLights />
-      <CityTraffic />
     </group>
   );
 }

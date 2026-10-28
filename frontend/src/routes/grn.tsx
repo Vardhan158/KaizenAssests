@@ -75,6 +75,8 @@ export const Route = createFileRoute("/grn")({
     gatePassId?: string;
     dock?: string;
     po?: string;
+    admin_user?: string;
+    admin_user_name?: string;
   } => ({
     tab: (search.tab as string) || "dashboard",
     page: Number(search.page) || 1,
@@ -85,6 +87,8 @@ export const Route = createFileRoute("/grn")({
     gatePassId: (search.gatePassId as string) || (search.gate_pass_id as string) || undefined,
     dock: (search.dock as string) || (search.dock_number as string) || undefined,
     po: (search.po as string) || (search.po_number as string) || undefined,
+    admin_user: (search.admin_user as string) || undefined,
+    admin_user_name: (search.admin_user_name as string) || undefined,
   }),
   component: GrnPageWorkflow,
 });
@@ -874,7 +878,7 @@ function GrnPageWorkflow() {
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const res = await api.getGrns({ limit: 200 });
+      const res = await api.getGrns({ limit: 200, adminUser: search.admin_user });
       if (res && Array.isArray(res.items)) {
         const normalized = res.items.map(normalizeGrnRecord).filter(Boolean);
         setGrnRecords(normalized);
@@ -894,7 +898,7 @@ function GrnPageWorkflow() {
     } finally {
       setLoadingRecords(false);
     }
-  }, []);
+  }, [search.admin_user]);
 
   useEffect(() => {
     if (activeTab === "dashboard" || activeTab === "records") {
@@ -3678,7 +3682,7 @@ function GrnPageWorkflow() {
             <RefreshCw className={`size-4 ${loadingRecords || loadingContext ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          {activeTab === "dashboard" && (
+          {activeTab === "dashboard" && !search.admin_user && (
             <>
               <Button
                 variant={activeTab === "records" ? "default" : "outline"}
@@ -3709,6 +3713,17 @@ function GrnPageWorkflow() {
       }
     >
       {/* 📊 GRN OPERATIONS DASHBOARD TAB */}
+      {search.admin_user && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm">
+          <div>
+            <span className="font-semibold">GRN user activity</span>
+            <span className="text-muted-foreground"> · Showing receipts, KPIs, records and recent activity for {search.admin_user_name || "the selected GRN user"}</span>
+          </div>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/grn" search={{ tab: "dashboard", page: 1 }}>View overall GRN</Link>
+          </Button>
+        </div>
+      )}
       {activeTab === "dashboard" &&
         (() => {
           const totalQuarantineLots = grnRecords.reduce((acc, r) => {

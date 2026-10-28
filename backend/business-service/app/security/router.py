@@ -202,7 +202,6 @@ async def dev_login(
     # 1. Query StoreManagerUserModel
     account_result = await uow.session.execute(
         select(StoreManagerUserModel)
-        .options(selectinload(StoreManagerUserModel.store))
         .where(
             or_(
                 func.lower(StoreManagerUserModel.username) == req_lower,
@@ -247,6 +246,14 @@ async def dev_login(
             "STORE_MANAGER": "STORE_MANAGER",
         }.get(role_key, role_key)
 
+        supplier_id = None
+        if role == "SUPPLIER":
+            supplier_id = (await uow.session.execute(
+                select(SupplierUserModel.supplier_id).where(
+                    func.lower(SupplierUserModel.username) == account.username.lower()
+                )
+            )).scalar_one_or_none()
+
         token = (
             f"mock-jwt-store-manager-{account.employee_id}"
             if role == "STORE_MANAGER"
@@ -263,67 +270,32 @@ async def dev_login(
             "full_name": account.full_name,
             "employee_id": account.employee_id,
             "roles": [role],
-            "store_id": str(account.store_id) if account.store_id else None,
-            "store_code": account.store.store_code if account.store else None,
-            "store_name": account.store.store_name if account.store else None,
             "applications": account.applications or [],
+            "page_permissions": account.page_permissions or {},
+            "supplier_id": str(supplier_id) if supplier_id else None,
+            "supplierId": str(supplier_id) if supplier_id else None,
         }
 
     # 2. Configured dev credentials lookup
     normalized_username = req_lower
-    wh_uname = getattr(settings, "warehouse_username", "warehouse").lower()
-    sup_uname = getattr(settings, "supplier_username", "supplier").lower()
-    gate_sec_uname = getattr(settings, "gate_security_username", "gate_security").lower()
-    gate_ent_uname = getattr(settings, "gate_entry_username", "gate_entry").lower()
-    asm_uname = getattr(settings, "assembly_manager_username", "assembly_manager").lower()
-    grn_uname = getattr(settings, "grn_username", "grn").lower()
-
-    if normalized_username == wh_uname and settings.warehouse_password and req_password == settings.warehouse_password:
-        return {
-            "token": "mock-jwt-warehouse-token",
-            "username": getattr(settings, "warehouse_username", "warehouse"),
-            "roles": ["WAREHOUSE"],
-        }
-    elif (
-        normalized_username in (gate_sec_uname, gate_ent_uname, "gate_entry", "gate_security", "gate")
-        and req_password in (settings.gate_security_password, settings.gate_entry_password)
+    admin_uname = settings.admin_username.lower()
+    if (
+        normalized_username == admin_uname
+        and settings.admin_password
+        and req_password == settings.admin_password
     ):
         return {
-            "token": "mock-jwt-gate-entry-token",
-            "username": req_username,
-            "roles": ["GATE_SECURITY"],
+            "token": "mock-jwt-admin-token",
+            "username": settings.admin_username,
+            "full_name": "System Administrator",
+            "employee_id": "ADMIN",
+            "roles": ["ADMIN"],
+            "applications": ["WMS"],
         }
-    elif (
-        normalized_username in (asm_uname, "assembly", "assembly_manager")
-        and settings.assembly_manager_password
-        and req_password == settings.assembly_manager_password
-    ):
-        return {
-            "token": "mock-jwt-assembly-manager-token",
-            "username": getattr(settings, "assembly_manager_username", req_username),
-            "roles": ["ASSEMBLY_MANAGER"],
-        }
-    elif normalized_username == sup_uname and settings.supplier_password and req_password == settings.supplier_password:
-        return {
-            "token": "mock-jwt-supplier-token",
-            "username": getattr(settings, "supplier_username", "supplier"),
-            "roles": ["SUPPLIER"],
-        }
-    elif (
-        normalized_username in (grn_uname, "grn", "grn_manager", "operations_manager")
-        and settings.grn_password
-        and req_password == settings.grn_password
-    ):
-        return {
-            "token": "mock-jwt-grn-token",
-            "username": req_username,
-            "roles": ["GRN"],
-        }
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid username or password",
+    )
 
 
 @router.post("/supplier-login", response_model=SupplierLoginResponse)
@@ -340,14 +312,6 @@ async def supplier_login(
     user = result.scalars().first()
 
     if not user:
-        settings = get_settings()
-        if request.username == getattr(settings, "supplier_username", "supplier") and settings.supplier_password and request.password == settings.supplier_password:
-            return SupplierLoginResponse(
-                token="mock-jwt-supplier-token",
-                supplier_id="default-supplier-id",
-                must_change_password=False,
-                username=request.username,
-            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid supplier username or password",

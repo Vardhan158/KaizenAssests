@@ -1,4 +1,4 @@
-import { Html } from "@react-three/drei";
+import { Html, Text } from "@react-three/drei";
 import { supplierJourney } from "../supplierJourney";
 import type { GroupProps } from "@react-three/fiber";
 
@@ -20,7 +20,6 @@ function smoothstep(value: number) {
 export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAsnEnvelopeProps) {
   const delivery = supplierJourney(progress);
   const travel = smoothstep((progress - 0.12) / 0.53);
-  const arrival = smoothstep((progress - 0.45) / 0.2);
   const open = delivery.open;
   // Follow the existing inbound camera corridor. The camera moves from the
   // front approach (z ~= 43) to the receiving checkpoint (z ~= -17) during
@@ -30,7 +29,7 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
   const z = delivery.envelope.z;
   const y = delivery.envelope.y;
   const flapAngle = -open * Math.PI * 0.82;
-  const documentY = 0.12 + open * 1.05;
+  const documentY = 0.12 + open * 1.8;
   const documentScale = 0.72 + open * 0.28;
   const text = (value: unknown) =>
     value === null || value === undefined || value === "" ? "—" : String(value);
@@ -39,14 +38,14 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
     <group
       {...groupProps}
       position={[x, y, z]}
-      rotation={[0.05, travel * 0.55, Math.sin(travel * Math.PI) * 0.08]}
+      rotation={[0, travel * 0.3, Math.sin(travel * Math.PI) * 0.04]}
       frustumCulled={false}
       renderOrder={100}
     >
       <group scale={0.45 * (1 - smoothstep((progress - 0.97) / 0.03))}>
-        {/* Envelope body and folded front */}
+        {/* Upright envelope body, facing the camera like a piece of mail. */}
         <mesh castShadow receiveShadow renderOrder={100}>
-          <boxGeometry args={[3.2, 0.12, 2.15]} />
+          <boxGeometry args={[3.2, 2.15, 0.12]} />
           <meshStandardMaterial
             color="#f8fafc"
             emissive="#164e63"
@@ -56,19 +55,53 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
             depthTest={false}
           />
         </mesh>
-        <mesh position={[0, 0.08, 0.01]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={101}>
-          <planeGeometry args={[2.05, 3.08]} />
+        <mesh position={[0, 0, 0.071]} renderOrder={101}>
+          <planeGeometry args={[3.08, 2.05]} />
           <meshStandardMaterial color="#dbeafe" roughness={0.6} side={2} depthTest={false} />
         </mesh>
+        {/* Fold lines make the white card read immediately as a mail envelope. */}
+        <mesh position={[-0.72, 0.42, 0.085]} rotation={[0, 0, 0.62]} renderOrder={103}>
+          <boxGeometry args={[1.82, 0.055, 0.025]} />
+          <meshStandardMaterial
+            color="#60a5fa"
+            emissive="#2563eb"
+            emissiveIntensity={0.2}
+            depthTest={false}
+          />
+        </mesh>
+        <mesh position={[0.72, 0.42, 0.085]} rotation={[0, 0, -0.62]} renderOrder={103}>
+          <boxGeometry args={[1.82, 0.055, 0.025]} />
+          <meshStandardMaterial
+            color="#60a5fa"
+            emissive="#2563eb"
+            emissiveIntensity={0.2}
+            depthTest={false}
+          />
+        </mesh>
+        {/* Real 3D lettering is fixed to the face, so ASN cannot drift away. */}
+        <Text
+          position={[0, -0.3, 0.13]}
+          fontSize={0.78}
+          color="#020617"
+          anchorX="center"
+          anchorY="middle"
+          letterSpacing={0.08}
+          outlineWidth={0.025}
+          outlineColor="#ffffff"
+          renderOrder={104}
+          material-depthTest={false}
+        >
+          ASN
+        </Text>
         {/* Flap stays closed during travel and opens only at security. */}
-        <group position={[0, 0.1, -1.04]} rotation={[flapAngle, 0, 0]}>
-          <mesh position={[0, 0.02, 0.52]} rotation={[Math.PI / 2, 0, 0]} renderOrder={102}>
+        <group position={[0, 1.04, 0.08]} rotation={[flapAngle, 0, 0]}>
+          <mesh position={[0, -0.52, 0]} renderOrder={102}>
             <planeGeometry args={[3.05, 1.05]} />
             <meshStandardMaterial color="#bfdbfe" roughness={0.55} side={2} depthTest={false} />
           </mesh>
         </group>
-        <mesh position={[0, 0.16, 0]} renderOrder={103}>
-          <boxGeometry args={[0.28, 0.035, 0.28]} />
+        <mesh position={[0, 0.05, 0.1]} renderOrder={103}>
+          <boxGeometry args={[0.28, 0.28, 0.035]} />
           <meshStandardMaterial
             color="#06b6d4"
             emissive="#22d3ee"
@@ -76,49 +109,38 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
             depthTest={false}
           />
         </mesh>
-        {/* ASN document emerges only after the envelope reaches security. */}
-        <group position={[0, documentY, 0.12]} scale={documentScale}>
-          <mesh visible={open > 0.01} castShadow renderOrder={104}>
-            <boxGeometry args={[2.35, 0.035, 1.55]} />
-            <meshStandardMaterial
-              color="#ffffff"
-              emissive="#cffafe"
-              emissiveIntensity={0.25}
-              roughness={0.7}
-              depthTest={false}
-            />
-          </mesh>
-          {open > 0.08 && (
-            <Html
-              position={[0, 0.04, 0]}
-              rotation={[-Math.PI / 2, 0, 0]}
-              transform
-              distanceFactor={8}
-              zIndexRange={[20, 0]}
-            >
-              <div className="w-52 rounded-md border border-cyan-400/50 bg-slate-950/95 p-2 text-left font-mono text-[8px] text-white shadow-xl">
-                <div className="mb-1 border-b border-cyan-400/30 pb-1 text-[9px] font-black tracking-widest text-cyan-300">
-                  ASN DOCUMENT
+        {/* The detail card is intentionally disabled to prevent gate overlap. */}
+        {open > 1 && (
+          <group position={[0, documentY, 0.13]} scale={documentScale}>
+            <mesh visible={open > 0.01} castShadow renderOrder={104}>
+              <boxGeometry args={[2.35, 1.55, 0.035]} />
+              <meshStandardMaterial
+                color="#ffffff"
+                emissive="#cffafe"
+                emissiveIntensity={0.25}
+                roughness={0.7}
+                depthTest={false}
+              />
+            </mesh>
+            {open > 0.08 && (
+              <Html position={[0, 0, 0.04]} transform distanceFactor={8} zIndexRange={[20, 0]}>
+                <div className="w-52 rounded-md border border-cyan-400/50 bg-slate-950/95 p-2 text-left font-mono text-[8px] text-white shadow-xl">
+                  <div className="mb-1 border-b border-cyan-400/30 pb-1 text-[9px] font-black tracking-widest text-cyan-300">
+                    ASN DOCUMENT
+                  </div>
+                  <div>ASN: {text(asn?.asn_number)}</div>
+                  <div>SUPPLIER: {text(asn?.supplier_name)}</div>
+                  <div>PO: {text(asn?.po_number)}</div>
+                  <div>
+                    EXPECTED: {text(asn?.expected_arrival_at || asn?.expected_arrival_date)}
+                  </div>
+                  <div>VEHICLE: {text(asn?.vehicle_number)}</div>
+                  <div>STATUS: {text(asn?.status)}</div>
                 </div>
-                <div>ASN: {text(asn?.asn_number)}</div>
-                <div>SUPPLIER: {text(asn?.supplier_name)}</div>
-                <div>PO: {text(asn?.po_number)}</div>
-                <div>EXPECTED: {text(asn?.expected_arrival_at || asn?.expected_arrival_date)}</div>
-                <div>VEHICLE: {text(asn?.vehicle_number)}</div>
-                <div>STATUS: {text(asn?.status)}</div>
-              </div>
-            </Html>
-          )}
-        </group>
-        <Html position={[0, 1.5, 0]} center distanceFactor={10} zIndexRange={[20, 0]}>
-          <div className="pointer-events-none whitespace-nowrap rounded-full border border-cyan-400/40 bg-slate-950/85 px-2 py-1 font-mono text-[9px] font-bold tracking-widest text-cyan-300">
-            {open > 0.04
-              ? "ASN RECEIVED BY SECURITY"
-              : arrival > 0.2
-                ? "SECURITY CHECKPOINT"
-                : "ASN SENT"}
-          </div>
-        </Html>
+              </Html>
+            )}
+          </group>
+        )}
       </group>
     </group>
   );
