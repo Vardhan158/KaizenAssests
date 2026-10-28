@@ -228,12 +228,12 @@ const managerNav: any[] = [];
 const adminNav: NavItem[] = [
   { label: "Dashboard", to: "/admin", icon: LayoutDashboard },
   { label: "User Management", to: "/admin/users", icon: Users },
+  { label: "Audit Log", to: "/admin/audit", icon: ClipboardList },
   { label: "Suppliers", to: "/admin/suppliers", icon: Truck },
   { label: "Gate Security", to: "/gate-dashboard", icon: ShieldCheck },
   { label: "GRN / Receiving", to: "/grn?tab=dashboard", icon: FileCheck2 },
   { label: "Warehouse", to: "/inventory?tab=dashboard", icon: Warehouse },
   { label: "Assembly", to: "/assembly-dashboard", icon: Factory },
-  { label: "Dispatch", to: "/dispatch-orders", icon: PackageCheck },
 ];
 
 const gateSecurityNav = [
@@ -521,41 +521,25 @@ export function AppShell({
       "/arrival-success",
     ].some((route) => path.startsWith(route)) ||
     (isGateSecurityUser && (isSharedOperationsRoute || isNotificationsRoute));
-  const adminNavWithUsers = adminNav.flatMap((item) => {
+  const adminNavByModule = adminNav.flatMap((item) => {
     const itemPath = item.to.split("?")[0];
     const module = adminModules.find((candidate) => candidate.route?.split("?")[0] === itemPath);
     if (!module) return [item];
     if ((module.assembly_units || []).length) {
       return [
         item,
-        ...module.assembly_units.flatMap((unit: any) => [
-          {
-            label: unit.name,
-            to: unit.route,
-            icon: Factory,
-            isUnit: true,
-          },
-          ...(unit.users || []).map((moduleUser: any) => ({
-            label: moduleUser.full_name,
-            to: `${unit.route}${unit.route.includes("?") ? "&" : "?"}admin_user=${encodeURIComponent(moduleUser.id)}&admin_user_name=${encodeURIComponent(moduleUser.full_name)}`,
-            icon: Users,
-            isUser: true,
-          })),
-        ]),
+        ...module.assembly_units.map((unit: any) => ({
+          label: unit.name,
+          to: unit.route,
+          icon: Factory,
+          isUnit: true,
+        })),
       ];
     }
-    return [
-      item,
-      ...(module.users || []).map((moduleUser: any) => ({
-        label: moduleUser.full_name,
-        to: `${module.route}${module.route.includes("?") ? "&" : "?"}admin_user=${encodeURIComponent(moduleUser.id)}&admin_user_name=${encodeURIComponent(moduleUser.full_name)}`,
-        icon: Users,
-        isUser: true,
-      })),
-    ];
+    return [item];
   });
   const resolvedNav = isAdmin
-    ? adminNavWithUsers
+    ? adminNavByModule
     : isSupplierRoute
     ? supplierNav
     : path.startsWith("/admin")

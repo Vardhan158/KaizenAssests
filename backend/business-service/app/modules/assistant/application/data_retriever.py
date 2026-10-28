@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import func, or_, select
@@ -25,7 +26,8 @@ from app.common.persistence.models import (
     SupplierUserModel,
 )
 from app.config.settings import get_settings
-from app.modules.assembly.infrastructure.persistence.models import AssemblyOrderModel
+from app.modules.assembly.infrastructure.persistence.models import AssemblyOrderModel, AssemblyUnitModel
+from app.modules.admin.infrastructure.persistence.models import SystemAuditLogModel
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel
 from app.modules.gate.infrastructure.persistence.models import GateEntryModel
 from app.modules.gate.infrastructure.persistence.models import DockModel
@@ -43,6 +45,26 @@ from app.modules.store.infrastructure.persistence.models import (
 from app.security.dependencies import CurrentUser
 
 logger = logging.getLogger("ams.assistant.data_retriever")
+
+
+def relative_date_filter(query: str) -> tuple[Optional[datetime], Optional[datetime], Optional[str]]:
+    """Translate common relative-date phrases into an inclusive/exclusive time window."""
+    q = query.lower()
+    now = datetime.now()
+    today = datetime.combine(date.today(), time.min)
+    if re.search(r"\byesterday\b", q):
+        return today - timedelta(days=1), today, "yesterday"
+    if re.search(r"\btoday\b", q):
+        return today, today + timedelta(days=1), "today"
+    days_match = re.search(r"\b(?:last|past|previous)\s+(\d+)\s+days?\b", q)
+    if days_match:
+        days = max(1, min(int(days_match.group(1)), 365))
+        return now - timedelta(days=days), now, f"the last {days} days"
+    if re.search(r"\b(?:last|past|previous)\s+(?:one|1)\s+weeks?\b|\b(?:last|past)\s+weeks?\b", q):
+        return now - timedelta(days=7), now, "the last 7 days"
+    if re.search(r"\b(?:last|past|previous)\s+(?:one|1)\s+months?\b|\b(?:last|past)\s+months?\b", q):
+        return now - timedelta(days=30), now, "the last 30 days"
+    return None, None, None
 
 
 # ==============================================================================
@@ -191,6 +213,49 @@ def extract_identifier(query: str, pattern: str) -> Optional[str]:
 
 class AssistantDataRetriever:
     """Service providing authorized, read-only data queries for Kaizen AMS Assistant."""
+
+    async def retrieve_admin_metrics(
+        self, query: str, user: CurrentUser, session: AsyncSession
+    ) -> Dict[str, Any]:
+        roles_upper = {role.upper() for role in (user.roles or [])}
+        if not roles_upper.intersection({"ADMIN", "SUPERUSER", "SUPER_ADMIN"}):
+            return {
+                "category": "admin",
+                "authorized": False,
+                "reason": "Administrator access is required to view user and audit KPIs.",
+            }
+
+        total = int((await session.execute(
+            select(func.count()).select_from(StoreManagerUserModel)
+        )).scalar_one())
+        active = int((await session.execute(
+            select(func.count()).select_from(StoreManagerUserModel).where(
+                func.upper(StoreManagerUserModel.status) == "ACTIVE"
+            )
+        )).scalar_one())
+        role_rows = (await session.execute(
+            select(StoreManagerUserModel.role, func.count(StoreManagerUserModel.id))
+            .group_by(StoreManagerUserModel.role)
+            .order_by(StoreManagerUserModel.role)
+        )).all()
+        assembly_units = int((await session.execute(
+            select(func.count()).select_from(AssemblyUnitModel)
+        )).scalar_one())
+        audit_logs = int((await session.execute(
+            select(func.count()).select_from(SystemAuditLogModel)
+        )).scalar_one())
+        return {
+            "category": "admin",
+            "authorized": True,
+            "found": True,
+            "users": {"total": total, "active": active, "inactive": total - active},
+            "roles": [
+                {"role": str(role).strip().upper().replace(" ", "_"), "count": int(count)}
+                for role, count in role_rows
+            ],
+            "assembly_units": assembly_units,
+            "audit_logs": audit_logs,
+        }
 
     async def retrieve_inventory(
         self, query: str, user: CurrentUser, session: AsyncSession
@@ -514,6 +579,7 @@ class AssistantDataRetriever:
         asn_number = extract_identifier(query, r"\bASN-[A-Z0-9-]+\b")
         entry_number = extract_identifier(query, r"\b(GE|GATE)-[A-Z0-9-]+\b")
         vehicle_number = extract_identifier(query, r"\b[A-Z]{2}[0-9]{1,2}[A-Z]{1,2}[0-9]{4}\b")
+        period_start, period_end, period_label = relative_date_filter(query)
 
         is_asn_inquiry = bool(
             asn_number
@@ -547,6 +613,10 @@ class AssistantDataRetriever:
                 asn_stmt = asn_stmt.where(func.upper(AsnModel.asn_number) == asn_number)
             elif vehicle_number:
                 asn_stmt = asn_stmt.where(func.upper(AsnModel.vehicle_number) == vehicle_number)
+            if period_start is not None:
+                asn_stmt = asn_stmt.where(AsnModel.created_at >= period_start)
+            if period_end is not None:
+                asn_stmt = asn_stmt.where(AsnModel.created_at < period_end)
 
             asn_stmt = asn_stmt.order_by(AsnModel.created_at.desc()).limit(10)
             res = await session.execute(asn_stmt)
@@ -559,6 +629,7 @@ class AssistantDataRetriever:
                     "found": False,
                     "message": f"No Advance Shipping Notice (ASN) records found"
                     + (f" matching '{asn_number or vehicle_number}'" if (asn_number or vehicle_number) else "")
+                    + (f" from {period_label}" if period_label else "")
                     + (" for your supplier account." if is_supplier else " in the database."),
                 }
 
@@ -599,6 +670,7 @@ class AssistantDataRetriever:
                 "category": "gate_entries",
                 "authorized": True,
                 "found": True,
+                "period_label": period_label,
                 "asns": asn_list,
             }
 
@@ -974,16 +1046,27 @@ class AssistantDataRetriever:
         ):
             return None
 
+        # Administration dashboard and user KPIs. Keep this ahead of generic
+        # operational terms such as "assembly" or "activity".
+        if re.search(
+            r"\b(total|count|how\s+many|number\s+of|active|inactive|summary|overview|kpis?|metrics?|show|list|latest|recent)\b",
+            q,
+        ) and re.search(
+            r"\b(users?|accounts?|employees?|roles?|assembly[\s_-]?units?|audit[\s_-]?(?:logs?|activity)|login[\s_-]?activity)\b",
+            q,
+        ):
+            return "admin"
+
         # 1. Purchase orders
-        if re.search(r"\b(pos|po|purchase[\s_-]?orders?|po[\s_-]?numbers?|rfqs?|procurement|sourcing|vendor[\s_-]?orders?|supplier[\s_-]?orders?)\b", q) or extract_identifier(query, r"\bPO-[A-Z0-9-]+\b"):
+        if re.search(r"\b(pos|po|purchase[\s_-]?orders?|po[\s_-]?numbers?|rfqs?|quotations?|procurement|sourcing|vendor[\s_-]?(?:orders?|status)|supplier[\s_-]?(?:orders?|status)|open[\s_-]?orders?|ordered[\s_-]?materials?)\b", q) or extract_identifier(query, r"\bPO-[A-Z0-9-]+\b"):
             return "purchase_orders"
 
         # 2. Putaway
-        if re.search(r"\b(putaways?|put[\s_-]?aways?|bin[\s_-]?placements?|stow(?:ing)?|storage[\s_-]?assignments?|pending[\s_-]?placements?)\b", q) or extract_identifier(query, r"\b(TASK|PUT|PT)-[A-Z0-9-]+\b"):
+        if re.search(r"\b(putaways?|put[\s_-]?aways?|bin[\s_-]?placements?|stow(?:ing)?|storage[\s_-]?assignments?|pending[\s_-]?placements?|received[\s_-]?stock[\s_-]?(?:placement|movement)|move[\s_-]?to[\s_-]?bin)\b", q) or extract_identifier(query, r"\b(TASK|PUT|PT)-[A-Z0-9-]+\b"):
             return "putaway"
 
         # 3. Gate entries / Inbound
-        if re.search(r"\b(gate|gates|security|gate[\s_-]?entries|gate[\s_-]?entry|gate[\s_-]?passes|gate[\s_-]?pass|vehicle[\s_-]?(?:entry|exit|queue|check[\s_-]?in|check[\s_-]?out)|inbound|arriv(al|als|ed|ing)|truck|asns?|advance[\s_-]?shipping[\s_-]?notices?|dock[\s_-]?arrivals?)\b", q) or extract_identifier(query, r"\b(GE|GATE|ASN)-[A-Z0-9-]+\b"):
+        if re.search(r"\b(gate|gates|security|gate[\s_-]?entries|gate[\s_-]?entry|gate[\s_-]?passes|gate[\s_-]?pass|vehicle[\s_-]?(?:entry|exit|queue|check[\s_-]?in|check[\s_-]?out)|driver|inbound|arriv(al|als|ed|ing)|truck|lorry|asns?|advance[\s_-]?shipping[\s_-]?notices?|dock[\s_-]?arrivals?|grns?|goods[\s_-]?receipts?|receiving|unloading|weighbridge)\b", q) or extract_identifier(query, r"\b(GE|GATE|ASN|GRN)-[A-Z0-9-]+\b"):
             return "gate_entries"
 
         # 4. Dock master and operational availability. Keep loading bays ahead
@@ -992,19 +1075,19 @@ class AssistantDataRetriever:
             return "docks"
 
         # 5. Assembly
-        if re.search(r"\b(assembly|assemblies|manufacturing|shop[\s_-]?floor|wip|assembly[\s_-]?orders?|work[\s_-]?orders?|boms?|production|production[\s_-]?orders?|production[\s_-]?lines?|assembly[\s_-]?builds?)\b", q) or extract_identifier(query, r"\b(AO|ASSY|WO)-[A-Z0-9-]+\b"):
+        if re.search(r"\b(assembly|assemblies|assembly[\s_-]?units?|manufacturing|shop[\s_-]?floor|wip|assembly[\s_-]?orders?|work[\s_-]?orders?|boms?|bill[\s_-]?of[\s_-]?materials?|production|production[\s_-]?orders?|production[\s_-]?lines?|assembly[\s_-]?builds?|material[\s_-]?requests?|finished[\s_-]?goods?)\b", q) or extract_identifier(query, r"\b(AO|ASSY|WO)-[A-Z0-9-]+\b"):
             return "assembly"
 
         # 6. Dispatch
-        if re.search(r"\b(dispatches|dispatch|customer[\s_-]?orders?|outbound|shipments?|shipment[\s_-]?status|delivery|delivery[\s_-]?routes?|consignment|transport|logistics|picking[\s_-]?packing|loading|gate[\s_-]?out)\b", q) or extract_identifier(query, r"\b(DISP|DSP|DO)-[A-Z0-9-]+\b"):
+        if re.search(r"\b(dispatches|dispatch|customer[\s_-]?orders?|outbound|shipments?|shipment[\s_-]?status|delivery|delivery[\s_-]?routes?|consignment|transport|logistics|pick[\s_-]?(?:lists?|waves?)|picking|packing|packed|loading|loaded|ready[\s_-]?to[\s_-]?ship|gate[\s_-]?out|proof[\s_-]?of[\s_-]?delivery|pod)\b", q) or extract_identifier(query, r"\b(DISP|DSP|DO)-[A-Z0-9-]+\b"):
             return "dispatch"
 
         # 7. Inventory & Stock
-        if re.search(r"\b(stocks?|inventory|stock[\s_-]?ledger|stock[\s_-]?balance|on[\s_-]?hands?|available|availability|reorders?|shortages?|skus?|items?|batches?|lots?|material[\s_-]?stocks?|bin[\s_-]?balances?)\b", q) or extract_identifier(query, r"\b(MAT|RM|PKG|FG|ITEM|SKU)-[A-Z0-9-]+\b"):
+        if re.search(r"\b(stocks?|inventory|stock[\s_-]?(?:ledger|balance|level|summary|movement|aging|ageing|issue|transfer|adjustment)|on[\s_-]?hands?|available|availability|reorders?|shortages?|low[\s_-]?stock|out[\s_-]?of[\s_-]?stock|skus?|items?|materials?|batches?|lots?|serial[\s_-]?numbers?|expiry|expired|fifo|fefo|quarantine|quality[\s_-]?hold|qc[\s_-]?hold|cycle[\s_-]?count|stock[\s_-]?take|material[\s_-]?stocks?|bin[\s_-]?balances?)\b", q) or extract_identifier(query, r"\b(MAT|RM|PKG|FG|ITEM|SKU)-[A-Z0-9-]+\b"):
             return "inventory"
 
         # 8. Warehouse layout / zone and bin master
-        if re.search(r"\b(zones?|bins?|racks?|shelves?|aisles?|storage[\s_-]?locations?|location[\s_-]?hierarchy|warehouse[\s_-]?layout)\b", q):
+        if re.search(r"\b(zones?|bins?|racks?|shelves?|aisles?|storage[\s_-]?(?:locations?|capacity)|location[\s_-]?hierarchy|warehouse[\s_-]?(?:layout|map)|space[\s_-]?utilization)\b", q):
             return "locations"
 
         return None

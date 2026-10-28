@@ -3742,6 +3742,15 @@ export const api = {
   async getAdminOverview(): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/admin/overview`);
   },
+  async getAdminAuditLogs(filters?: { module?: string; actor?: string; action?: string; result?: string; limit?: number }): Promise<{ total: number; items: any[] }> {
+    const params = new URLSearchParams();
+    if (filters?.module) params.set("module", filters.module);
+    if (filters?.actor) params.set("actor", filters.actor);
+    if (filters?.action) params.set("action", filters.action);
+    if (filters?.result) params.set("result", filters.result);
+    params.set("limit", String(filters?.limit || 100));
+    return request(`${BUSINESS_API_URL}/api/v1/admin/audit-logs?${params.toString()}`);
+  },
   async getAdminUsers(): Promise<any[]> {
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/admin/users`);
   },
@@ -3749,6 +3758,15 @@ export const api = {
     return request<Array<{ value: string; label: string }>>(
       `${BUSINESS_API_URL}/api/v1/admin/roles`,
     );
+  },
+  async getAdminAssemblyUnits(): Promise<Array<{ id: string; code: string; name: string; description?: string | null; status: string }>> {
+    return request(`${BUSINESS_API_URL}/api/v1/admin/assembly-units`);
+  },
+  async createAdminAssemblyUnit(payload: { unit_code: string; unit_name: string; description?: string }): Promise<any> {
+    return request(`${BUSINESS_API_URL}/api/v1/admin/assembly-units`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
   async getAdminStores(): Promise<Array<{ id: string; code: string; name: string }>> {
     return request<Array<{ id: string; code: string; name: string }>>(

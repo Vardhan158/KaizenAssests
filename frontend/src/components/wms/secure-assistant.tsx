@@ -20,7 +20,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { api, type AssistantChatMessage } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 
-const suggestedQuestions = [
+const defaultSuggestedQuestions = [
   "Show today’s inbound arrivals",
   "Show available inventory",
   "Show pending putaway tasks",
@@ -31,6 +31,34 @@ const suggestedQuestions = [
   "Show dispatch status",
   "How many zones, bins, and docks are configured?",
 ];
+
+const roleSuggestedQuestions: Record<string, string[]> = {
+  ADMIN: ["Show today's inbound arrivals", "Show available inventory", "Show active assembly orders", "Show dispatch status", "What can you do?"],
+  WAREHOUSE: ["Show available inventory", "Show pending putaway tasks", "Show today's inbound arrivals", "Where is material MAT-001?", "How many zones, bins, and docks are configured?"],
+  GATE_SECURITY: ["Show today's inbound arrivals", "Show the vehicle queue", "Which docks are available?", "Show dispatches ready for gate out", "Explain vehicle check-in and check-out"],
+  GRN: ["Show arrivals waiting for receiving", "Show open purchase orders", "Explain the GRN workflow", "Show pending putaway tasks", "Explain damaged material handling"],
+  STORE_MANAGER: ["Show available inventory", "Show pending putaway tasks", "Where is material MAT-001?", "Explain FIFO picking", "Show warehouse zones and bins"],
+  ASSEMBLY_MANAGER: ["Show active assembly orders", "Show material availability", "Explain material requests", "Show production progress", "Explain finished goods handover"],
+  DISPATCH_MANAGER: ["Show dispatch status", "Show outbound orders", "Explain picking and packing", "Explain loading and gate out", "Show available inventory"],
+  SUPPLIER: ["Show my purchase orders", "Show my inbound ASN status", "Explain ASN creation", "Explain damaged material claims", "Explain finished goods pickup"],
+};
+
+const roleAliases: Record<string, string> = {
+  SUPERUSER: "ADMIN", SUPER_ADMIN: "ADMIN", ADMIN_OFFICER: "ADMIN",
+  WAREHOUSE_MANAGER: "WAREHOUSE", STORE_KEEPER: "STORE_MANAGER",
+  STORE_OPERATOR: "STORE_MANAGER", ASSEMBLY: "ASSEMBLY_MANAGER",
+  DISPATCH: "DISPATCH_MANAGER",
+};
+
+function getSuggestedQuestions() {
+  const roles = getUserInfo()?.roles || [];
+  for (const rawRole of roles) {
+    const role = rawRole.toUpperCase().replaceAll("-", "_").replaceAll(" ", "_");
+    const suggestions = roleSuggestedQuestions[role] || roleSuggestedQuestions[roleAliases[role]];
+    if (suggestions) return suggestions;
+  }
+  return defaultSuggestedQuestions;
+}
 
 const roleModules: Record<string, { label: string; links: { label: string; to: string }[] }> = {
   WAREHOUSE: {
@@ -167,6 +195,7 @@ export function SecureAssistant() {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const module = useMemo(getModule, [location.pathname]);
+  const suggestedQuestions = useMemo(getSuggestedQuestions, [location.pathname]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });

@@ -32,6 +32,7 @@ import { Route as SupplierMaterialsRouteImport } from './routes/supplier-materia
 import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
 import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashboard'
+import { Route as AdminAuditRouteImport } from './routes/admin_.audit'
 import { Route as AdminSuppliersRouteImport } from './routes/admin_.suppliers'
 import { Route as AdminUsersRouteImport } from './routes/admin_.users'
 import { Route as AssemblyDispatchRouteImport } from './routes/assembly.dispatch'
@@ -166,6 +167,11 @@ const WarehouseDashboardRoute = WarehouseDashboardRouteImport.update({
   path: '/warehouse-dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAuditRoute = AdminAuditRouteImport.update({
+  id: '/admin_/audit',
+  path: '/admin/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminSuppliersRoute = AdminSuppliersRouteImport.update({
   id: '/admin_/suppliers',
   path: '/admin/suppliers',
@@ -287,6 +293,7 @@ export interface FileRoutesByFullPath {
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
+  '/admin/audit': typeof AdminAuditRoute
   '/admin/suppliers': typeof AdminSuppliersRoute
   '/admin/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
@@ -330,6 +337,7 @@ export interface FileRoutesByTo {
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
+  '/admin/audit': typeof AdminAuditRoute
   '/admin/suppliers': typeof AdminSuppliersRoute
   '/admin/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
@@ -374,6 +382,7 @@ export interface FileRoutesById {
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
+  '/admin_/audit': typeof AdminAuditRoute
   '/admin_/suppliers': typeof AdminSuppliersRoute
   '/admin_/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
@@ -419,6 +428,7 @@ export interface FileRouteTypes {
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
+    | '/admin/audit'
     | '/admin/suppliers'
     | '/admin/users'
     | '/assembly/dispatch'
@@ -462,6 +472,7 @@ export interface FileRouteTypes {
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
+    | '/admin/audit'
     | '/admin/suppliers'
     | '/admin/users'
     | '/assembly/dispatch'
@@ -505,6 +516,7 @@ export interface FileRouteTypes {
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
+    | '/admin_/audit'
     | '/admin_/suppliers'
     | '/admin_/users'
     | '/assembly/dispatch'
@@ -549,6 +561,7 @@ export interface RootRouteChildren {
   VehicleExitRoute: typeof VehicleExitRoute
   VehicleQueueRoute: typeof VehicleQueueRoute
   WarehouseDashboardRoute: typeof WarehouseDashboardRoute
+  AdminAuditRoute: typeof AdminAuditRoute
   AdminSuppliersRoute: typeof AdminSuppliersRoute
   AdminUsersRoute: typeof AdminUsersRoute
   AssemblyDispatchRoute: typeof AssemblyDispatchRoute
@@ -731,6 +744,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WarehouseDashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin_/audit': {
+      id: '/admin_/audit'
+      path: '/admin/audit'
+      fullPath: '/admin/audit'
+      preLoaderRoute: typeof AdminAuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin_/suppliers': {
       id: '/admin_/suppliers'
       path: '/admin/suppliers'
@@ -896,6 +916,7 @@ const rootRouteChildren: RootRouteChildren = {
   VehicleExitRoute: VehicleExitRoute,
   VehicleQueueRoute: VehicleQueueRoute,
   WarehouseDashboardRoute: WarehouseDashboardRoute,
+  AdminAuditRoute: AdminAuditRoute,
   AdminSuppliersRoute: AdminSuppliersRoute,
   AdminUsersRoute: AdminUsersRoute,
   AssemblyDispatchRoute: AssemblyDispatchRoute,

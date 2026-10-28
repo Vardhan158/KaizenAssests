@@ -4008,7 +4008,7 @@ function GrnPageWorkflow() {
                           ? grnRecords.slice(0, 4).map((r, idx) => ({
                               time: r.receipt_date || "Today",
                               title: `${r.grn_number || `GRN-000${idx + 1}`} · ${r.supplier_name || r.supplier_company_name || "Supplier"}`,
-                              detail: `PO ${r.po_number || "—"} · ${r.vehicle_number || "Dock arrival"}`,
+                              detail: `PO ${r.po_number || "—"} · ${r.vehicle_number || "Dock arrival"} · By ${r.received_by || "System"}`,
                               tone:
                                 r.status === "COMPLETED"
                                   ? "success"

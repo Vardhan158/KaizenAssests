@@ -50,6 +50,7 @@ export const ROLE_PAGES: Record<string, PermissionPage[]> = {
   ADMIN: [
     { key: "/admin", label: "Admin Overview" },
     { key: "/admin/users", label: "User Management" },
+    { key: "/admin/audit", label: "Audit Log" },
     { key: "/warehouse-dashboard", label: "Operations" },
   ],
 };

@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
-  Activity,
   ArrowRight,
   Boxes,
   Factory,
@@ -31,7 +30,6 @@ type AdminOverview = {
     gate_entries?: number;
     grns?: number;
     assembly_orders?: number;
-    dispatches?: number;
   };
   modules?: AdminModule[];
 };
@@ -106,7 +104,6 @@ function AdminPage() {
       Factory,
       "text-cyan-600 bg-cyan-50",
     ],
-    ["Dispatches", overview?.operations?.dispatches ?? 0, Activity, "text-rose-600 bg-rose-50"],
   ] as const;
 
   return (

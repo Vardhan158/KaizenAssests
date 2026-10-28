@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Pencil, Plus, ShieldCheck } from "lucide-react";
+import { Factory, Loader2, Pencil, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ type ManagedUser = {
 };
 
 type RoleOption = { value: string; label: string };
+type AssemblyUnit = { id: string; code: string; name: string; description?: string | null; status: string };
 
 const emptyForm = {
   username: "",
@@ -65,19 +66,27 @@ type EditForm = {
 function AdminUsersPage() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [assemblyUnits, setAssemblyUnits] = useState<AssemblyUnit[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [showUnitForm, setShowUnitForm] = useState(false);
+  const [unitForm, setUnitForm] = useState({ unit_code: "", unit_name: "", description: "" });
   const [search, setSearch] = useState("");
   const [editForm, setEditForm] = useState<EditForm | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [userData, roleData] = await Promise.all([api.getAdminUsers(), api.getAdminRoles()]);
+      const [userData, roleData, unitData] = await Promise.all([
+        api.getAdminUsers(),
+        api.getAdminRoles(),
+        api.getAdminAssemblyUnits(),
+      ]);
       setUsers(userData);
       setRoles(roleData);
+      setAssemblyUnits(unitData);
     } catch (error: any) {
       toast.error(error.message || "Unable to load users");
     } finally {
@@ -114,6 +123,22 @@ function AdminUsersPage() {
       await load();
     } catch (error: any) {
       toast.error(error.message || "Unable to create user");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createAssemblyUnit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const created = await api.createAdminAssemblyUnit(unitForm);
+      setAssemblyUnits((current) => [...current, created].sort((a, b) => a.code.localeCompare(b.code)));
+      setUnitForm({ unit_code: "", unit_name: "", description: "" });
+      setShowUnitForm(false);
+      toast.success(`Assembly unit ${created.code} created`);
+    } catch (error: any) {
+      toast.error(error.message || "Unable to create assembly unit");
     } finally {
       setSaving(false);
     }
@@ -196,10 +221,35 @@ function AdminUsersPage() {
               Manage warehouse staff roles, shifts, assembly units, and account status.
             </p>
           </div>
-          <Button onClick={() => setShowForm((current) => !current)}>
-            <Plus /> Create user
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setShowUnitForm((current) => !current)}>
+              <Factory /> Create assembly unit
+            </Button>
+            <Button onClick={() => setShowForm((current) => !current)}>
+              <Plus /> Create user
+            </Button>
+          </div>
         </div>
+
+        {showUnitForm && (
+          <Card>
+            <CardHeader><CardTitle className="flex items-center gap-2"><Factory className="text-primary" /> Create assembly unit</CardTitle></CardHeader>
+            <CardContent>
+              <form onSubmit={createAssemblyUnit} className="grid gap-4 md:grid-cols-3">
+                <label className="space-y-1.5 text-sm font-medium">Unit code
+                  <input required placeholder="UNIT-01" value={unitForm.unit_code} onChange={(event) => setUnitForm({ ...unitForm, unit_code: event.target.value.toUpperCase() })} className="h-10 w-full rounded-md border bg-background px-3 font-normal" />
+                </label>
+                <label className="space-y-1.5 text-sm font-medium">Unit name
+                  <input required placeholder="Pump Assembly Unit 1" value={unitForm.unit_name} onChange={(event) => setUnitForm({ ...unitForm, unit_name: event.target.value })} className="h-10 w-full rounded-md border bg-background px-3 font-normal" />
+                </label>
+                <label className="space-y-1.5 text-sm font-medium">Description
+                  <input placeholder="Optional" value={unitForm.description} onChange={(event) => setUnitForm({ ...unitForm, description: event.target.value })} className="h-10 w-full rounded-md border bg-background px-3 font-normal" />
+                </label>
+                <div className="flex gap-2 md:col-span-3"><Button type="submit" disabled={saving}>{saving && <Loader2 className="animate-spin" />} Create unit</Button><Button type="button" variant="outline" onClick={() => setShowUnitForm(false)}>Cancel</Button></div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
 
         {showForm && (
           <Card>
@@ -249,13 +299,15 @@ function AdminUsersPage() {
                 {form.role === "ASSEMBLY_MANAGER" ? (
                   <label className="space-y-1.5 text-sm font-medium">
                     Assembly unit code
-                    <input
+                    <select
                       required
-                      placeholder="e.g. UNIT-01"
                       value={form.assembly_unit_code}
                       onChange={(event) => setForm({ ...form, assembly_unit_code: event.target.value.toUpperCase() })}
                       className="h-10 w-full rounded-md border bg-background px-3 font-normal"
-                    />
+                    >
+                      <option value="">Select assembly unit</option>
+                      {assemblyUnits.filter((unit) => unit.status === "ACTIVE").map((unit) => <option key={unit.id} value={unit.code}>{unit.name} ({unit.code})</option>)}
+                    </select>
                   </label>
                 ) : (
                   <label className="space-y-1.5 text-sm font-medium">
@@ -363,7 +415,7 @@ function AdminUsersPage() {
                           <div>{roles.find((role) => role.value === user.role)?.label || user.role}</div>
                           <div className="text-xs text-muted-foreground">
                             {user.role === "ASSEMBLY_MANAGER"
-                              ? user.assembly_unit_code || "Unit unassigned"
+                              ? user.assembly_unit_code || "Unit assignment required"
                               : user.shift_name || "General shift"}
                           </div>
                         </td>
@@ -458,12 +510,15 @@ function AdminUsersPage() {
                   {editForm.role === "ASSEMBLY_MANAGER" ? (
                     <label className="space-y-1.5 text-sm font-medium">
                       Assembly unit code
-                      <input
+                      <select
                         required
                         value={editForm.assembly_unit_code}
                         onChange={(event) => setEditForm({ ...editForm, assembly_unit_code: event.target.value.toUpperCase() })}
                         className="h-10 w-full rounded-md border bg-background px-3 font-normal"
-                      />
+                      >
+                        <option value="">Select assembly unit</option>
+                        {assemblyUnits.filter((unit) => unit.status === "ACTIVE").map((unit) => <option key={unit.id} value={unit.code}>{unit.name} ({unit.code})</option>)}
+                      </select>
                     </label>
                   ) : (
                     <label className="space-y-1.5 text-sm font-medium">

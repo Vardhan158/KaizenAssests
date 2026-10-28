@@ -11,6 +11,18 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base, GUID
 
 
+class AssemblyUnitModel(Base):
+    __tablename__ = "assembly_unit"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    unit_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    unit_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
 class AssemblyOrderModel(Base):
     __tablename__ = "assembly_order"
 

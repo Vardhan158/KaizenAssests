@@ -13,6 +13,7 @@ from app.config.settings import get_settings
 from app.logging.logger import configure_logging, get_logger
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.request_context import RequestContextMiddleware
+from app.middleware.audit_log import AuditLogMiddleware
 from app.modules.dock.infrastructure.api.router import router as dock_router
 from app.modules.gate.infrastructure.api.router import (
     preview_router as gate_preview_router,
@@ -1709,6 +1710,7 @@ def create_app() -> FastAPI:
             origins.append(o)
 
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(AuditLogMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,

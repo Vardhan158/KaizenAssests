@@ -4,18 +4,18 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, or_, select
+from sqlalchemy import desc, func, or_, select
 
 from app.common.persistence.models import AsnModel, FinishedGoodsRequestModel, SupplierModel, SupplierUserModel
 from app.database.session import UnitOfWork, get_uow
-from app.modules.assembly.infrastructure.persistence.models import AssemblyOrderModel
-from app.modules.dispatch.infrastructure.persistence.models import DispatchModel
+from app.modules.assembly.infrastructure.persistence.models import AssemblyOrderModel, AssemblyUnitModel
 from app.modules.gate.infrastructure.persistence.models import GateEntryModel
 from app.modules.receiving.infrastructure.persistence.models import GrnModel
 from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel
 from app.security.dependencies import CurrentUser, get_current_user
+from app.modules.admin.infrastructure.persistence.models import SystemAuditLogModel
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -27,7 +27,6 @@ MANAGED_ROLES = [
     {"value": "GRN", "label": "GRN / Receiving"},
     {"value": "ASSEMBLY_MANAGER", "label": "Assembly Manager"},
     {"value": "QUALITY", "label": "Quality Inspector"},
-    {"value": "DISPATCH", "label": "Dispatch Manager"},
 ]
 ROLE_VALUES = {item["value"] for item in MANAGED_ROLES}
 
@@ -68,6 +67,12 @@ class UserUpdate(BaseModel):
     status: str | None = None
     password: str | None = Field(default=None, min_length=8, max_length=128)
     page_permissions: dict[str, str] | None = None
+
+
+class AssemblyUnitCreate(BaseModel):
+    unit_code: str = Field(min_length=2, max_length=64)
+    unit_name: str = Field(min_length=2, max_length=128)
+    description: str | None = Field(default=None, max_length=255)
 
 
 def serialize_user(account: StoreManagerUserModel) -> dict:
@@ -128,7 +133,6 @@ async def overview(
         "gate_entries": await count(GateEntryModel),
         "grns": await count(GrnModel),
         "assembly_orders": await count(AssemblyOrderModel),
-        "dispatches": await count(DispatchModel),
     }
 
     module_definitions = {
@@ -136,14 +140,37 @@ async def overview(
         "GATE_SECURITY": ("Gate", "/gate-dashboard", "Vehicle entry, verification and exit"),
         "GRN": ("GRN / Receiving", "/grn?tab=dashboard", "Goods receipt and receiving reports"),
         "ASSEMBLY_MANAGER": ("Assembly", "/assembly-dashboard", "Production, quality and finished goods"),
-        "DISPATCH": ("Dispatch", "/dispatch-orders", "Picking, loading and gate-out"),
-        "DISPATCH_MANAGER": ("Dispatch", "/dispatch-orders", "Picking, loading and gate-out"),
         "QUALITY": ("Quality", "/assembly/quality", "Incoming and finished-goods quality"),
         "SUPPLIER": ("Suppliers", "/supplier-dashboard", "ASN and finished-goods dispatches"),
     }
     grouped_modules: dict[str, dict] = {}
+    assembly_units = (await uow.session.execute(
+        select(AssemblyUnitModel).order_by(AssemblyUnitModel.unit_code)
+    )).scalars().all()
+    if assembly_units:
+        grouped_modules["Assembly"] = {
+            "key": "ASSEMBLY_MANAGER",
+            "name": "Assembly",
+            "route": "/assembly-dashboard",
+            "description": "Independent production units, quality and finished goods",
+            "users": [],
+            "assembly_units": [
+                {
+                    "code": unit.unit_code,
+                    "name": unit.unit_name,
+                    "route": f"/assembly-dashboard?assembly_unit={unit.unit_code}",
+                    "status": unit.status,
+                    "users": [],
+                }
+                for unit in assembly_units
+            ],
+        }
     for account in accounts:
         role = account.role.strip().upper().replace(" ", "_")
+        if role in {"DISPATCH", "DISPATCH_MANAGER"}:
+            continue
+        if role == "ASSEMBLY_MANAGER" and not (account.assembly_unit_code or "").strip():
+            continue
         title, route, description = module_definitions.get(
             role, (role.replace("_", " ").title(), "/admin/users", "Module users and access")
         )
@@ -187,12 +214,12 @@ async def overview(
             "pages": len(account.page_permissions or {}),
         }
         if role == "ASSEMBLY_MANAGER":
-            unit_code = (account.assembly_unit_code or "UNASSIGNED").strip().upper()
+            unit_code = account.assembly_unit_code.strip().upper()
             unit = next((item for item in module["assembly_units"] if item["code"] == unit_code), None)
             if unit is None:
                 unit = {
                     "code": unit_code,
-                    "name": "Unassigned Assembly" if unit_code == "UNASSIGNED" else unit_code.replace("_", " ").title(),
+                    "name": unit_code.replace("_", " ").title(),
                     "route": f"/assembly-dashboard?assembly_unit={unit_code}",
                     "users": [],
                 }
@@ -211,6 +238,102 @@ async def overview(
 @router.get("/roles")
 async def roles(_: CurrentUser = Depends(require_admin)) -> list[dict[str, str]]:
     return MANAGED_ROLES
+
+
+@router.get("/assembly-units")
+async def assembly_units(
+    _: CurrentUser = Depends(require_admin),
+    uow: UnitOfWork = Depends(get_uow),
+) -> list[dict]:
+    rows = (await uow.session.execute(
+        select(AssemblyUnitModel).order_by(AssemblyUnitModel.unit_code)
+    )).scalars().all()
+    return [
+        {
+            "id": str(unit.id),
+            "code": unit.unit_code,
+            "name": unit.unit_name,
+            "description": unit.description,
+            "status": unit.status,
+        }
+        for unit in rows
+    ]
+
+
+@router.get("/audit-logs")
+async def audit_logs(
+    module: str | None = Query(default=None, max_length=64),
+    actor: str | None = Query(default=None, max_length=128),
+    action: str | None = Query(default=None, max_length=32),
+    result: str | None = Query(default=None, max_length=32),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    _: CurrentUser = Depends(require_admin),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    conditions = []
+    if module:
+        conditions.append(func.upper(SystemAuditLogModel.module) == module.strip().upper())
+    if actor:
+        conditions.append(SystemAuditLogModel.actor_username.ilike(f"%{actor.strip()}%"))
+    if action:
+        conditions.append(func.upper(SystemAuditLogModel.action) == action.strip().upper())
+    if result:
+        conditions.append(func.upper(SystemAuditLogModel.result) == result.strip().upper())
+    total = int((await uow.session.execute(
+        select(func.count()).select_from(SystemAuditLogModel).where(*conditions)
+    )).scalar_one())
+    rows = (await uow.session.execute(
+        select(SystemAuditLogModel)
+        .where(*conditions)
+        .order_by(desc(SystemAuditLogModel.occurred_at))
+        .limit(limit)
+        .offset(offset)
+    )).scalars().all()
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": str(row.id),
+                "actor_username": row.actor_username,
+                "actor_employee_id": row.actor_employee_id,
+                "actor_roles": row.actor_roles,
+                "module": row.module,
+                "action": row.action,
+                "request_path": row.request_path,
+                "target_reference": row.target_reference,
+                "status_code": row.status_code,
+                "result": row.result,
+                "request_id": row.request_id,
+                "ip_address": row.ip_address,
+                "occurred_at": row.occurred_at,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.post("/assembly-units", status_code=status.HTTP_201_CREATED)
+async def create_assembly_unit(
+    payload: AssemblyUnitCreate,
+    _: CurrentUser = Depends(require_admin),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    code = payload.unit_code.strip().upper().replace(" ", "-")
+    duplicate = await uow.session.execute(
+        select(AssemblyUnitModel.id).where(func.upper(AssemblyUnitModel.unit_code) == code)
+    )
+    if duplicate.first():
+        raise HTTPException(status_code=409, detail="Assembly unit code already exists")
+    unit = AssemblyUnitModel(
+        unit_code=code,
+        unit_name=payload.unit_name.strip(),
+        description=(payload.description or "").strip() or None,
+        status="ACTIVE",
+    )
+    uow.session.add(unit)
+    await uow.commit()
+    return {"id": str(unit.id), "code": unit.unit_code, "name": unit.unit_name, "description": unit.description, "status": unit.status}
 
 
 @router.get("/suppliers")
@@ -278,6 +401,16 @@ async def create_user(
     role = payload.role.strip().upper().replace(" ", "_")
     if role not in ROLE_VALUES:
         raise HTTPException(status_code=422, detail="Unsupported role")
+    if role == "ASSEMBLY_MANAGER" and not (payload.assembly_unit_code or "").strip():
+        raise HTTPException(status_code=422, detail="Assembly unit code is required for Assembly Managers")
+    if role == "ASSEMBLY_MANAGER":
+        unit = (await uow.session.execute(
+            select(AssemblyUnitModel.id).where(
+                func.upper(AssemblyUnitModel.unit_code) == payload.assembly_unit_code.strip().upper()
+            )
+        )).first()
+        if not unit:
+            raise HTTPException(status_code=422, detail="Selected Assembly Unit does not exist")
 
     duplicate = await uow.session.execute(
         select(StoreManagerUserModel.id).where(
@@ -377,6 +510,16 @@ async def update_user(
         account.shift_name = payload.shift_name.strip() or None
     if payload.assembly_unit_code is not None:
         account.assembly_unit_code = payload.assembly_unit_code.strip().upper() or None
+    if account.role.strip().upper().replace(" ", "_") == "ASSEMBLY_MANAGER" and not account.assembly_unit_code:
+        raise HTTPException(status_code=422, detail="Assembly unit code is required for Assembly Managers")
+    if account.role.strip().upper().replace(" ", "_") == "ASSEMBLY_MANAGER":
+        unit = (await uow.session.execute(
+            select(AssemblyUnitModel.id).where(
+                func.upper(AssemblyUnitModel.unit_code) == account.assembly_unit_code.upper()
+            )
+        )).first()
+        if not unit:
+            raise HTTPException(status_code=422, detail="Selected Assembly Unit does not exist")
     if payload.status is not None:
         next_status = payload.status.strip().upper()
         if next_status not in {"ACTIVE", "INACTIVE"}:

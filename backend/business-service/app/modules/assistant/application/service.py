@@ -8,6 +8,12 @@ from typing import Any, Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.assistant.application.data_retriever import AssistantDataRetriever
+from app.modules.assistant.application.role_policy import (
+    can_access_category,
+    canonical_roles,
+    capabilities_reply,
+    unauthorized_reply,
+)
 from app.modules.assistant.domain.schemas import AssistantChatRequest, AssistantChatResponse
 from app.security.dependencies import CurrentUser
 
@@ -32,23 +38,47 @@ DOMAIN_TERMS = re.compile(
     r"\b(warehouses?|inventory|stocks?|materials?|skus?|items?|batches?|lots?|bins?|zones?|"
     r"racks?|shelves?|aisles?|locations?|putaway|stow|storage|"
     r"purchase\s*orders?|procurement|\bpos?\b|\brfqs?\b|vendors?|suppliers?|gate|security|inbound|"
-    r"arrival|truck|asn|docks?|grns?|goods\s+receipt|receiving|quarantine|"
+    r"arrival|truck|asns?|advance\s+shipping\s+notices?|docks?|grns?|goods\s+receipt|receiving|quarantine|"
     r"assembly|manufacturing|work\s+orders?|bom|production|wip|finished\s+goods|dispatch|"
     r"shipment|outbound|transport|logistics|delivery|picking|packing|loading|gate\s*out|"
     r"requisition|fifo|fefo|aging|ageing|allocation|allocated|"
     r"reservation|reserved|quantity|capacity|"
     r"qc|quality|inspection|damage|claims?|hold|holds|returns?|cycle.count|stock.take|shortage|"
-    r"receipt|receipts|issue|issued|issue.stock|material.request|assembly.request)\b",
+    r"receipt|receipts|issue|issued|issue.stock|material.request|assembly.request|"
+    r"users?|roles?|permissions?|audit.logs?|activity.logs?|login.activity|assembly.units?|"
+    r"drivers?|vehicles?|weighbridge|serial.numbers?|proof.of.delivery|pod|utilization|"
+    r"dashboard|kpis?|metrics?|reports?)\b",
     re.IGNORECASE,
 )
 MUTATION_REQUEST = re.compile(
     r"^\s*(?:(?:please|can you|could you|would you|i want you to|i need you to)\s+)*(?:create|add|edit|"
     r"update|change|delete|remove|approve|reject|issue|reserve|allocate|"
-    r"cancel|execute|submit|post)\b",
+    r"cancel|execute|submit|post|assign|unassign|release|close|complete|mark|upload|import)\b",
     re.IGNORECASE,
 )
 GREETING = re.compile(r"^(hi|hello|hey|good morning|good afternoon|good evening)[!. ]*$", re.I)
 THANKS = re.compile(r"^(thanks|thank you|thx|appreciate it)[!. ]*$", re.I)
+HELP_REQUEST = re.compile(
+    r"\b(help|what can you do|how can you help|show (?:me )?(?:my )?(?:options|commands)|"
+    r"capabilities|what can i ask|examples?|suggestions?)\b",
+    re.I,
+)
+FOLLOW_UP = re.compile(
+    r"\b(what about|how about|and (?:the|those|pending|open|today)|those|them|it|"
+    r"pending ones?|open ones?|today|yesterday|this week|same|more|details?|status)\b",
+    re.I,
+)
+ADMIN_TOPIC = re.compile(
+    r"\b(audit[\s_-]?logs?|activity[\s_-]?logs?|login[\s_-]?activity|user[\s_-]?management|"
+    r"user[\s_-]?roles?|role[\s_-]?management|assign[\s_-]?roles?|permissions?|"
+    r"page[\s_-]?access|assembly[\s_-]?units?)\b",
+    re.I,
+)
+ADMIN_LIVE_QUERY = re.compile(
+    r"\b(total|count|how\s+many|number\s+of|active|inactive|summary|overview|kpis?|metrics?|"
+    r"show|list|latest|recent)\b",
+    re.I,
+)
 
 SPELLING_VARIANTS = {
     "inventry": "inventory",
@@ -65,6 +95,15 @@ SPELLING_VARIANTS = {
     "suplier": "supplier",
     "suppplier": "supplier",
     "vehical": "vehicle",
+    "vechicle": "vehicle",
+    "reciept": "receipt",
+    "puchase": "purchase",
+    "pruchase": "purchase",
+    "quanity": "quantity",
+    "availble": "available",
+    "manufaturing": "manufacturing",
+    "quarentine": "quarantine",
+    "allotement": "allocation",
 }
 
 
@@ -82,6 +121,18 @@ class AssistantService:
     def __init__(self, data_retriever: Optional[AssistantDataRetriever] = None) -> None:
         self.data_retriever = data_retriever or AssistantDataRetriever()
 
+    def _resolve_contextual_query(self, request: AssistantChatRequest, query: str) -> str:
+        """Carry the last operational topic into short, natural follow-up questions."""
+        if self.data_retriever.detect_category(query) or not FOLLOW_UP.search(query):
+            return query
+        for message in reversed(request.history[-8:]):
+            if message.role != "user":
+                continue
+            previous = normalize_query(message.content)
+            if self.data_retriever.detect_category(previous):
+                return f"{previous}. Follow-up request: {query}"
+        return query
+
     async def retrieve_context(
         self, query: str, user: CurrentUser, session: AsyncSession
     ) -> Optional[Dict[str, Any]]:
@@ -97,6 +148,7 @@ class AssistantService:
             "dispatch": self.data_retriever.retrieve_dispatch_status,
             "locations": self.data_retriever.retrieve_warehouse_locations,
             "docks": self.data_retriever.retrieve_docks,
+            "admin": self.data_retriever.retrieve_admin_metrics,
         }
         try:
             method = methods.get(category)
@@ -179,6 +231,22 @@ class AssistantService:
                 lines.append(f"• {detail}.")
             return "\n".join(lines)
 
+        if category == "admin":
+            users = facts.get("users") or {}
+            lines = [
+                f"Total users: {users.get('total', 0)}.",
+                f"Active users: {users.get('active', 0)}; inactive users: {users.get('inactive', 0)}.",
+            ]
+            roles = facts.get("roles") or []
+            if roles:
+                lines.append("Users by role: " + ", ".join(
+                    f"{item['role'].replace('_', ' ').title()} {item['count']}" for item in roles
+                ) + ".")
+            lines.append(
+                f"Assembly units: {facts.get('assembly_units', 0)}; audit-log entries: {facts.get('audit_logs', 0)}."
+            )
+            return "\n".join(lines)
+
         keys = {
             "inventory": ("items", "Inventory"),
             "purchase_orders": ("orders", "Purchase order"),
@@ -191,10 +259,14 @@ class AssistantService:
         }
         collection_key, label = keys.get(category, ("items", "Record"))
         records = facts.get(collection_key) or []
+        if category == "gate_entries" and facts.get("asns") is not None:
+            records = facts.get("asns") or []
+            label = "ASN"
         if not records:
             return "No matching records were found."
 
-        lines = [f"{label}{'s' if len(records) != 1 else ''} ({len(records)}):"]
+        period = f" from {facts['period_label']}" if facts.get("period_label") else ""
+        lines = [f"{label}{'s' if len(records) != 1 else ''}{period} ({len(records)}):"]
         for item in records[:10]:
             if category == "inventory":
                 name = item.get("material_name") or item.get("material_code", "Material")
@@ -225,6 +297,7 @@ class AssistantService:
                     ("destination_bin", "bin"), ("destination_zone", "zone"),
                     ("product_name", "product"), ("planned_quantity", "planned"),
                     ("completed_quantity", "completed"), ("scheduled_date", "scheduled"),
+                    ("shipment_date", "shipped"), ("expected_arrival_at", "expected arrival"),
                     ("required_date", "required"), ("customer_name", "customer"),
                     ("current_location", "location"),
                 ):
@@ -279,6 +352,14 @@ class AssistantService:
             return "\n\n".join(metric_replies)
 
         workflows = (
+            (r"\b(audit[\s_-]?logs?|activity[\s_-]?logs?|who[\s_-]?(?:did|performed|changed)|login[\s_-]?activity)\b",
+             "The Admin Audit Log records who performed an action, their module, action, record, result, and timestamp. Use Admin > Audit Log to filter by user, module, action, status, or date. The assistant does not expose the full security log as chat text."),
+            (r"\b(user[\s_-]?management|users?|roles?|permissions?|page[\s_-]?access)\b",
+             "User access is managed from Admin > User Management. Assign the user's operational role and only the page permissions needed for their work. Changes must be made in the admin workflow; the assistant is read-only."),
+            (r"\b(assembly[\s_-]?units?|production[\s_-]?units?)\b.*\b(create|setup|configuration|manage|add)\b|\b(create|setup|configure|add)\b.*\b(assembly[\s_-]?units?|production[\s_-]?units?)\b",
+             "Assembly units are created and maintained from the admin assembly-unit management page. Each unit gets its own operational workspace and assigned assembly users; all other operational roles share their module page."),
+            (r"\b(kpis?|metrics?|reports?|dashboard)\b",
+             "Dashboards and reports summarize the records available to your role. Ask for the operational area as well, such as 'inventory summary', 'inbound status', 'assembly progress', or 'dispatch status', so I can use the correct live data."),
             (r"\b(fifo|pick\s+order|older\s+stock|oldest\s+stock|expiry|expired)\b",
              "Use FIFO: pick the oldest eligible stock first. If older eligible stock remains, the system should block picking a newer batch until the older stock is cleared. Quarantined or expired stock is not eligible."),
             (r"\b(grn|goods\s+receipt|receive\s+goods|receiving)\b",
@@ -334,16 +415,37 @@ class AssistantService:
         user: CurrentUser,
         session: Optional[AsyncSession] = None,
     ) -> AssistantChatResponse:
-        query = normalize_query(request.message.strip())
+        original_query = normalize_query(request.message.strip())
+        query = self._resolve_contextual_query(request, original_query)
         if MUTATION_REQUEST.search(query):
             reply = READ_ONLY_REPLY
         elif GREETING.fullmatch(query):
             reply = "Hello! I can help with Kaizen AMS warehouse and operations questions. What would you like to look up?"
         elif THANKS.fullmatch(query):
             reply = "You’re welcome. Ask whenever you need help with an AMS operations lookup."
+        elif HELP_REQUEST.search(query):
+            reply = capabilities_reply(user.roles)
+        elif ADMIN_TOPIC.search(query) and not ADMIN_LIVE_QUERY.search(query):
+            if "ADMIN" not in canonical_roles(user.roles):
+                reply = (
+                    "This is an administration-only topic. Your role cannot view or manage "
+                    "users, permissions, assembly-unit setup, or audit-log details through the assistant."
+                )
+            else:
+                reply = self._workflow_reply(query) or (
+                    "Use the Admin workspace for user access, assembly-unit setup, and audit logs. "
+                    "The assistant can explain these controls but cannot change them."
+                )
         elif not DOMAIN_TERMS.search(query):
             reply = STANDARD_FALLBACK
         else:
+            category = self.data_retriever.detect_category(query)
+            if category and not can_access_category(user.roles, category):
+                return AssistantChatResponse(
+                    reply=unauthorized_reply(user.roles, category),
+                    model="rules-v2-role-aware",
+                    role="assistant",
+                )
             asks_for_guidance = bool(re.search(
                 r"\b(how\b|why\b|when\b|where\b|who\b|steps?\s+to|explain|"
                 r"guide|what\b|tell\s+me|meaning|difference|purpose|used\s+for|"
@@ -363,10 +465,12 @@ class AssistantService:
                 facts = await self.retrieve_context(query, user, session)
                 if facts:
                     reply = self._format_records(facts, query)
+            if not reply and category is None:
+                reply = self._workflow_reply(query) or ""
             if not reply:
                 reply = UNSUPPORTED_REPLY
 
-        return AssistantChatResponse(reply=reply, model="rules-v1", role="assistant")
+        return AssistantChatResponse(reply=reply, model="rules-v2-role-aware", role="assistant")
 
 
 def get_assistant_service() -> AssistantService:
