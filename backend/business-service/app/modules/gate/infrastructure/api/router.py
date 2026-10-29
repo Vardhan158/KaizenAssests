@@ -213,13 +213,16 @@ async def complete_finished_goods_pickup_gate_exit(
                 raise HTTPException(409, "Assembly must confirm loading first")
             loaded = (await uow.session.scalars(select(FinishedGoodsSectionModel.qr_identity).where(
                 FinishedGoodsSectionModel.gate_visit_id == visit.id, FinishedGoodsSectionModel.status == "LOADED"))).all()
-            if not loaded or set(loaded) != set(payload.section_qr_identities):
+            if not loaded:
+                raise HTTPException(409, "No sections loaded on this vehicle")
+            if payload.section_qr_identities and set(loaded) != set(payload.section_qr_identities):
                 raise HTTPException(422, "Verify all and only the sections loaded on this vehicle")
             claimed = await uow.session.execute(update(FinishedGoodsPickupGateVisitModel).where(
                 FinishedGoodsPickupGateVisitModel.id == visit.id, FinishedGoodsPickupGateVisitModel.status == "READY_FOR_GATE_EXIT").values(status="CLOSED"))
             if claimed.rowcount != 1:
                 raise HTTPException(409, "Gate exit already confirmed")
-            await transition_sections(uow.session, request.section_fg_id, visit.id, payload.section_qr_identities, user.username, exiting=True)
+            sections_to_exit = payload.section_qr_identities if payload.section_qr_identities else list(loaded)
+            await transition_sections(uow.session, request.section_fg_id, visit.id, sections_to_exit, user.username, exiting=True)
             visit.exited_at = datetime.datetime.now(datetime.timezone.utc)
             visit.exit_approved_by = user.username
             visit.documents_verified = True

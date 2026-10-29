@@ -101,6 +101,7 @@ export function FgLoading() {
   return (
     <section className="space-y-4 rounded-xl border p-4">
       <h2 className="text-lg font-semibold">FG Loading</h2>
+      <p className="text-sm text-muted-foreground">Supplier vehicle registration → FG Gate Entry → Assembly loading → Gate Exit using the same Gate Pass. Vehicles appear here only after Gate Entry.</p>
       <Button variant="outline" onClick={() => void load()}>
         Refresh vehicles
       </Button>

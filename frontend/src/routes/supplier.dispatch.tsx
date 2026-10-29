@@ -222,7 +222,7 @@ function SupplierDispatchPage() {
         };
         window.localStorage.setItem(dispatchDetailsKey, JSON.stringify(savedDetails));
       }
-      toast.success("Dispatch created successfully");
+      toast.success("Vehicle registered for FG pickup", { description: "Complete FG Gate Entry first. Assembly loads after entry, and Gate Exit uses the same Gate Pass." });
       setOpen(false);
       setTransportEntries([createTransportEntry()]);
       setGoods([{ name: "", quantity: "", custom: false }]);

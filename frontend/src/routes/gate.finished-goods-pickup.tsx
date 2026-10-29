@@ -1,4 +1,3 @@
-import { FgQrInput } from "@/components/wms/fg-qr-input";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
@@ -37,8 +36,6 @@ function FinishedGoodsPickupGatePage() {
   const [exitOpen, setExitOpen] = useState(false);
   const [exitPass, setExitPass] = useState("");
   const [exitDetails, setExitDetails] = useState<any | null>(null);
-  const [sectionScan, setSectionScan] = useState("");
-  const [verifiedScans, setVerifiedScans] = useState<string[]>([]);
   const [exitDocs, setExitDocs] = useState(false);
   const [exitBusy, setExitBusy] = useState(false);
 
@@ -53,8 +50,6 @@ function FinishedGoodsPickupGatePage() {
       const result = await api.getFinishedGoodsPickupGatePass(normalized);
       setExitDetails(result);
       setExitDocs(false);
-      setVerifiedScans([]);
-      setSectionScan("");
     } catch (err) {
       setExitDetails(null);
       toast.error(err instanceof Error ? err.message : "Gate pass not found.");
@@ -69,7 +64,6 @@ function FinishedGoodsPickupGatePage() {
         vehicle_number: exitDetails.vehicle_number,
         driver_name: exitDetails.driver_name,
         documents_verified: true,
-        section_qr_identities: verifiedScans,
       });
       toast.success(`${result.request_number} exited successfully`, {
         description: `Exit recorded at ${new Date(result.exited_at).toLocaleString()}.`,
@@ -267,17 +261,52 @@ function FinishedGoodsPickupGatePage() {
                   <p className="sm:col-span-2"><span className="text-muted-foreground">Entry:</span> {exitDetails.entered_at ? new Date(exitDetails.entered_at).toLocaleString() : "—"}</p>
                 </Card>
               )}
-              {exitDetails?.fg_id && <div className="space-y-2">
-                <p>FG: {exitDetails.fg_id}</p>
-                {exitDetails.loaded_sections?.map((s: any) => <p key={s.sub_id}>{s.sub_id} ? {s.status} ? {verifiedScans.includes(s.qr_identity) ? "Verified" : "Scan required"}</p>)}
-                <FgQrInput value={sectionScan} onChange={setSectionScan} label="Verify loaded section" inputId="exit-section-scan" />
-                <Button onClick={() => { if (!exitDetails.loaded_sections?.some((s: any) => s.qr_identity === sectionScan)) { toast.error("QR is not loaded on this vehicle"); return; } setVerifiedScans(prev => [...new Set([...prev, sectionScan])]); setSectionScan(""); }}>Verify section</Button>
-              </div>}
-              {exitDetails && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={exitDocs} onChange={(e) => setExitDocs(e.target.checked)} /> Packing list and dispatch documents verified</label>}
+              {exitDetails?.fg_id && (
+                <div className="space-y-2">
+                  {exitDetails.status !== "READY_FOR_GATE_EXIT" && exitDetails.status !== "CLOSED" && (
+                    <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+                      Assembly must confirm loading before Gate Exit.
+                    </p>
+                  )}
+                  {exitDetails.loaded_sections && exitDetails.loaded_sections.length > 0 && (
+                    <div className="rounded-xl border border-border/60 bg-muted/10 p-3 text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">
+                          Loaded Transport Sections ({exitDetails.loaded_sections.length})
+                        </span>
+                        <span className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
+                          ✓ Verified at loading dock
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {exitDetails.loaded_sections.map((s: any) => (
+                          <span
+                            key={s.sub_id}
+                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-mono font-medium text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                          >
+                            ✓ {s.sub_id}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {exitDetails && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={exitDocs}
+                    onChange={(e) => setExitDocs(e.target.checked)}
+                    className="size-4 rounded accent-primary"
+                  />
+                  Packing list and dispatch documents verified
+                </label>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setExitOpen(false)}>Cancel</Button>
-              <Button disabled={!exitDetails || !exitDocs || exitBusy} onClick={() => void confirmExit()}>{exitBusy ? "Recording exit…" : "Confirm Exit"}</Button>
+              <Button disabled={!exitDetails || !exitDocs || exitBusy || (Boolean(exitDetails?.fg_id) && exitDetails.status !== "READY_FOR_GATE_EXIT")} onClick={() => void confirmExit()}>{exitBusy ? "Recording exit…" : "Confirm Exit"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

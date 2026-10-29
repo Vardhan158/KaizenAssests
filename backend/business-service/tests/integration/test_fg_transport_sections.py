@@ -66,11 +66,23 @@ async def test_two_vehicle_section_dispatch_and_guards():
                 number = registered.json()["request_number"]
                 async with session_scope() as db:
                     request_ids.append(await db.scalar(select(FinishedGoodsRequestModel.id).where(FinishedGoodsRequestModel.request_number == number)))
+                queue_before_entry = await client.get("/api/v1/assembly/fg-loading", headers=headers("ASSEMBLY"))
+                assert queue_before_entry.status_code == 200
+                assert not any(row["fg_id"] == str(fg_id) for row in queue_before_entry.json())
+                before_entry = await client.post("/api/v1/assembly/fg-loading/NOENTRY/confirm",
+                    json={"qr_identities": [chosen[0]["qr_identity"]]}, headers=headers("ASSEMBLY"))
+                assert before_entry.status_code == 409
                 entry_payload = {k: registration[k] for k in ("vehicle_number", "driver_name", "driver_contact")}
                 entry_payload["request_number"] = number
                 entry = await client.post("/api/gate-entries/finished-goods-pickup", json=entry_payload, headers=headers("ADMIN"))
                 assert entry.status_code == 201, entry.text
                 gate_pass = entry.json()["gate_pass_number"]
+                queue_after_entry = await client.get("/api/v1/assembly/fg-loading", headers=headers("ASSEMBLY"))
+                assert any(row["fg_id"] == str(fg_id) and row["gate_pass_number"] == gate_pass for row in queue_after_entry.json())
+                premature_exit = await client.post(f"/api/gate-entries/finished-goods-pickup/{gate_pass}/exit",
+                    json={"vehicle_number": registration["vehicle_number"], "driver_name": registration["driver_name"],
+                          "documents_verified": True, "section_qr_identities": [s["qr_identity"] for s in chosen]}, headers=headers("ADMIN"))
+                assert premature_exit.status_code == 409
                 repeated = await client.post("/api/gate-entries/finished-goods-pickup", json=entry_payload, headers=headers("ADMIN"))
                 assert repeated.json()["gate_pass_number"] == gate_pass
                 scans = [s["qr_identity"] for s in chosen]
@@ -91,6 +103,7 @@ async def test_two_vehicle_section_dispatch_and_guards():
                 assert wrong.status_code == 422
                 exited = await client.post(f"/api/gate-entries/finished-goods-pickup/{gate_pass}/exit", json=exit_payload, headers=headers("ADMIN"))
                 assert exited.status_code == 200, exited.text
+                assert exited.json()["gate_pass_number"] == gate_pass
                 assert exited.json()["dispatched_sections"] == (3 if index == 0 else 8)
                 assert exited.json()["dispatch_status"] == ("PARTIALLY_DISPATCHED" if index == 0 else "FULLY_DISPATCHED")
                 duplicate_exit = await client.post(f"/api/gate-entries/finished-goods-pickup/{gate_pass}/exit", json=exit_payload, headers=headers("ADMIN"))
