@@ -19,6 +19,16 @@ type Batch = {
   status: string;
   qr_code?: string;
 };
+type Section = {
+  sub_id: string;
+  qr_identity: string;
+  status: string;
+  gate_visit_id?: string | null;
+  loaded_by?: string | null;
+  loaded_at?: string | null;
+  dispatched_by?: string | null;
+  dispatched_at?: string | null;
+};
 type Pickup = {
   id: string;
   request_number: string;
@@ -45,8 +55,16 @@ type Pickup = {
   gate_pass_number?: string;
   gate_pass_status?: string;
   allocated_batches?: Batch[];
+  fg_id?: string | null;
+  section_fg_id?: string | null;
+  main_fg_id?: string | null;
+  sections?: Section[];
+  dispatched_sections?: number;
+  remaining_sections?: number;
 };
-const steps = ["Dispatch Verification", "Picking & Packing", "Loading"];
+const legacySteps = ["Dispatch Verification", "Picking & Packing", "Loading"];
+const sectionalSteps = ["Vehicle Arrival", "Section Loading", "Gate Exit"];
+const steps = legacySteps;
 const loadingStatuses = [
   "PACKED",
   "DISPATCH_READY",
@@ -68,6 +86,19 @@ const terminalStatuses = [
   "DELIVERED",
 ];
 function fgDispatchStep(request: Pickup, status = request.dispatch_status): number {
+  if (request.fg_id || (request as any).section_fg_id) {
+    if (
+      request.gate_pass_status === "CLOSED" ||
+      request.status === "COMPLETED" ||
+      request.status === "DISPATCHED" ||
+      request.dispatch_status === "FULLY_DISPATCHED" ||
+      terminalStatuses.includes(status || request.status)
+    )
+      return 2;
+    if (request.gate_pass_status === "READY_FOR_GATE_EXIT") return 2;
+    if (request.gate_pass_status === "INSIDE_FACILITY") return 1;
+    return 0;
+  }
   if (request.processing_group)
     return request.processing_group === "COMPLETE" ? 2 : Number(request.processing_group);
   if (terminalStatuses.includes(status || request.status)) return 2;
@@ -78,6 +109,17 @@ function fgDispatchStep(request: Pickup, status = request.dispatch_status): numb
     : 1;
 }
 function dispatchAction(request: Pickup): "Process" | "View" {
+  if (request.fg_id || (request as any).section_fg_id) {
+    if (
+      request.gate_pass_status === "CLOSED" ||
+      request.status === "COMPLETED" ||
+      request.status === "CANCELLED" ||
+      request.dispatch_status === "FULLY_DISPATCHED"
+    ) {
+      return "View";
+    }
+    return "Process";
+  }
   const status = request.dispatch_status || request.status;
   const closed =
     request.gate_exit_confirmed === true ||
@@ -135,7 +177,16 @@ function AssemblyDispatchPage() {
   const [verified, setVerified] = useState<string[]>([]);
   const [packageType, setPackageType] = useState("");
   const [packageCount, setPackageCount] = useState("");
+  const [selectedSectionQrs, setSelectedSectionQrs] = useState<string[]>([]);
+  const [sectionScan, setSectionScan] = useState("");
   const selected = requests.find((request) => request.id === selectedId);
+  const isSectional = Boolean(
+    selected &&
+      (selected.fg_id ||
+        (selected as any).section_fg_id ||
+        (selected.sections && selected.sections.length > 0)),
+  );
+  const availableSections = (selected?.sections || []).filter((s) => s.status === "AVAILABLE");
   const load = useCallback(async (isCurrent: () => boolean = () => true) => {
     const result = await api.getSupplierFinishedGoodsDispatchRequests();
     if (!isCurrent()) return (result || []) as Pickup[];
@@ -164,6 +215,8 @@ function AssemblyDispatchPage() {
     setVehicleConfirmed(false);
     setPackageType("");
     setPackageCount("");
+    setSelectedSectionQrs([]);
+    setSectionScan("");
     if (selected?.dispatch_id) {
       setDetailLoading(true);
       void api
@@ -236,13 +289,24 @@ function AssemblyDispatchPage() {
   };
   const status = dispatch?.status || selected?.dispatch_status || "";
   const step = selected ? fgDispatchStep(selected, status) : 0;
+  const sectionalCompleted =
+    isSectional &&
+    (selected?.gate_pass_status === "CLOSED" ||
+      selected?.status === "COMPLETED" ||
+      selected?.status === "DISPATCHED" ||
+      selected?.dispatch_status === "FULLY_DISPATCHED" ||
+      selected?.gate_exit_confirmed === true);
+  const sectionalReady = isSectional && selected?.gate_pass_status === "READY_FOR_GATE_EXIT";
   const completed =
     !!selected &&
     (selected.gate_exit_confirmed === true ||
       selected.status === "CANCELLED" ||
-      selected.workflow_status === "CANCELLED");
+      selected.workflow_status === "CANCELLED" ||
+      sectionalCompleted);
   const ready =
-    status === "READY_FOR_GATE_EXIT" || (!completed && terminalStatuses.includes(status));
+    status === "READY_FOR_GATE_EXIT" ||
+    (!completed && terminalStatuses.includes(status)) ||
+    sectionalReady;
   const items: any[] = dispatch?.items || [];
   const batches = (selected?.allocated_batches || []).filter((batch) =>
     ["ALLOCATED", "LOADED"].includes(batch.status),
@@ -514,7 +578,7 @@ function AssemblyDispatchPage() {
               </span>
             </div>
             <ol aria-label="FG dispatch steps" className="flex flex-wrap gap-3 text-xs">
-              {steps.map((label, index) => (
+              {(isSectional ? sectionalSteps : legacySteps).map((label, index) => (
                 <li
                   key={label}
                   aria-current={index === step ? "step" : undefined}
@@ -535,6 +599,15 @@ function AssemblyDispatchPage() {
                 ["Driver Contact", selected.driver_contact],
                 ["Gate Pass", selected.gate_pass_number],
                 ["Gate Status", selected.gate_pass_status?.replaceAll("_", " ")],
+                ...(isSectional
+                  ? [
+                      ["Main FG ID", selected.main_fg_id || selected.fg_id],
+                      [
+                        "Section Status",
+                        `${selected.dispatched_sections ?? 0}/8 Dispatched (${selected.dispatch_status || "READY"})`,
+                      ],
+                    ]
+                  : []),
               ].map(([label, value]) => (
                 <div key={label}>
                   <dt className="text-muted-foreground">{label}</dt>
@@ -544,6 +617,356 @@ function AssemblyDispatchPage() {
             </dl>
             {detailLoading ? (
               <p className="text-sm text-muted-foreground">Loading selected dispatch...</p>
+            ) : isSectional ? (
+              <div className="space-y-4">
+                {sectionalCompleted ? (
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold text-emerald-800 dark:text-emerald-300">
+                          Pickup Completed · Gate Exit Recorded
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className={
+                            selected.dispatched_sections === 8
+                              ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                              : "border-blue-300 bg-blue-100 text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+                          }
+                        >
+                          {selected.dispatched_sections === 8
+                            ? "FULLY DISPATCHED (8/8)"
+                            : `PARTIALLY DISPATCHED (${selected.dispatched_sections || 0}/8)`}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Vehicle {selected.vehicle_number || "assigned vehicle"} (Gate Pass:{" "}
+                        {selected.gate_pass_number || "-"}) completed gate exit.
+                        {selected.remaining_sections && selected.remaining_sections > 0
+                          ? ` Remaining ${selected.remaining_sections} sections are available for subsequent vehicle pickup.`
+                          : " All 8 transport sections have exited the facility."}
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <span className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+                        Transport Sections Summary ({selected.dispatched_sections || 0}/8 Dispatched)
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {(selected.sections || []).map((section) => (
+                          <div
+                            key={section.sub_id}
+                            className="rounded-xl border border-border/70 p-3 bg-card text-xs"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono font-semibold">{section.sub_id}</span>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${
+                                  section.status === "DISPATCHED"
+                                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                    : section.status === "LOADED"
+                                      ? "border-blue-300 bg-blue-50 text-blue-700"
+                                      : "border-amber-300 bg-amber-50 text-amber-700"
+                                }`}
+                              >
+                                {section.status}
+                              </Badge>
+                            </div>
+                            <p className="font-mono text-[10px] text-muted-foreground mt-2 truncate">
+                              {section.qr_identity}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : sectionalReady ? (
+                  <div className="space-y-3">
+                    <div
+                      role="status"
+                      className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-2"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 font-semibold text-emerald-700 dark:text-emerald-300">
+                        <span>Vehicle Loaded & Ready for Departure</span>
+                        <Badge
+                          variant="outline"
+                          className="border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                        >
+                          READY FOR GATE EXIT
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Sections successfully loaded into vehicle {selected.vehicle_number} (Gate Pass:{" "}
+                        {selected.gate_pass_number}). Awaiting Gate Security confirmation of Gate Exit at
+                        the security gate.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <span className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+                        Loaded Vehicle Sections
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {(selected.sections || []).map((section) => (
+                          <div
+                            key={section.sub_id}
+                            className="rounded-xl border border-border/70 p-3 bg-card text-xs"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono font-semibold">{section.sub_id}</span>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${
+                                  section.status === "DISPATCHED"
+                                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                    : section.status === "LOADED"
+                                      ? "border-blue-300 bg-blue-50 text-blue-700"
+                                      : "border-amber-300 bg-amber-50 text-amber-700"
+                                }`}
+                              >
+                                {section.status}
+                              </Badge>
+                            </div>
+                            <p className="font-mono text-[10px] text-muted-foreground mt-2 truncate">
+                              {section.qr_identity}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : selected.gate_pass_status === "INSIDE_FACILITY" ? (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+                          Vehicle Inside Facility · Ready for Section Loading
+                        </h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Vehicle <strong>{selected.vehicle_number}</strong> (Gate Pass:{" "}
+                          <strong>{selected.gate_pass_number}</strong>) is parked at the loading dock.
+                          Select or scan the sections to load into this vehicle.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-xl text-xs"
+                          disabled={busy || availableSections.length === 0}
+                          onClick={() => {
+                            setSelectedSectionQrs(availableSections.map((s) => s.qr_identity));
+                            toast.info(`Selected all ${availableSections.length} available sections`);
+                          }}
+                        >
+                          Select All Available ({availableSections.length})
+                        </Button>
+                        {selectedSectionQrs.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="rounded-xl text-xs"
+                            disabled={busy}
+                            onClick={() => setSelectedSectionQrs([])}
+                          >
+                            Deselect All
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-muted-foreground uppercase tracking-wider">
+                          Transport Sections (8 Sub-IDs)
+                        </span>
+                        <span className="font-medium">
+                          {selectedSectionQrs.length} of {availableSections.length} available selected
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                        {(selected.sections || []).map((section) => {
+                          const isAvailable = section.status === "AVAILABLE";
+                          const isSelected = selectedSectionQrs.includes(section.qr_identity);
+                          return (
+                            <label
+                              key={section.sub_id}
+                              className={`flex flex-col justify-between rounded-xl border p-3 cursor-pointer transition-colors ${
+                                !isAvailable
+                                  ? "bg-muted/40 border-muted opacity-75 cursor-not-allowed"
+                                  : isSelected
+                                    ? "border-primary bg-primary/5 ring-1 ring-primary"
+                                    : "border-border/70 hover:bg-muted/30"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="font-mono font-semibold text-xs">
+                                  {section.sub_id}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] ${
+                                    section.status === "DISPATCHED"
+                                      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                      : section.status === "LOADED"
+                                        ? "border-blue-300 bg-blue-50 text-blue-700"
+                                        : "border-amber-300 bg-amber-50 text-amber-700"
+                                  }`}
+                                >
+                                  {section.status}
+                                </Badge>
+                              </div>
+                              <div className="mt-3 flex items-center justify-between">
+                                <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[120px]">
+                                  {section.qr_identity}
+                                </span>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Select section ${section.sub_id}`}
+                                  disabled={!isAvailable || busy}
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedSectionQrs((prev) => [
+                                        ...new Set([...prev, section.qr_identity]),
+                                      ]);
+                                    } else {
+                                      setSelectedSectionQrs((prev) =>
+                                        prev.filter((qr) => qr !== section.qr_identity),
+                                      );
+                                    }
+                                  }}
+                                  className="size-4 rounded accent-primary"
+                                />
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-border/60">
+                      <div className="flex-1 min-w-[240px]">
+                        <FgQrInput
+                          value={sectionScan}
+                          onChange={setSectionScan}
+                          label="Or scan section QR code to select"
+                          inputId="dispatch-section-scan"
+                          disabled={busy}
+                        />
+                      </div>
+                      <Button
+                        variant="outline"
+                        className="rounded-xl text-xs h-9"
+                        disabled={busy || !sectionScan.trim()}
+                        onClick={() => {
+                          const query = sectionScan.trim();
+                          const found = (selected.sections || []).find(
+                            (s) =>
+                              s.qr_identity === query ||
+                              s.sub_id.toLowerCase() === query.toLowerCase(),
+                          );
+                          if (!found) {
+                            toast.error("QR code does not match any section for this Finished Good");
+                            return;
+                          }
+                          if (found.status !== "AVAILABLE") {
+                            toast.error(
+                              `Section ${found.sub_id} is already ${found.status.toLowerCase()}`,
+                            );
+                            return;
+                          }
+                          if (selectedSectionQrs.includes(found.qr_identity)) {
+                            toast.info(`Section ${found.sub_id} is already selected`);
+                            setSectionScan("");
+                            return;
+                          }
+                          setSelectedSectionQrs((prev) => [...prev, found.qr_identity]);
+                          setSectionScan("");
+                          toast.success(`Section ${found.sub_id} added to loading list`);
+                        }}
+                      >
+                        Add Scanned Section
+                      </Button>
+                    </div>
+
+                    <div className="pt-2">
+                      <Button
+                        className="rounded-xl px-6"
+                        disabled={
+                          busy || selectedSectionQrs.length === 0 || !selected.gate_pass_number
+                        }
+                        onClick={() =>
+                          void act(async () => {
+                            if (!selected.gate_pass_number) {
+                              throw new Error("No active gate pass found for this vehicle");
+                            }
+                            await api.confirmFgLoading(selected.gate_pass_number, selectedSectionQrs);
+                            toast.success(
+                              `Loading confirmed for ${selectedSectionQrs.length} section(s)! Vehicle is ready for Gate Exit.`,
+                            );
+                            setSelectedSectionQrs([]);
+                          })
+                        }
+                      >
+                        Confirm Section Loading ({selectedSectionQrs.length} selected)
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div
+                      role="status"
+                      className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2"
+                    >
+                      <div className="flex items-center gap-2 font-semibold text-amber-800 dark:text-amber-300">
+                        <span>Awaiting Gate Entry</span>
+                        <Badge variant="outline" className="border-amber-300 bg-amber-100 text-amber-800">
+                          {selected.gate_pass_status?.replaceAll("_", " ") || "AWAITING ARRIVAL"}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Supplier vehicle <strong>{selected.vehicle_number || "Not assigned"}</strong>{" "}
+                        has not yet entered the facility. Security must verify the vehicle and issue a
+                        Gate Pass at the Security Gate (/vehicle-queue). Once the vehicle is inside the
+                        facility, Section Loading will be enabled.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+                        Transport Section Availability ({availableSections.length}/8 available)
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {(selected.sections || []).map((section) => (
+                          <div
+                            key={section.sub_id}
+                            className="rounded-xl border border-border/70 p-3 bg-card text-xs"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono font-semibold">{section.sub_id}</span>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${
+                                  section.status === "DISPATCHED"
+                                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                    : section.status === "LOADED"
+                                      ? "border-blue-300 bg-blue-50 text-blue-700"
+                                      : "border-amber-300 bg-amber-50 text-amber-700"
+                                }`}
+                              >
+                                {section.status}
+                              </Badge>
+                            </div>
+                            <p className="font-mono text-[10px] text-muted-foreground mt-2 truncate">
+                              {section.qr_identity}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : completed ? (
               <p className="text-sm font-semibold">
                 {selected.status === "CANCELLED" || selected.workflow_status === "CANCELLED"

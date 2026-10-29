@@ -38,6 +38,8 @@ const { api, navigate } = vi.hoisted(() => ({
       "startDispatchLoading",
       "verifyDispatchLoading",
       "verifyDispatchFinal",
+      "getFgLoading",
+      "confirmFgLoading",
     ].map((name) => [name, vi.fn()]),
   ),
   navigate: vi.fn(),
