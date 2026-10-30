@@ -161,7 +161,7 @@ function FinishedGoodsPickupGatePage() {
     setDriverContact(nextTransport?.driver_contact || "");
     setMismatchReason("");
     if (!preserveSuccess) setSuccess(null);
-    if (transportEntries.length && nextIndex < 0) {
+    if (transportEntries.length && nextIndex < 0 && !preserveSuccess) {
       toast.error("Every assigned vehicle already has a gate pass for this dispatch.");
     }
   };
