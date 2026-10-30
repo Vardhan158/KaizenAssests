@@ -84,6 +84,8 @@ def _build_role_condition(role: Optional[str], store_code: Optional[str] = None)
             target_roles.update(["GRN", "STORE_MANAGER"])
         if "PROCUREMENT" in r:
             target_roles.update(["PROCUREMENT"])
+        if "GATE" in r or "SECURITY" in r:
+            target_roles.update(["GATE", "GATE_SECURITY", "GATE_OPERATOR", "SECURITY", "GATE_ENTRY"])
 
         clauses.append(func.upper(NotificationModel.user_role).in_(list(target_roles)))
         clauses.append(NotificationModel.user_role.ilike(f"%{r}%"))

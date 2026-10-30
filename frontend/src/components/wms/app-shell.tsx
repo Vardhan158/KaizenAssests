@@ -214,6 +214,7 @@ const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
   { label: "Vehicle Entry & Exit", to: "/vehicle-queue", icon: PlusCircle },
   { label: "FG Pickup Entry & Exit", to: "/gate/finished-goods-pickup", icon: QrCode },
+  { label: "Notifications", to: "/notifications", icon: Bell },
 ];
 
 const ICON_MAP: Record<string, any> = {
@@ -278,7 +279,14 @@ function isDispatchSession(user: { username?: string; roles?: string[] } | null)
 
 function getNotificationRole(user: { username?: string; roles?: string[] } | null): string {
   if (hasUserRole(user, "SUPPLIER")) return "SUPPLIER";
-  if (hasUserRole(user, "GATE_SECURITY")) return "GATE_SECURITY";
+  if (
+    hasUserRole(user, "GATE_SECURITY") ||
+    hasUserRole(user, "GATE_OPERATOR") ||
+    hasUserRole(user, "GATE") ||
+    hasUserRole(user, "GATE_ENTRY") ||
+    user?.username?.toLowerCase() === "gate_entry"
+  )
+    return "GATE_SECURITY";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
     return "ASSEMBLY_MANAGER";
   if (isDispatchSession(user)) return "DISPATCH";

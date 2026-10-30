@@ -147,7 +147,7 @@ async def create_finished_goods_pickup_gate_entry(
         now = datetime.datetime.now(datetime.timezone.utc)
         visit = FinishedGoodsPickupGateVisitModel(request_id=request.id, gate_pass_number=gate_pass, supplier_id=request.supplier_id, supplier_name=request.supplier_name or request.requested_by, vehicle_number=vehicle_number, driver_name=driver_name, driver_contact=driver_contact, status="INSIDE_FACILITY", arrived_at=now, entered_at=now, security_officer=user.username)
         uow.session.add(visit)
-        uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Finished-goods pickup vehicle arrived", message=f"Pickup {request.request_number} arrived. Gate pass {gate_pass}. Vehicle {vehicle_number}.", link="/assembly/finished-goods" if request.section_fg_id else "/assembly/dispatch"))
+        uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Finished-goods pickup vehicle arrived", message=f"Pickup {request.request_number} arrived. Gate pass {gate_pass}. Vehicle {vehicle_number}.", link="/assembly/dispatch"))
         await uow.commit()
         return {"gate_pass_number": gate_pass, "request_number": request.request_number, "status": visit.status, "arrived_at": now.isoformat(), "visit_purpose": "FINISHED_GOODS_PICKUP"}
 

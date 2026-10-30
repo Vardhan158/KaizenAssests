@@ -194,6 +194,19 @@ async def create_supplier_finished_goods_dispatch_request(
         )
         uow.session.add(row)
         uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Supplier FG dispatch request", message=f"{request_number} requests {payload.quantity:g} {payload.uom} of {payload.product_name}.", link="/assembly/dispatch"))
+        vehicles_str = ", ".join(t.get("vehicle_number") for t in transport_entries if t.get("vehicle_number")) or vehicle_number or "Vehicle"
+        pickup_date_str = str(payload.expected_pickup_date) if payload.expected_pickup_date else "today"
+        uow.session.add(NotificationModel(
+            user_role="GATE_SECURITY",
+            title=f"FG Pickup Request: {request_number}",
+            message=f"Supplier {current_user.username} requested FG pickup {request_number} for {payload.product_name} ({payload.quantity:g} {payload.uom}). Expected vehicle: {vehicles_str} on {pickup_date_str}.",
+            link="/gate/finished-goods-pickup",
+            vehicle_number=vehicle_number,
+            driver_name=driver_name,
+            driver_phone=driver_contact,
+            supplier_name=current_user.username,
+            notification_type="FG_PICKUP_REQUESTED",
+        ))
         await uow.commit()
         return {"request_number": request_number, "status": row.status, "supplier_id": str(supplier_id)}
 
@@ -4180,4 +4193,13 @@ async def confirm_fg_loading(gate_pass: str, payload: SectionScans, current_user
             raise HTTPException(409, "Legacy pickup uses existing loading workflow")
         await transition_sections(uow.session, request.section_fg_id, visit.id, payload.qr_identities, current_user.username)
         visit.status = "READY_FOR_GATE_EXIT"
+        uow.session.add(NotificationModel(
+            user_role="GATE_SECURITY",
+            title="FG Vehicle Ready for Gate Exit",
+            message=f"Vehicle {visit.vehicle_number} (Gate Pass {gate_pass}) for {request.request_number} loaded by Assembly. Ready for Gate Exit.",
+            link="/gate/finished-goods-pickup",
+            gate_pass_number=gate_pass,
+            vehicle_number=visit.vehicle_number,
+            notification_type="FG_READY_FOR_GATE_EXIT",
+        ))
         return {"status": visit.status}

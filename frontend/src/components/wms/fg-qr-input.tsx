@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
+import QRCode from "qrcode";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { isValidUpload } from "@/lib/input-validation";
@@ -92,6 +94,19 @@ export function FgQrInput({
       toast.error(error instanceof Error ? error.message : "Unable to decode QR image");
     }
   };
+  const downloadQr = async () => {
+    const qrValue = value.trim();
+    if (!qrValue) return;
+    try {
+      const dataUrl = await QRCode.toDataURL(qrValue, { width: 512, margin: 4 });
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = "finished-good-qr.png";
+      link.click();
+    } catch {
+      toast.error("Unable to generate QR image");
+    }
+  };
   return (
     <div className="space-y-2">
       <label htmlFor={inputId} className="text-xs font-semibold">
@@ -114,6 +129,16 @@ export function FgQrInput({
           onClick={() => file.current?.click()}
         >
           Upload QR
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-xl"
+          disabled={disabled || !value.trim()}
+          onClick={() => void downloadQr()}
+        >
+          <Download className="mr-2 size-4" />
+          Download QR
         </Button>
         <Button
           variant="outline"
