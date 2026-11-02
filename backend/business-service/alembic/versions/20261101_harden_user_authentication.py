@@ -15,18 +15,29 @@ depends_on = None
 
 
 def upgrade() -> None:
-    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("user_account")}
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    table_name = "user_account" if insp.has_table("user_account") else ("store_manager_user" if insp.has_table("store_manager_user") else None)
+    if not table_name:
+        return
+    columns = {column["name"] for column in insp.get_columns(table_name)}
     if "auth_token_expires_at" not in columns:
-        op.add_column("user_account", sa.Column("auth_token_expires_at", sa.DateTime(timezone=True)))
+        op.add_column(table_name, sa.Column("auth_token_expires_at", sa.DateTime(timezone=True)))
     if "failed_login_attempts" not in columns:
         op.add_column(
-            "user_account",
+            table_name,
             sa.Column("failed_login_attempts", sa.Integer(), server_default="0", nullable=False),
         )
     if "locked_until" not in columns:
-        op.add_column("user_account", sa.Column("locked_until", sa.DateTime(timezone=True)))
+        op.add_column(table_name, sa.Column("locked_until", sa.DateTime(timezone=True)))
+
 
 def downgrade() -> None:
-    op.drop_column("user_account", "locked_until")
-    op.drop_column("user_account", "failed_login_attempts")
-    op.drop_column("user_account", "auth_token_expires_at")
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    table_name = "user_account" if insp.has_table("user_account") else ("store_manager_user" if insp.has_table("store_manager_user") else None)
+    if not table_name:
+        return
+    op.drop_column(table_name, "locked_until")
+    op.drop_column(table_name, "failed_login_attempts")
+    op.drop_column(table_name, "auth_token_expires_at")
