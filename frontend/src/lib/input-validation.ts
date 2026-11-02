@@ -55,8 +55,8 @@ export function normalizeAsnVehicleNumber(value: string): string {
 export function isValidAsnVehicleNumber(value: string): boolean {
   const normalized = normalizeAsnVehicleNumber(value);
   return (
-    /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(normalized) ||
-    /^(?:2[1-9]|[3-9]\d)BH\d{4}[A-HJ-NP-Z]{2}$/.test(normalized)
+    /^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(normalized) ||
+    /^\d{2}BH\d{4}[A-Z]{2}$/.test(normalized)
   );
 }
 

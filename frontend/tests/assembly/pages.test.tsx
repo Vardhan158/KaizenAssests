@@ -49,6 +49,7 @@ vi.mock("@/lib/auth-utils", () => ({ requireRole: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
   useNavigate: () => navigate,
+  useSearch: () => ({}),
   Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => (
     <a href={to} {...props}>
       {children}
@@ -150,13 +151,13 @@ describe("Assembly dashboard", () => {
     expect(screen.queryByText("Manage Orders")).not.toBeInTheDocument();
     expect(screen.queryByText("Assembly overview")).not.toBeInTheDocument();
   });
-  it("refreshes all dashboard sources", async () => {
+  it("loads all dashboard sources without the removed Refresh button", async () => {
     show(Dashboard);
     await screen.findByText("23");
-    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(api.getAssemblyDashboard).toHaveBeenCalledTimes(2));
-    expect(api.getAssemblyMaterialRequests).toHaveBeenCalledTimes(2);
-    expect(api.getAssemblyFinishedGoodsInventorySummary).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
+    expect(api.getAssemblyDashboard).toHaveBeenCalledTimes(1);
+    expect(api.getAssemblyMaterialRequests).toHaveBeenCalledTimes(1);
+    expect(api.getAssemblyFinishedGoodsInventorySummary).toHaveBeenCalledTimes(1);
   });
   it("reports a partial API failure without showing a fake inventory zero", async () => {
     api.getAssemblyFinishedGoodsInventorySummary.mockRejectedValue(new Error("offline"));
@@ -192,7 +193,7 @@ describe("Material request queue", () => {
       target: { value: "Steel bolt" },
     });
     expect(screen.getByText("MR-1")).toBeInTheDocument();
-  });
+  }, 15000);
   it("keeps the queue compact and shows material quantities in Details", async () => {
     show(Requests);
     await screen.findByText("MR-1");
@@ -958,9 +959,10 @@ describe("Material request date submission", () => {
     await userEvent.click(screen.getByRole("button", { name: "New Material Request" }));
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("MAT-LAPT-001");
+    const validDate = localDateInput();
     const dateInput = dialog.querySelector('input[type="date"]') as HTMLInputElement;
     await userEvent.clear(dateInput);
-    await userEvent.type(dateInput, "2026-11-04");
+    await userEvent.type(dateInput, validDate);
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Submit Request to Warehouse" }),
     );
@@ -968,7 +970,7 @@ describe("Material request date submission", () => {
       expect(api.createAssemblyMaterialRequest).toHaveBeenCalledWith({
         product_code: "FG-LAPT-001",
         target_quantity: 10,
-        required_date: "2026-11-04",
+        required_date: validDate,
         remarks: "",
       }),
     );

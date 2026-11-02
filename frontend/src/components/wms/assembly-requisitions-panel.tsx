@@ -6,19 +6,18 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ClipboardList, Loader2, RefreshCw } from "lucide-react";
 
-export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => void | Promise<void> }) {
+export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefresh = true, pickupTasks = [], onConfirmPick }: { onUpdated?: () => void | Promise<void>; refreshKey?: number; showRefresh?: boolean; pickupTasks?: any[]; onConfirmPick?: (task: any) => void }) {
   const [rows, setRows] = useState<any[]>([]);
-  const [stores, setStores] = useState<any[]>([]);
-  const [storeChoice, setStoreChoice] = useState<Record<string, string>>({});
+  const [warehouses, setWarehouses] = useState<any[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
-      const [requests, materialRequests, storeRows] = await Promise.all([
+      const [requests, materialRequests, warehouseRows] = await Promise.all([
         api.getAssemblyRequisitions("Assembly"),
         api.getAssemblyMaterialRequests(),
-        api.getStores().catch(() => []),
+        api.getWarehouses().catch(() => []),
       ]);
       const requisitionRows = Array.isArray(requests) ? requests : [];
       const existingIds = new Set(requisitionRows.map((request: any) => String(request.id)));
@@ -39,9 +38,9 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
           legacy_material_request: true,
         }));
       setRows([...requisitionRows, ...legacyRows]);
-      setStores(
-        Array.isArray(storeRows)
-          ? storeRows.filter((store: any) => String(store.status).toUpperCase() === "ACTIVE")
+      setWarehouses(
+        Array.isArray(warehouseRows)
+          ? warehouseRows.filter((warehouse: any) => String(warehouse.status).toUpperCase() === "ACTIVE")
           : [],
       );
     } catch (error: any) {
@@ -55,7 +54,7 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
     void refresh();
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
-  }, [refresh]);
+  }, [refresh, refreshKey]);
 
   const runAction = async (id: string, action: () => Promise<unknown>, message: string) => {
     setBusyId(id);
@@ -72,12 +71,11 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
   };
 
   return (
-    <section className="space-y-5" aria-label="Assembly requisitions">
-      <div className="flex items-center justify-between gap-3">
+    <section className="assembly-requisitions-panel space-y-4" aria-label="Assembly requisitions">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-transparent px-5 py-5 shadow-sm">
         <h2 className="flex items-center gap-2 text-lg font-bold"><ClipboardList className="size-5" />Assembly Requisitions</h2>
-        <Button variant="outline" onClick={() => void refresh()} aria-label="Refresh Assembly requisitions">
-          <RefreshCw className="mr-2 size-4" />Refresh
-        </Button>
+        {showRefresh && <Button data-refresh-control="true" size="icon" variant="outline" onClick={() => void refresh()} aria-label="Refresh Assembly requisitions">
+          <RefreshCw className="size-4" /></Button>}
       </div>
       {loading ? (
         <div className="grid min-h-64 place-items-center">
@@ -94,14 +92,7 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
           {rows.map((request) => {
             const id = String(request.id);
             const status = String(request.status || "").toUpperCase();
-            const statusBorderTone = ["ISSUED", "ASSEMBLY_RECEIVED", "COMPLETED"].includes(status)
-              ? "border-l-emerald-600 dark:border-l-emerald-500"
-              : ["REJECTED", "CANCELLED"].includes(status)
-                ? "border-l-rose-600 dark:border-l-rose-500"
-                : ["APPROVED", "RESERVED", "PARTIALLY_RESERVED"].includes(status)
-                  ? "border-l-blue-700 dark:border-l-blue-500"
-                  : "border-l-amber-600 dark:border-l-amber-500";
-            const statusPillTone = ["ISSUED", "ASSEMBLY_RECEIVED", "COMPLETED"].includes(status)
+            const statusPillTone = ["ISSUED", "ASSEMBLY_RECEIVED", "COMPLETED", "RECEIVED"].includes(status)
               ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200"
               : ["REJECTED", "CANCELLED"].includes(status)
                 ? "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200"
@@ -114,13 +105,16 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
             const hasReservation = (request.reservations || []).some(
               (reservation: any) => Number(reservation.reserved_quantity) > 0,
             );
-            const selectedStore =
-              storeChoice[id] ||
-              request.assigned_store_id ||
-              request.suggested_store_id ||
-              request.reservations?.find((r: any) => r.store_id)?.store_id ||
-              "";
+            const selectedWarehouse =
+              request.assigned_warehouse_ref_id ||
+              request.suggested_warehouse_ref_id ||
+              request.reservations?.find((r: any) => r.warehouse_ref_id)?.warehouse_ref_id ||
+              warehouses[0]?.id || "";
             const isBusy = busyId === id;
+            const requestNumber = String(request.requisition_number || request.request_number || "").trim().toUpperCase();
+            const relatedPickupTasks = pickupTasks.filter((task) =>
+              String(task.assembly_order_number || task.request_number || "").trim().toUpperCase() === requestNumber,
+            );
             const productionQuantity = Number(
               request.target_quantity || request.planned_quantity || 0,
             );
@@ -131,14 +125,13 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
                   productionQuantity
                 : 0;
             return (
-              <Card key={id} className={`rounded-lg border-slate-300 border-l-[3px] bg-white shadow-none dark:border-slate-700 dark:bg-slate-900 ${statusBorderTone}`}>
-                <CardContent className="space-y-4 p-5">
+              <Card key={id} className="rounded-lg border-border/60 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
+                <CardContent className="space-y-3 p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className="font-semibold text-slate-900 dark:text-slate-100">{request.requisition_number}</h2>
                       <p className="text-xs text-muted-foreground">
-                        {request.department} · Requested by {request.requested_by} ·{" "}
-                        {request.required_date}
+                        {[request.department, request.requested_by ? `Requested by ${request.requested_by}` : "", request.required_date].filter(Boolean).join(" · ")}
                       </p>
                     </div>
                     <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-semibold tracking-wide ${statusPillTone}`}>
@@ -146,7 +139,7 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
                     </span>
                   </div>
                   {productionQuantity > 0 && firstItem && (
-                    <div className="rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs text-slate-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-slate-200">
+                    <div className="text-xs leading-relaxed text-muted-foreground">
                       <span className="font-semibold text-blue-900 dark:text-blue-200">BOM calculation: </span>
                       {request.product_name || "Finished good"} × {productionQuantity}{" "}
                       {request.uom || "PCS"}
@@ -188,7 +181,8 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
                       </p>
                     )}
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
+                    <table className="w-full min-w-[650px] table-fixed text-left text-sm">
+                      <colgroup><col className="w-[40%]" /><col className="w-[16%]" /><col className="w-[16%]" /><col className="w-[16%]" /><col className="w-[12%]" /></colgroup>
                       <thead>
                         <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
                           <th className="px-3 py-2">Material</th>
@@ -205,7 +199,8 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
                             className="border-b border-slate-100 text-slate-700 transition-colors hover:bg-blue-50/50 last:border-0 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-blue-950/20"
                           >
                             <td className="px-3 py-2.5 font-medium">
-                              {item.material_code} · {item.material_name}
+                              <span className="block font-semibold text-primary">{item.material_code}</span>
+                              <span className="mt-0.5 block text-sm">{item.material_name}</span>
                             </td>
                             <td className="px-3 py-2.5 tabular-nums">{item.requested_quantity}</td>
                             <td className="px-3 py-2.5 tabular-nums">{item.available_quantity}</td>
@@ -262,42 +257,48 @@ export function AssemblyRequisitionsPanel({ onUpdated }: { onUpdated?: () => voi
                         </Button>
                       </>
                     )}
-                    {(hasReservation || request.assigned_store_id) &&
+                    {(hasReservation || request.assigned_warehouse_ref_id) &&
                       !["REJECTED", "ASSEMBLY_RECEIVED"].includes(status) && (
                         <>
-                          <select
-                            className="h-9 min-w-56 rounded-md border bg-background px-3 text-sm"
-                            value={selectedStore}
-                            onChange={(event) =>
-                              setStoreChoice((current) => ({
-                                ...current,
-                                [id]: event.target.value,
-                              }))
-                            }
-                          >
-                            <option value="">Select fulfilling store</option>
-                            {stores.map((store: any) => (
-                              <option key={store.id} value={store.id}>
-                                {store.store_code} · {store.store_name}
-                              </option>
-                            ))}
-                          </select>
+
                           <Button
                             variant="secondary"
-                            disabled={isBusy || !selectedStore}
+                            disabled={isBusy || !selectedWarehouse}
                             onClick={() =>
                               void runAction(
                                 id,
-                                () => api.assignAssemblyRequisitionStore(id, selectedStore),
-                                "Store picking task created",
+                                () => api.assignAssemblyRequisitionWarehouse(id, selectedWarehouse),
+                                "Warehouse picking task created",
                               )
                             }
                           >
-                            Assign store and create pick task
+                            Create warehouse pick task
                           </Button>
                         </>
                       )}
                   </div>
+                  {relatedPickupTasks.length > 0 && (
+                    <div className="space-y-2 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900/60 dark:bg-indigo-950/20">
+                      <p className="text-xs font-semibold text-indigo-950 dark:text-indigo-100">Related warehouse pickup</p>
+                      {relatedPickupTasks.map((task) => (
+                        <div key={task.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white px-3 py-2 dark:bg-slate-900">
+                          <div className="min-w-0 text-xs">
+                            <span className="font-semibold">{task.task_number || "Pick task"}</span>
+                            <span className="mx-2 text-muted-foreground">·</span>
+                            <span>{task.material_name || task.material_code}</span>
+                            <span className="mx-2 text-muted-foreground">·</span>
+                            <span>{task.quantity ?? "—"} {task.uom || ""}</span>
+                            <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-700 dark:bg-slate-800 dark:text-slate-200">{task.status || "PENDING"}</span>
+                          </div>
+                          {String(task.status || "").toUpperCase() === "COMPLETED" ? (
+                            <span className="text-xs font-semibold text-emerald-700">Pickup confirmed</span>
+                          ) : (
+                            <Button size="sm" className="h-8" disabled={!onConfirmPick} onClick={() => onConfirmPick?.(task)}>Confirm pickup</Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );

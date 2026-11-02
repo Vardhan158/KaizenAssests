@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useSearch, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
@@ -131,10 +131,10 @@ const statusGroups: Record<string, string[]> = {
 };
 function issuedQuantity(request: AssemblyMaterialRequest, item: AssemblyMaterialRequestItem) {
   if (item.issued_quantity != null) return item.issued_quantity;
-  const issuedItems = (request.issue_transaction || request.material_issue)?.items || [];
-  const matching = issuedItems.filter((issued) => issued.material_code === item.material_code);
-  if (matching.length && matching.every((issued) => issued.issued_quantity != null)) {
-    return matching.reduce((sum, issued) => sum + Number(issued.issued_quantity), 0);
+  const issuedItems = ((request as any).issue_transaction || (request as any).material_issue)?.items || [];
+  const matching = issuedItems.filter((issued: any) => issued.material_code === item.material_code);
+  if (matching.length && matching.every((issued: any) => issued.issued_quantity != null)) {
+    return matching.reduce((sum: number, issued: any) => sum + Number(issued.issued_quantity), 0);
   }
   return null;
 }
@@ -146,6 +146,8 @@ function AssemblyMaterialRequestsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
+  useEffect(() => { if (typeof moduleSearchParams.search === "string") setSearchTerm(moduleSearchParams.search); }, [moduleSearchParams.search]);
   const [statusFilter, setStatusFilter] = useState("ALL");
 
   // Create Modal State
@@ -156,12 +158,25 @@ function AssemblyMaterialRequestsPage() {
   const [creating, setCreating] = useState(false);
   const [formData, setFormData] = useState({
     product_code: "",
-    target_quantity: 10,
-    required_date: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+    target_quantity: "",
+    required_date: "",
     remarks: "",
   });
 
   const [requiredDateError, setRequiredDateError] = useState<string | null>(null);
+  const openCreateRequest = () => {
+    setFormData({
+      product_code: "",
+      target_quantity: "",
+      required_date: "",
+      remarks: "",
+    });
+    setRequiredDateError(null);
+    setBomPreview(null);
+    setBomPreviewError(null);
+    setIsCreateOpen(true);
+  };
+
 
   // Quick Add Product State
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -220,6 +235,7 @@ function AssemblyMaterialRequestsPage() {
   const [loadingBOM, setLoadingBOM] = useState(false);
   const [bomRevision, setBomRevision] = useState(0);
   const [showBomMaterial, setShowBomMaterial] = useState(false);
+  const [editingBomMaterial, setEditingBomMaterial] = useState(false);
   const [savingBomMaterial, setSavingBomMaterial] = useState(false);
   const [bomMaterialError, setBomMaterialError] = useState("");
   const [bomMaterialDraft, setBomMaterialDraft] = useState({ material_code: "", quantity_per_unit: "1" });
@@ -247,10 +263,10 @@ function AssemblyMaterialRequestsPage() {
     }
     setSavingBomMaterial(true); setBomMaterialError("");
     try {
-      await api.addProductBOMMaterial(formData.product_code, { material_code: bomMaterialDraft.material_code, quantity_per_unit: quantity });
+      await (editingBomMaterial ? api.updateProductBOMMaterial : api.addProductBOMMaterial)(formData.product_code, { material_code: bomMaterialDraft.material_code, quantity_per_unit: quantity });
       setShowBomMaterial(false); setBomMaterialDraft({ material_code: "", quantity_per_unit: "1" });
       setBomRevision(value => value + 1);
-      toast.success("Material added to the product BOM.");
+      toast.success(editingBomMaterial ? "BOM quantity updated." : "Material added to the product BOM.");
     } catch (err: any) { setBomMaterialError(err.message || "Unable to add the material."); }
     finally { setSavingBomMaterial(false); }
   };
@@ -379,14 +395,6 @@ function AssemblyMaterialRequestsPage() {
       const productRows = await api.getAssemblyProducts();
       await refreshAvailableMaterials();
       setProducts(productRows);
-      if (
-        productRows.length > 0 &&
-        !productRows.some((p) => p.product_code === formData.product_code)
-      ) {
-        setFormData((prev) => ({ ...prev, product_code: productRows[0]?.product_code || "" }));
-      } else if (productRows.length === 0) {
-        setFormData((prev) => ({ ...prev, product_code: "" }));
-      }
     } catch (err: any) {
       console.error("Failed to load products master:", err);
     }
@@ -405,12 +413,12 @@ function AssemblyMaterialRequestsPage() {
     let active = true;
     setBomPreview(null);
     setBomPreviewError(null);
-    if (!isCreateOpen || !formData.product_code || formData.target_quantity <= 0) {
+    if (!isCreateOpen || !formData.product_code) {
       setLoadingBOM(false);
       return;
     }
     setLoadingBOM(true);
-    void api.getProductBOM(formData.product_code, formData.target_quantity)
+    void api.getProductBOM(formData.product_code, Number(formData.target_quantity) > 0 ? Number(formData.target_quantity) : 1)
       .then(result => { if (active) setBomPreview(result); })
       .catch((err: Error) => { if (active) setBomPreviewError(err.message || "Unable to load the selected product's BOM."); })
       .finally(() => { if (active) setLoadingBOM(false); });
@@ -421,6 +429,11 @@ function AssemblyMaterialRequestsPage() {
     e.preventDefault();
     if (!newProductData.product_name.trim()) {
       toast.error("Product name is required.");
+      return;
+    }
+    const normalizedName = newProductData.product_name.trim().replace(/\s+/g, " ").toLowerCase();
+    if (products.some(product => product.product_name.trim().replace(/\s+/g, " ").toLowerCase() === normalizedName)) {
+      toast.error("A product with this name already exists. Select the existing product.");
       return;
     }
     const components = newProductData.components.filter(
@@ -517,9 +530,9 @@ function AssemblyMaterialRequestsPage() {
       );
       setIsCreateOpen(false);
       setFormData({
-        product_code: products[0]?.product_code || "",
-        target_quantity: 10,
-        required_date: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+        product_code: "",
+        target_quantity: "",
+        required_date: "",
         remarks: "",
       });
       loadRequests();
@@ -560,6 +573,13 @@ function AssemblyMaterialRequestsPage() {
       );
     });
   }, [requests, searchTerm, statusFilter]);
+  const [requestPage, setRequestPage] = useState(1);
+  const requestPageCount = Math.max(1, Math.ceil(filteredRequests.length / 10));
+  const currentRequestPage = Math.min(requestPage, requestPageCount);
+  const requestStart = (currentRequestPage - 1) * 10;
+  const pagedRequests = filteredRequests.slice(requestStart, requestStart + 10);
+  useEffect(() => { setRequestPage(1); }, [searchTerm, statusFilter]);
+  useEffect(() => { setRequestPage(page => Math.min(page, requestPageCount)); }, [requestPageCount]);
   const metricValue = (value: number) =>
     loading ? "..." : loadError && !requests.length ? "Unavailable" : value.toLocaleString();
 
@@ -578,19 +598,17 @@ function AssemblyMaterialRequestsPage() {
             <LayoutDashboard className="size-3.5 text-primary" />
             Dashboard
           </Button>
-          <Button
+          <Button data-refresh-control="true" aria-label="Refresh" title="Refresh"
             variant="outline"
             size="sm"
             onClick={() => loadRequests(true)}
             disabled={refreshing}
             className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80"
           >
-            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} />
-            Refresh
-          </Button>
+            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} /></Button>
           <Button
             size="sm"
-            onClick={() => setIsCreateOpen(true)}
+            onClick={openCreateRequest}
             className="rounded-xl text-xs gap-1.5 font-semibold shadow-soft bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <PlusCircle className="size-3.5" />
@@ -599,7 +617,7 @@ function AssemblyMaterialRequestsPage() {
         </div>
       }
     >
-      <div className="min-w-0 space-y-5">
+      <div className="assembly-material-requests-page min-w-0 space-y-5">
         <div
           className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
           aria-busy={loading || refreshing}
@@ -669,9 +687,9 @@ function AssemblyMaterialRequestsPage() {
             </div>
 
             {/* Filter & Search Toolbar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-1">
               {/* Status Filter Tabs */}
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/60">
                 {[
                   { key: "ALL", label: `All (${kpiStats.total})` },
                   { key: "PENDING", label: `Awaiting WH (${kpiStats.awaitingWH})` },
@@ -696,7 +714,7 @@ function AssemblyMaterialRequestsPage() {
               </div>
 
               {/* Search input */}
-              <div className="relative w-full sm:w-80 sm:shrink-0">
+              <div className="relative min-w-0 w-full sm:w-auto sm:flex-1">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                 <input
                   type="text"
@@ -704,7 +722,7 @@ function AssemblyMaterialRequestsPage() {
                   placeholder="Search requests or materials..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="h-8 w-full rounded-xl border border-border bg-card pl-8 pr-7 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
+                  className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
                 />
                 {searchTerm && (
                   <button
@@ -759,7 +777,7 @@ function AssemblyMaterialRequestsPage() {
                   <Button
                     size="sm"
                     className="rounded-xl text-xs gap-1.5 font-semibold"
-                    onClick={() => setIsCreateOpen(true)}
+                    onClick={openCreateRequest}
                   >
                     <PlusCircle className="size-3.5" />
                     New Material Request
@@ -781,7 +799,7 @@ function AssemblyMaterialRequestsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {filteredRequests.map((r) => (
+                  {pagedRequests.map((r) => (
                     <tr
                       key={r.id}
                       className="group hover:bg-muted/40 transition-colors cursor-pointer"
@@ -869,14 +887,22 @@ function AssemblyMaterialRequestsPage() {
               </table>
             </div>
           )}
+          {!loading && filteredRequests.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
+            <p className="text-muted-foreground">Showing {requestStart + 1} to {Math.min(requestStart + 10, filteredRequests.length)} of {filteredRequests.length} requests</p>
+            <nav aria-label="Material requests pagination" className="flex items-center gap-3">
+              <Button size="sm" variant="outline" disabled={currentRequestPage === 1} onClick={() => setRequestPage(currentRequestPage - 1)}>Previous</Button>
+              <span>{currentRequestPage} / {requestPageCount}</span>
+              <Button size="sm" variant="outline" disabled={currentRequestPage === requestPageCount} onClick={() => setRequestPage(currentRequestPage + 1)}>Next</Button>
+            </nav>
+          </div>}
         </div>
 
         {/* ========================================================================= */}
         {/* CREATE MATERIAL REQUEST MODAL */}
         {/* ========================================================================= */}
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl p-6 rounded-2xl">
-            <DialogHeader className="border-b border-border/60 pb-3">
+          <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-3xl max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden p-4 sm:p-5 rounded-2xl">
+            <DialogHeader className="border-b border-border/60 pb-3 pr-6 text-left">
               <DialogTitle className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Boxes className="size-5 text-primary" />
                 Request Raw Materials from Warehouse
@@ -887,7 +913,7 @@ function AssemblyMaterialRequestsPage() {
               </DialogDescription>
             </DialogHeader>
 
-            <form onSubmit={handleCreateRequest} className="space-y-4 pt-3">
+            <form onSubmit={handleCreateRequest} className="min-w-0 space-y-3 pt-1">
               {/* Product Selection */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -897,7 +923,7 @@ function AssemblyMaterialRequestsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <select
-                    className="flex-1 h-9 rounded-xl border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    className="min-w-0 flex-1 h-11 rounded-xl border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                     value={formData.product_code}
                     onChange={(e) => setFormData({ ...formData, product_code: e.target.value })}
                     required
@@ -922,7 +948,7 @@ function AssemblyMaterialRequestsPage() {
                     variant="outline"
                     size="sm"
                     onClick={openAddProductModal}
-                    className="h-9 px-3 rounded-xl text-xs gap-1 font-semibold border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+                    className="h-11 px-3 rounded-xl text-sm gap-1 font-semibold border-primary/30 text-primary hover:bg-primary/10 shrink-0"
                     title="Add new manufacturable product & BOM"
                   >
                     <Plus className="size-3.5" />
@@ -952,12 +978,13 @@ function AssemblyMaterialRequestsPage() {
                       aria-describedby="production-target-help"
                       value={formData.target_quantity}
                       onChange={(e) =>
-                        setFormData({ ...formData, target_quantity: Number(e.target.value) })
+                        setFormData({ ...formData, target_quantity: e.target.value === "" ? "" : Number(e.target.value) })
                       }
                       required
-                      className="h-9 pr-12 text-sm rounded-xl"
+                      placeholder="Enter quantity"
+                      className="h-11 pr-12 text-sm rounded-xl"
                     />
-                    <span className="absolute right-3 top-2 text-xs font-medium text-muted-foreground pointer-events-none">
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground pointer-events-none">
                       PCS
                     </span>
                   </div>
@@ -995,7 +1022,7 @@ function AssemblyMaterialRequestsPage() {
                       requiredDateError ? "required-completion-date-error" : undefined
                     }
                     required
-                    className="h-9 text-sm rounded-xl"
+                    className="h-11 text-sm rounded-xl"
                   />
                   {requiredDateError && (
                     <p
@@ -1024,8 +1051,8 @@ function AssemblyMaterialRequestsPage() {
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5 font-semibold text-foreground">
                       <Layers className="size-3.5 text-primary" />
-                      <span>BOM Material Preview ({availableBomMaterials.length} Available)</span>
-                      <Button type="button" size="sm" variant="outline" className="ml-2 h-7 gap-1 text-xs" disabled={savingBomMaterial || loadingRawMaterials} onClick={() => { setShowBomMaterial(true); setBomMaterialError(""); void refreshAvailableMaterials(); }}><Plus className="size-3.5" />Add Material</Button>
+                      <span>BOM Material Preview ({bomPreview.materials?.length || 0} {bomPreview.materials?.length === 1 ? "Item" : "Items"})</span>
+                      <Button type="button" size="sm" variant="outline" className="ml-2 h-7 gap-1 text-xs" disabled={savingBomMaterial} onClick={() => { setEditingBomMaterial(false); setBomMaterialDraft({ material_code: "", quantity_per_unit: "1" }); setShowBomMaterial(true); setBomMaterialError(""); }}><Plus className="size-3.5" />Add Material</Button>
                     </div>
                     <span className="text-[11px] text-muted-foreground font-mono">
                       BOM: {bomPreview.bom_number}
@@ -1035,8 +1062,8 @@ function AssemblyMaterialRequestsPage() {
                   {showBomMaterial && <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
                     <p className="text-xs text-muted-foreground">Add an available component to this product's saved BOM. Its total requirement is calculated using the production quantity.</p>
                     <div className="grid gap-3 sm:grid-cols-[1fr_160px_72px]">
-                      <div className="space-y-1.5"><label htmlFor="bom-add-material" className="text-xs font-semibold">Raw Material</label><select id="bom-add-material" disabled={savingBomMaterial || loadingRawMaterials} className="h-9 w-full rounded-xl border bg-card px-3 text-sm" value={bomMaterialDraft.material_code} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, material_code: e.target.value })}>
-                        <option value="">{loadingRawMaterials ? "Checking warehouse availability..." : rawMaterials.filter(material => Number(material.available_quantity) > 0 && !bomPreview.materials?.some(item => item.material_code === material.code)).length ? "Select available material..." : "No available materials"}</option>{rawMaterials.filter(material => Number(material.available_quantity) > 0 && !bomPreview.materials?.some(item => item.material_code === material.code)).map(material => <option key={material.id || material.code} value={material.code}>{material.name} ({material.code}) · Avail: {material.available_quantity} {material.uom}</option>)}
+                      <div className="space-y-1.5"><label htmlFor="bom-add-material" className="text-xs font-semibold">Raw Material</label><select id="bom-add-material" disabled={savingBomMaterial || editingBomMaterial} className="h-9 w-full rounded-xl border bg-card px-3 text-sm" value={bomMaterialDraft.material_code} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, material_code: e.target.value })}>
+                        <option value="">Select material...</option>{rawMaterials.filter(material => editingBomMaterial || !bomPreview.materials?.some(item => item.material_code === material.code)).map(material => <option key={material.id || material.code} value={material.code}>{material.name} ({material.code})</option>)}
                       </select></div>
                       <div className="space-y-1.5"><label htmlFor="bom-add-quantity" className="text-xs font-semibold">Qty per Product</label><Input id="bom-add-quantity" disabled={savingBomMaterial} type="number" min="0.0001" step="0.0001" value={bomMaterialDraft.quantity_per_unit} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, quantity_per_unit: e.target.value })} className="h-9" /></div>
                       <div className="space-y-1.5"><label className="text-xs font-semibold">UOM</label><div className="flex h-9 items-center rounded-xl border px-3 text-xs">{rawMaterials.find(material => material.code === bomMaterialDraft.material_code)?.uom || "-"}</div></div>
@@ -1051,44 +1078,38 @@ function AssemblyMaterialRequestsPage() {
                           <th className="p-2 pl-3">Raw Material</th>
                           <th className="p-2 text-right">Qty per Product</th>
                           <th className="p-2 text-right font-semibold">Total Required Qty</th>
-                          <th className="p-2 text-right">Available in WH</th>
-                          <th className="p-2 text-right pr-3">UOM</th>
+                          <th className="p-2 text-right font-semibold">Available in WH</th>
+                          <th className="p-2 text-right pr-3">UOM</th><th className="p-2 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/30">
-                        {availableBomMaterials.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="p-3 text-center text-xs text-amber-600">
-                              No materials currently available in warehouse stock for this BOM.
-                            </td>
-                          </tr>
-                        ) : (
-                          availableBomMaterials.map((item, idx) => {
-                            return (
-                              <tr
-                                key={item.material_code || `${item.material_name}-${idx}`}
-                                className="hover:bg-muted/20"
-                              >
-                                <td className="p-2 pl-3 font-medium text-foreground truncate max-w-[160px]">
-                                  {item.material_code}
-                                  <span className="block text-[10px] text-muted-foreground truncate font-normal">
-                                    {item.material_name}
-                                  </span>
-                                </td>
-                                <td className="p-2 text-right">{item.quantity_per_unit}</td>
-                                <td className="p-2 text-right font-bold text-foreground">
-                                  {item.required_quantity}
-                                </td>
-                                <td className="p-2 text-right">
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 font-mono">
-                                    {item.available_quantity ?? 0}
-                                  </span>
-                                </td>
-                                <td className="p-2 text-right pr-3 font-medium">{item.uom}</td>
-                              </tr>
-                            );
-                          })
-                        )}
+                        {bomPreview.materials?.map((item, idx) => {
+                          return (
+                            <tr
+                              key={item.material_code || `${item.material_name}-${idx}`}
+                              className="hover:bg-muted/20"
+                            >
+                              <td className="p-2 pl-3 font-medium text-foreground truncate max-w-[160px]">
+                                {item.material_code}
+                                <span className="block text-[10px] text-muted-foreground truncate font-normal">
+                                  {item.material_name}
+                                </span>
+                              </td>
+                              <td className="p-2 text-right">{item.quantity_per_unit}</td>
+                              <td className="p-2 text-right font-bold text-foreground">
+                                {Number(formData.target_quantity) > 0 ? item.required_quantity : "Enter quantity"}
+                              </td>
+                              <td className={`p-2 text-right font-bold ${Number(item.available_quantity ?? 0) >= Number(item.required_quantity) ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                                {item.available_quantity ?? 0}
+                              </td>
+                              <td className="p-2 text-right pr-3 font-medium">{item.uom}</td>
+                              <td className="p-2 text-right"><Button type="button" variant="outline" size="sm" disabled={savingBomMaterial} onClick={() => {
+                                setEditingBomMaterial(true); setBomMaterialDraft({ material_code: item.material_code, quantity_per_unit: String(item.quantity_per_unit) });
+                                setBomMaterialError(""); setShowBomMaterial(true);
+                              }}>Edit</Button></td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1117,7 +1138,7 @@ function AssemblyMaterialRequestsPage() {
                 />
               </div>
 
-              <DialogFooter className="pt-2">
+              <DialogFooter className="flex-col gap-3 border-t pt-4 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
@@ -1131,8 +1152,8 @@ function AssemblyMaterialRequestsPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={creating || showBomMaterial || savingBomMaterial || loadingBOM || !bomPreview || !bomPreview.materials?.length || insufficientBomMaterials.length > 0 || bomPreview.product_code !== formData.product_code || Number(bomPreview.target_quantity) !== Number(formData.target_quantity)}
-                  className="rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-soft"
+                  disabled={creating || showBomMaterial || savingBomMaterial || loadingBOM || !bomPreview || !bomPreview.materials?.length || bomPreview.product_code !== formData.product_code || Number(bomPreview.target_quantity) !== Number(formData.target_quantity)}
+                  className="h-11 w-full min-w-0 rounded-xl gap-2 px-4 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-soft sm:w-auto"
                 >
                   {creating && <RefreshCw className="size-3.5 animate-spin" />}
                   Submit Request to Warehouse
@@ -1146,8 +1167,8 @@ function AssemblyMaterialRequestsPage() {
         {/* ADD MANUFACTURABLE PRODUCT & BOM MODAL */}
         {/* ========================================================================= */}
         <Dialog open={isAddProductOpen} onOpenChange={setIsAddProductOpen}>
-          <DialogContent className="max-w-lg p-6 rounded-2xl">
-            <DialogHeader className="border-b border-border/60 pb-3">
+          <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[90dvh] overflow-y-auto overflow-x-hidden p-6 rounded-2xl">
+            <DialogHeader className="border-b border-border/60 pb-4 pr-6 text-left">
               <DialogTitle className="text-lg font-bold text-foreground flex items-center gap-2">
                 <PlusCircle className="size-5 text-primary" />
                 Add Manufacturable Product & BOM
@@ -1158,8 +1179,8 @@ function AssemblyMaterialRequestsPage() {
               </DialogDescription>
             </DialogHeader>
 
-            <form onSubmit={handleCreateProduct} className="space-y-4 pt-3">
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleCreateProduct} className="min-w-0 space-y-5 pt-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-foreground">Product Name *</label>
                   <Input
@@ -1168,18 +1189,15 @@ function AssemblyMaterialRequestsPage() {
                     value={newProductData.product_name}
                     onChange={(e) => handleProductNameChange(e.target.value)}
                     required
-                    className="h-9 text-xs rounded-xl"
+                    className="h-11 text-sm rounded-xl"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
+                  <div className="flex min-h-6 flex-wrap items-center justify-between gap-2">
                     <label className="text-xs font-semibold text-foreground flex items-center gap-1">
-                      Product Code / SKU <span className="text-destructive">*</span>
+                      Product code <span className="text-destructive">*</span>
                     </label>
-                    <span className="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5">
-                      <Sparkles className="size-2.5" />
-                      Auto-generated
-                    </span>
+
                   </div>
                   <div className="relative flex items-center">
                     <Input
@@ -1194,24 +1212,15 @@ function AssemblyMaterialRequestsPage() {
                         });
                       }}
                       required
-                      className="h-9 pr-9 text-xs font-mono font-semibold rounded-xl uppercase tracking-wider bg-muted/30 focus:bg-background"
+                      className="h-11 pr-9 text-sm font-mono font-semibold rounded-xl uppercase tracking-wider bg-muted/30 focus:bg-background"
                     />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleRegenerateSKU}
-                      className="absolute right-1 size-7 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                      title="Re-generate SKU"
-                    >
-                      <Sparkles className="size-3.5 text-primary" />
-                    </Button>
+
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
-                <div className="flex items-center justify-between">
+              <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+                <div className="flex min-h-6 flex-wrap items-center justify-between gap-2">
                   <label className="text-xs font-semibold text-foreground">
                     Bill of Materials Components *
                   </label>
@@ -1233,7 +1242,7 @@ function AssemblyMaterialRequestsPage() {
                     <Plus className="mr-1 size-3" /> Add Component
                   </Button>
                 </div>
-                <div className="grid grid-cols-[1fr_90px_80px_28px] gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
+                <div className="hidden sm:grid sm:grid-cols-[minmax(0,1fr)_120px_80px_36px] gap-3 text-xs font-semibold uppercase text-muted-foreground">
                   <span>Raw Material</span>
                   <span>Qty per Product</span>
                   <span>UOM</span>
@@ -1242,11 +1251,11 @@ function AssemblyMaterialRequestsPage() {
                 {newProductData.components.map((component, index) => (
                   <div
                     key={`bom-component-${index}`}
-                    className="grid grid-cols-[1fr_90px_80px_28px] items-center gap-2"
+                    className="grid grid-cols-[minmax(0,1fr)_80px_36px] sm:grid-cols-[minmax(0,1fr)_120px_80px_36px] items-center gap-3"
                   >
                     <select
-                      className="h-8 min-w-0 rounded-lg border border-input bg-card px-2 text-xs"
-                      disabled={loadingRawMaterials}
+                      aria-label={`Raw material ${index + 1}`}
+                      className="col-span-3 sm:col-span-1 h-11 min-w-0 rounded-lg border border-input bg-card px-3 text-sm"
                       value={component.material_code}
                       required
                       onChange={(e) => {
@@ -1277,11 +1286,12 @@ function AssemblyMaterialRequestsPage() {
                     </select>
                     <Input
                       type="number"
+                      aria-label={`Quantity per product ${index + 1}`}
                       min="0.0001"
                       step="any"
                       value={component.quantity_per_unit}
                       required
-                      className="h-8 rounded-lg text-xs"
+                      className="h-11 min-w-0 rounded-lg text-sm"
                       onChange={(e) =>
                         setNewProductData((prev) => ({
                           ...prev,
@@ -1297,13 +1307,14 @@ function AssemblyMaterialRequestsPage() {
                       value={component.uom}
                       readOnly
                       placeholder="UOM"
-                      className="h-8 rounded-lg bg-muted/40 text-xs"
+                      className="h-11 min-w-0 rounded-lg bg-muted/40 text-sm"
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-8 px-1 text-destructive"
+                      aria-label={`Remove component ${index + 1}`}
+                      className="h-11 px-1 text-destructive"
                       disabled={newProductData.components.length === 1}
                       onClick={() =>
                         setNewProductData((prev) => ({
@@ -1328,7 +1339,7 @@ function AssemblyMaterialRequestsPage() {
                 )}
               </div>
 
-              <DialogFooter className="pt-2">
+              <DialogFooter className="gap-3 border-t pt-4">
                 <Button
                   type="button"
                   variant="outline"

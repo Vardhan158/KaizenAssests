@@ -12,7 +12,7 @@ class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system"] = Field(
         ..., description="Role of the message author: 'user', 'assistant', or 'system'"
     )
-    content: str = Field(..., min_length=1, description="Message text content")
+    content: str = Field(..., min_length=1, max_length=8000, description="Message text content")
 
     @field_validator("content")
     @classmethod
@@ -31,6 +31,7 @@ class AssistantChatRequest(BaseModel):
     )
     history: List[ChatMessage] = Field(
         default_factory=list,
+        max_length=50,
         description="Optional list of prior conversation messages",
     )
 

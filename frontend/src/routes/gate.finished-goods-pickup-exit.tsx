@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
+import { LogOut } from "lucide-react";
 import { isValidPersonName, isValidVehicleNumber, sanitizePersonName, sanitizeVehicleNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/gate/finished-goods-pickup-exit")({
@@ -58,7 +59,14 @@ function PickupExitPage() {
   };
   return (
     <AppShell
-      title="Finished-Goods Pickup Gate Exit"
+      title={
+        <span className="gate-entry-title inline-flex items-center gap-3">
+          <span className="gate-entry-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+            <LogOut className="size-5" aria-hidden="true" />
+          </span>
+          <span>Finished-Goods Pickup Gate Exit</span>
+        </span>
+      }
       subtitle="Verify the original pickup pass and close the outbound vehicle visit."
     >
       <form

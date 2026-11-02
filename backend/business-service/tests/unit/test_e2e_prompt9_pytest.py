@@ -33,10 +33,10 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 from app.modules.assembly.infrastructure.persistence.models import AssemblyOrderModel
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel
@@ -46,11 +46,11 @@ from app.modules.dispatch.infrastructure.persistence.models import DispatchModel
 async def test_e2e_prompt9_dock_release_and_putaway_flow():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        store_headers = {
-            "Authorization": "Bearer mock-jwt-store-mgr-token",
-            "X-User-Roles": "STORE_MANAGER,STORE_KEEPER",
-            "X-Store-Id": "9e93cb84-e799-424c-a0e5-ce06175222ec",
-            "X-Store-Code": "STR-1E6BD7",
+        warehouse_headers = {
+            "Authorization": "Bearer mock-jwt-warehouse-mgr-token",
+            "X-User-Roles": "WAREHOUSE_OPERATOR,WAREHOUSE_OPERATOR",
+            "X-Warehouse-Id": "9e93cb84-e799-424c-a0e5-ce06175222ec",
+            "X-Warehouse-Code": "STR-1E6BD7",
         }
 
         # 1. VERIFY DOCK RELEASE STATE
@@ -72,10 +72,10 @@ async def test_e2e_prompt9_dock_release_and_putaway_flow():
             )).scalar_one_or_none()
             assert da is not None
             assert da.dock_released_at is not None
-            assert da.assigned_store_code == "STR-1E6BD7"
+            assert da.assigned_warehouse_code == "STR-1E6BD7"
 
         # 2. VERIFY DUPLICATE DOCK RELEASE IS REJECTED (IDEMPOTENCY)
-        resp_double_rel = await client.post(f"/api/gate-entries/{ge.id}/release-dock", headers=store_headers)
+        resp_double_rel = await client.post(f"/api/gate-entries/{ge.id}/release-dock", headers=warehouse_headers)
         assert resp_double_rel.status_code in (400, 409, 422), "Double dock release must be rejected"
 
         # 3. VERIFY PUTAWAY TASK & EXECUTION
@@ -86,7 +86,7 @@ async def test_e2e_prompt9_dock_release_and_putaway_flow():
             assert len(tasks) == 1, "Exactly one putaway task must exist for the GRN"
             task = tasks[0]
             assert task.item_code == "MAT-MOTOR-001"
-            assert task.destination_store_id == uuid.UUID("9e93cb84-e799-424c-a0e5-ce06175222ec")
+            assert task.destination_warehouse_ref_id == uuid.UUID("9e93cb84-e799-424c-a0e5-ce06175222ec")
             assert task.status == "PUTAWAY_COMPLETED"
             assert task.completed_at is not None
 
@@ -101,7 +101,7 @@ async def test_e2e_prompt9_dock_release_and_putaway_flow():
         resp_double_put = await client.post(
             f"/api/storage/putaway-tasks/{task.id}/complete",
             json={"material_scan": "MAT-MOTOR-001", "location_scan": "ELE-Z01-2E34", "quantity": 4.0},
-            headers=store_headers,
+            headers=warehouse_headers,
         )
         assert resp_double_put.status_code in (400, 409, 422), "Duplicate putaway execution must be rejected"
 

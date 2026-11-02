@@ -10,8 +10,20 @@ from app.database.session import UnitOfWork, get_uow
 from app.modules.assistant.application.service import AssistantService, get_assistant_service
 from app.modules.assistant.domain.schemas import AssistantChatRequest, AssistantChatResponse
 from app.security.dependencies import CurrentUser, get_current_user
+from app.modules.assistant.application.role_policy import allowed_categories, primary_role, suggestions_for_roles
 
 router = APIRouter(prefix="/api/v1/assistant", tags=["assistant"])
+
+
+@router.get("/capabilities")
+async def capabilities(user: CurrentUser = Depends(get_current_user)) -> dict:
+    """Use the authenticated role policy for client suggestions as well as lookups."""
+    return {
+        "role": primary_role(user.roles),
+        "categories": sorted(allowed_categories(user.roles)),
+        "suggestions": suggestions_for_roles(user.roles),
+        "read_only": True,
+    }
 
 
 @router.post(

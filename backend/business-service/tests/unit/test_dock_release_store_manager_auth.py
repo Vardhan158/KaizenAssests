@@ -1,12 +1,12 @@
-"""Unit tests verifying Store Manager authorization for Dock Release in the Dock Allocation module.
+"""Unit tests verifying Warehouse Operator authorization for Dock Release in the Dock Allocation module.
 
 Covers:
-1. Store Manager A + Store A + Dock A -> Release succeeds (200 OK).
-2. Store Manager A + Store A + Dock B (assigned to Store B) -> 403 Forbidden.
+1. Warehouse Operator A + Warehouse A + Dock A -> Release succeeds (200 OK).
+2. Warehouse Operator A + Warehouse A + Dock B (assigned to Warehouse B) -> 403 Forbidden.
 3. Warehouse Manager -> Cannot release dock -> 403 Forbidden.
 4. Non-authorized roles (e.g. Procurement, Finance) -> 403 Forbidden.
 5. Unauthenticated user -> 401 Unauthorized.
-6. Store Manager with no store assignment -> 403 Forbidden.
+6. Warehouse Operator with no warehouse assignment -> 403 Forbidden.
 """
 
 from __future__ import annotations
@@ -26,79 +26,79 @@ from app.modules.dock.infrastructure.persistence.models import (
     DockMasterModel,
     DockStatusHistoryModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreManagerUserModel,
-    StoreModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    UserAccountModel,
+    WarehouseModel,
 )
 
 
 @pytest.mark.asyncio
-async def test_dock_release_store_manager_authorization():
+async def test_dock_release_warehouse_operator_authorization():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         now_tz = datetime.datetime.now(datetime.timezone.utc)
         wh_id = "WH-BLR-01"
 
         async with session_scope() as session:
-            # 1. Create two stores: Store A (Electronics) and Store B (Raw Materials)
-            store_a = StoreModel(
+            # 1. Create two warehouses: Warehouse A (Electronics) and Warehouse B (Raw Materials)
+            warehouse_a = WarehouseModel(
                 id=uuid.uuid4(),
-                store_code=f"STR-A-{uuid.uuid4().hex[:4].upper()}",
-                store_name="Electronics Testing Store",
+                warehouse_code=f"STR-A-{uuid.uuid4().hex[:4].upper()}",
+                warehouse_name="Electronics Testing Warehouse",
                 warehouse_id=wh_id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
-            store_b = StoreModel(
+            warehouse_b = WarehouseModel(
                 id=uuid.uuid4(),
-                store_code=f"STR-B-{uuid.uuid4().hex[:4].upper()}",
-                store_name="Raw Materials Bulk Store",
+                warehouse_code=f"STR-B-{uuid.uuid4().hex[:4].upper()}",
+                warehouse_name="Raw Materials Bulk Warehouse",
                 warehouse_id=wh_id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
-            session.add_all([store_a, store_b])
+            session.add_all([warehouse_a, warehouse_b])
 
-            # 2. Create Store Managers for Store A and Store B
+            # 2. Create Warehouse Operators for Warehouse A and Warehouse B
             mgr_a_user = f"mgr_a_{uuid.uuid4().hex[:4]}"
             mgr_b_user = f"mgr_b_{uuid.uuid4().hex[:4]}"
             mgr_unassigned_user = f"mgr_un_{uuid.uuid4().hex[:4]}"
 
-            mgr_a = StoreManagerUserModel(
+            mgr_a = UserAccountModel(
                 id=uuid.uuid4(),
                 employee_id=f"EMP-A-{uuid.uuid4().hex[:4].upper()}",
                 username=mgr_a_user,
                 full_name="Alice Electronics Manager",
                 email=f"{mgr_a_user}@test.com",
                 password_hash="mock",
-                store_id=store_a.id,
+                warehouse_ref_id=warehouse_a.id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
-            mgr_b = StoreManagerUserModel(
+            mgr_b = UserAccountModel(
                 id=uuid.uuid4(),
                 employee_id=f"EMP-B-{uuid.uuid4().hex[:4].upper()}",
                 username=mgr_b_user,
                 full_name="Bob Materials Manager",
                 email=f"{mgr_b_user}@test.com",
                 password_hash="mock",
-                store_id=store_b.id,
+                warehouse_ref_id=warehouse_b.id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
             session.add_all([mgr_a, mgr_b])
 
-            # 3. Create two Docks and Allocation Requests: Dock A (for Store A) and Dock B (for Store B)
+            # 3. Create two Docks and Allocation Requests: Dock A (for Warehouse A) and Dock B (for Warehouse B)
             dock_a = DockMasterModel(
                 id=uuid.uuid4(),
                 dock_code=f"DK-A-{uuid.uuid4().hex[:4].upper()}",
                 dock_name="Dock A Electronics",
                 dock_type=DockType.ELECTRONICS.value,
-                store_id=store_a.id,
+                warehouse_ref_id=warehouse_a.id,
                 status=DockStatus.OCCUPIED.value,
                 is_active=True,
                 created_at=now_tz,
@@ -109,7 +109,7 @@ async def test_dock_release_store_manager_authorization():
                 dock_code=f"DK-B-{uuid.uuid4().hex[:4].upper()}",
                 dock_name="Dock B Materials",
                 dock_type=DockType.RAW_MATERIAL.value,
-                store_id=store_b.id,
+                warehouse_ref_id=warehouse_b.id,
                 status=DockStatus.OCCUPIED.value,
                 is_active=True,
                 created_at=now_tz,
@@ -129,9 +129,9 @@ async def test_dock_release_store_manager_authorization():
                 priority=AllocationPriority.NORMAL.value,
                 status=AllocationStatus.OCCUPIED.value,
                 assigned_dock_id=dock_a.id,
-                assigned_store_id=store_a.id,
-                assigned_store_code=store_a.store_code,
-                assigned_store_name=store_a.store_name,
+                assigned_warehouse_ref_id=warehouse_a.id,
+                assigned_warehouse_code=warehouse_a.warehouse_code,
+                assigned_warehouse_name=warehouse_a.warehouse_name,
                 assigned_at=now_tz,
                 arrived_at=now_tz,
                 created_at=now_tz,
@@ -148,9 +148,9 @@ async def test_dock_release_store_manager_authorization():
                 priority=AllocationPriority.HIGH.value,
                 status=AllocationStatus.OCCUPIED.value,
                 assigned_dock_id=dock_b.id,
-                assigned_store_id=store_b.id,
-                assigned_store_code=store_b.store_code,
-                assigned_store_name=store_b.store_name,
+                assigned_warehouse_ref_id=warehouse_b.id,
+                assigned_warehouse_code=warehouse_b.warehouse_code,
+                assigned_warehouse_name=warehouse_b.warehouse_name,
                 assigned_at=now_tz,
                 arrived_at=now_tz,
                 created_at=now_tz,
@@ -161,27 +161,27 @@ async def test_dock_release_store_manager_authorization():
 
             alloc_a_id_str = str(alloc_a.id)
             alloc_b_id_str = str(alloc_b.id)
-            store_a_id_str = str(store_a.id)
-            store_b_id_str = str(store_b.id)
-            store_a_code = store_a.store_code
-            store_b_code = store_b.store_code
+            warehouse_a_id_str = str(warehouse_a.id)
+            warehouse_b_id_str = str(warehouse_b.id)
+            warehouse_a_code = warehouse_a.warehouse_code
+            warehouse_b_code = warehouse_b.warehouse_code
             dock_a_id_str = str(dock_a.id)
 
         # Header definitions for different actors
-        headers_store_mgr_a = {
+        headers_warehouse_mgr_a = {
             "Authorization": "Bearer mock-jwt-token",
-            "X-User-Roles": "STORE_MANAGER",
-            "X-User-Permissions": "gate:write,store:write",
-            "X-Store-Id": store_a_id_str,
-            "X-Store-Code": store_a_code,
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
+            "X-User-Permissions": "gate:write,warehouse:write",
+            "X-Warehouse-Id": warehouse_a_id_str,
+            "X-Warehouse-Code": warehouse_a_code,
         }
 
-        headers_store_mgr_b = {
+        headers_warehouse_mgr_b = {
             "Authorization": "Bearer mock-jwt-token",
-            "X-User-Roles": "STORE_MANAGER",
-            "X-User-Permissions": "gate:write,store:write",
-            "X-Store-Id": store_b_id_str,
-            "X-Store-Code": store_b_code,
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
+            "X-User-Permissions": "gate:write,warehouse:write",
+            "X-Warehouse-Id": warehouse_b_id_str,
+            "X-Warehouse-Code": warehouse_b_code,
         }
 
         headers_warehouse_mgr = {
@@ -196,11 +196,11 @@ async def test_dock_release_store_manager_authorization():
             "X-User-Permissions": "procurement:read",
         }
 
-        headers_store_mgr_unassigned = {
+        headers_warehouse_mgr_unassigned = {
             "Authorization": "Bearer mock-jwt-token",
-            "X-User-Roles": "STORE_MANAGER",
-            "X-User-Permissions": "gate:write,store:write",
-            # No X-Store-Id provided and user has no store in database
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
+            "X-User-Permissions": "gate:write,warehouse:write",
+            # No X-Warehouse-Id provided and user has no warehouse in database
             "X-User-Name": mgr_unassigned_user,
         }
 
@@ -223,26 +223,26 @@ async def test_dock_release_store_manager_authorization():
         )
         assert resp_proc.status_code == 403
 
-        # Case 6: Store Manager with no store assignment -> 403 Forbidden
+        # Case 6: Warehouse Operator with no warehouse assignment -> 403 Forbidden
         resp_unassigned = await client.post(
             f"/api/v1/warehouse/dock-allocations/{alloc_a_id_str}/release",
-            headers=headers_store_mgr_unassigned,
+            headers=headers_warehouse_mgr_unassigned,
         )
         assert resp_unassigned.status_code == 403
-        assert "does not have an assigned store" in resp_unassigned.json()["detail"]
+        assert "does not have an assigned warehouse" in resp_unassigned.json()["detail"]
 
-        # Case 2: Store Manager B attempts to release Dock A (Store A) -> 403 Forbidden
+        # Case 2: Warehouse Operator B attempts to release Dock A (Warehouse A) -> 403 Forbidden
         resp_sm_cross = await client.post(
             f"/api/v1/warehouse/dock-allocations/{alloc_a_id_str}/release",
-            headers=headers_store_mgr_b,
+            headers=headers_warehouse_mgr_b,
         )
         assert resp_sm_cross.status_code == 403
-        assert "only release docks assigned to your Store" in resp_sm_cross.json()["detail"]
+        assert "only release docks assigned to your Warehouse" in resp_sm_cross.json()["detail"]
 
-        # Case 1: Store Manager A releases Dock A (Store A) -> 200 OK
+        # Case 1: Warehouse Operator A releases Dock A (Warehouse A) -> 200 OK
         resp_sm_a = await client.post(
             f"/api/v1/warehouse/dock-allocations/{alloc_a_id_str}/release",
-            headers=headers_store_mgr_a,
+            headers=headers_warehouse_mgr_a,
         )
         assert resp_sm_a.status_code == 200
         data = resp_sm_a.json()
@@ -264,6 +264,6 @@ async def test_dock_release_store_manager_authorization():
         # Re-release attempt on already released dock -> 400 Bad Request
         resp_double = await client.post(
             f"/api/v1/warehouse/dock-allocations/{alloc_a_id_str}/release",
-            headers=headers_store_mgr_a,
+            headers=headers_warehouse_mgr_a,
         )
         assert resp_double.status_code == 400

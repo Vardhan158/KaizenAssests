@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { useSearch, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { AppShell } from "@/components/wms/app-shell";
+import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Loader2, LogOut, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, LogOut, Plus, QrCode, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/gate/finished-goods-pickup")({
   component: FinishedGoodsPickupGatePage,
@@ -24,7 +24,10 @@ function FinishedGoodsPickupGatePage() {
   const [selected, setSelected] = useState<any | null>(null);
   const [selectedTransportIndex, setSelectedTransportIndex] = useState(-1);
   const [query, setQuery] = useState("");
+  const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
+  useEffect(() => { if (typeof moduleSearchParams.search === "string") setQuery(moduleSearchParams.search); }, [moduleSearchParams.search]);
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [requestPage, setRequestPage] = useState(1);
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverContact, setDriverContact] = useState("");
@@ -108,9 +111,23 @@ function FinishedGoodsPickupGatePage() {
             request.status === statusFilter ||
             request.gate_pass_status === statusFilter)
         );
+      }).sort((a, b) => {
+        const time = (request: any) => {
+          const value = Date.parse(request.requested_on || request.created_at || request.submitted_at || "");
+          return Number.isNaN(value) ? 0 : value;
+        };
+        return time(b) - time(a) ||
+          String(b.request_number || "").localeCompare(String(a.request_number || ""), undefined, { numeric: true }) ||
+          String(b.id || "").localeCompare(String(a.id || ""));
       }),
     [requests, query, statusFilter],
   );
+  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / 10));
+  const currentPage = Math.min(requestPage, pageCount);
+  const pageStart = (currentPage - 1) * 10;
+  const pagedRequests = filteredRequests.slice(pageStart, pageStart + 10);
+  useEffect(() => { setRequestPage(1); }, [query, statusFilter]);
+  useEffect(() => { setRequestPage(page => Math.min(page, pageCount)); }, [pageCount]);
   const vehicle = vehicleNumber.trim().toUpperCase().replace(/\s+/g, " ");
   const contact = driverContact.replace(/\D/g, "");
   const selectedTransport = selected?.transport_entries?.[selectedTransportIndex];
@@ -165,14 +182,14 @@ function FinishedGoodsPickupGatePage() {
       toast.error("Every assigned vehicle already has a gate pass for this dispatch.");
     }
   };
-  const lookupRequest = () => {
-    const requestNumber = query.trim().toLowerCase();
+  const lookupRequest = (value = query, showNotFound = true) => {
+    const requestNumber = value.trim().toLowerCase();
     if (!requestNumber) return;
     const match = requests.find(
       (request) => String(request.request_number || "").toLowerCase() === requestNumber,
     );
     if (match) chooseRequest(match);
-    else if (requestNumber.includes("-") || requestNumber.length > 5)
+    else if (showNotFound && (requestNumber.includes("-") || requestNumber.length > 5))
       toast.error("Dispatch request not found", {
         description: "Enter an existing dispatch request number.",
       });
@@ -221,19 +238,25 @@ function FinishedGoodsPickupGatePage() {
 
   return (
     <AppShell
-      title="Finished Goods Pickup Entry & Exit"
+      title={
+        <span className="gate-entry-title inline-flex items-center gap-3">
+          <span className="gate-entry-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+            <QrCode className="size-5" aria-hidden="true" />
+          </span>
+          <span>Finished Goods Pickup Entry &amp; Exit</span>
+        </span>
+      }
       subtitle="Create pickup gate entries, generate gate passes, and securely manage finished-goods vehicle exits."
       actions={
-        <div className="flex items-center gap-2">
+        <div className="gate-entry-actions flex flex-wrap items-center justify-end gap-2">
           <Button onClick={() => setEntryOpen(true)}>
             <Plus className="mr-2 size-4" /> FG Entry
           </Button>
           <Button variant="outline" onClick={() => setExitOpen(true)}>
             <LogOut className="mr-2 size-4" /> Exit Vehicle
           </Button>
-          <Button variant="outline" onClick={() => void load()}>
-            <RefreshCw className="mr-2 size-4" /> Refresh
-          </Button>
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" onClick={() => void load()}>
+            <RefreshCw className="size-4" /></Button>
         </div>
       }
     >
@@ -336,6 +359,15 @@ function FinishedGoodsPickupGatePage() {
                       onChange={(e) => {
                         const value = e.target.value;
                         setQuery(value);
+                        const exactMatch = requests.find(
+                          (request) =>
+                            String(request.request_number || "").toLowerCase() ===
+                            value.trim().toLowerCase(),
+                        );
+                        if (exactMatch) {
+                          chooseRequest(exactMatch);
+                          return;
+                        }
                         if (
                           selected &&
                           value.trim().toLowerCase() !==
@@ -348,7 +380,7 @@ function FinishedGoodsPickupGatePage() {
                           setDriverContact("");
                         }
                       }}
-                      onBlur={lookupRequest}
+                      onBlur={() => lookupRequest()}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
@@ -358,7 +390,7 @@ function FinishedGoodsPickupGatePage() {
                       placeholder="Enter dispatch request number"
                     />
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Enter the request number and press Enter to auto-fill the details.
+                      Enter the complete dispatch number to auto-fill the details.
                     </p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <div>
@@ -592,7 +624,7 @@ function FinishedGoodsPickupGatePage() {
                 aria-label="Search pickup requests"
               />
               <select
-                className="h-9 rounded-md border bg-background px-2 text-sm"
+                className="h-9 min-w-40 shrink-0 whitespace-nowrap rounded-md border bg-background px-2 text-sm"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 aria-label="Filter pickup request status"
@@ -653,7 +685,10 @@ function FinishedGoodsPickupGatePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filteredRequests.map((request) => (
+                  {pagedRequests.map((request) => {
+                    const status = request.gate_pass_status || request.status;
+                    const isExited = ["CLOSED", "EXITED", "VEHICLE_EXITED"].includes(status);
+                    return (
                     <tr key={request.id}>
                       <td className="px-4 py-3 font-mono font-semibold text-primary">
                         {request.request_number}
@@ -667,13 +702,24 @@ function FinishedGoodsPickupGatePage() {
                       <td className="px-4 py-3">{request.vehicle_number || "—"}</td>
                       <td className="px-4 py-3">{request.driver_name || "—"}</td>
                       <td className="px-4 py-3">
-                        {statusLabel(request.gate_pass_status || request.status)}
+                        <StatusBadge status={isExited ? "EXITED" : status} />
                       </td>
-                      <td className="px-4 py-3">{request.gate_pass_number || "—"}</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-primary">{request.gate_pass_number || "—"}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
+            </div>
+          )}
+          {!loading && !error && filteredRequests.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm">
+              <p className="text-muted-foreground">Showing {pageStart + 1}–{Math.min(pageStart + 10, filteredRequests.length)} of {filteredRequests.length} requests</p>
+              <nav aria-label="Pickup requests pagination" className="flex items-center gap-3">
+                <Button size="sm" variant="outline" disabled={currentPage === 1} onClick={() => setRequestPage(currentPage - 1)}>Previous</Button>
+                <span aria-live="polite">{currentPage} / {pageCount}</span>
+                <Button size="sm" variant="outline" disabled={currentPage === pageCount} onClick={() => setRequestPage(currentPage + 1)}>Next</Button>
+              </nav>
             </div>
           )}
         </Card>

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute, redirect, useNavigate, useSearch } from "@tanstack/react-router";
 import {
+  ArrowLeft,
   ArrowRight,
   Box,
   Eye,
@@ -168,10 +169,20 @@ function LoginPage() {
         </div>
       </section>
       <section className="relative z-10 mx-auto block w-full max-w-[580px] min-[1000px]:absolute min-[1000px]:top-[10.15%] min-[1000px]:right-[3%] min-[1000px]:m-0 min-[1000px]:w-[38%] min-[1000px]:max-w-none">
-        <div className="absolute right-0 top-[-2.5vw] hidden items-center gap-[.8vw] text-[.67vw] font-semibold tracking-[.07vw] whitespace-nowrap text-[#607391] min-[1000px]:flex">
-          PEOPLE&nbsp; | &nbsp;PROCESS&nbsp; | &nbsp;PRODUCTIVITY{" "}
-          <span className="h-0.5 w-[2.4vw] bg-[#0d214d]" />
-        </div>
+        <div className="mb-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 min-[1000px]:absolute min-[1000px]:right-0 min-[1000px]:bottom-full min-[1000px]:w-full">
+          <div className="hidden items-center gap-[.8vw] text-[.67vw] font-semibold tracking-[.07vw] whitespace-nowrap text-[#607391] min-[1000px]:flex">
+            PEOPLE&nbsp; | &nbsp;PROCESS&nbsp; | &nbsp;PRODUCTIVITY{" "}
+            <span className="h-0.5 w-[2.4vw] bg-[#0d214d]" />
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/" })}
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[10px] border border-[#DFE7F0] bg-white px-4 text-sm font-semibold text-[#064B87] transition-colors hover:border-[#B3C8D9] hover:bg-[#EAF3FC] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0866B1]"
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+            Back to Home
+          </button>
+          </div>
         <div className="relative w-full rounded-3xl bg-[linear-gradient(145deg,#fff,#f6f9fe)] px-6 py-[30px] shadow-[0_1.4vw_3vw_#4785e029] min-[1000px]:min-h-[40.7vw] min-[1000px]:rounded-[1.3vw] min-[1000px]:pt-[2.8vw] min-[1000px]:pr-[3.2vw] min-[1000px]:pb-[1.9vw] min-[1000px]:pl-[4.4vw] before:pointer-events-none before:absolute before:top-0 before:right-0 before:h-[65px] before:w-[75px] before:rounded-tr-3xl before:bg-[#eaf2ff] before:content-[''] before:[clip-path:polygon(0_0,100%_0,100%_100%)] min-[1000px]:before:h-[6vw] min-[1000px]:before:w-[6.9vw] min-[1000px]:before:rounded-tr-[1.3vw] [&_input:focus-visible]:outline-2 [&_input:focus-visible]:outline-offset-[3px] [&_input:focus-visible]:outline-[#3180ff] [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-[3px] [&_button:focus-visible]:outline-[#3180ff]">
           <p className="text-xs leading-[1.2] font-bold tracking-[3px] text-[#1168ed] min-[1000px]:text-[.8vw] min-[1000px]:tracking-[.18vw]">
             WELCOME BACK

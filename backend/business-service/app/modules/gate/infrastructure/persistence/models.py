@@ -40,12 +40,12 @@ class DockAssignmentModel(Base):
     po_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("purchase_order.id", ondelete="RESTRICT"), nullable=True, index=True)
     vehicle_number: Mapped[str] = mapped_column(String(32), nullable=False)
     dock_number: Mapped[str] = mapped_column(String(32), ForeignKey("warehouse_dock.dock_number", ondelete="RESTRICT"), nullable=False, index=True)
-    assigned_store_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True, index=True)
-    assigned_store_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    assigned_store_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    assigned_store_manager_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    assigned_store_manager_username: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    assigned_store_manager_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    assigned_warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_warehouse_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    assigned_warehouse_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    assigned_warehouse_operator_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    assigned_warehouse_operator_username: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    assigned_warehouse_operator_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     assigned_by: Mapped[str] = mapped_column(String(128), nullable=False)
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     movement_started_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -304,7 +304,7 @@ class GateEntryModel(Base):
 class FinishedGoodsPickupGateVisitModel(Base):
     __tablename__ = "finished_goods_pickup_gate_visit"
 
-    # Existing databases store this primary key as VARCHAR, not UUID.
+    # Existing databases warehouse this primary key as VARCHAR, not UUID.
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("finished_goods_request.id", ondelete="RESTRICT"), nullable=False, index=True)
     gate_pass_number: Mapped[str] = mapped_column(String(6), nullable=False, unique=True, index=True)

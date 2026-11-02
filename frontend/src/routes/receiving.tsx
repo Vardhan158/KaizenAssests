@@ -169,7 +169,7 @@ const INITIAL_RECORDS: InboundRecord[] = [
     poNo: "PO-8790",
     asnNo: "ASN-2026-003310",
     dockNo: "D-01",
-    warehouseName: "Electrical Spares Store",
+    warehouseName: "Electrical Spares Warehouse",
     zoneName: "Components Receiving",
     status: "QC_PENDING",
     entryTime: "07 Oct 2026 • 09:30 AM",
@@ -599,7 +599,7 @@ function ReceivingControlCenter() {
                       },
                       {
                         time: "12:18 PM",
-                        actor: "Store Manager – Suresh",
+                        actor: "Warehouse Operator – Suresh",
                         event: "GRN Posted (GRN-BLR-2026-000184)",
                       },
                       {
@@ -639,7 +639,7 @@ function ReceivingControlCenter() {
                           <th className="p-2.5 text-center">Warehouse Manager</th>
                           <th className="p-2.5 text-center">Operator</th>
                           <th className="p-2.5 text-center">QC</th>
-                          <th className="p-2.5 text-center">Store Manager</th>
+                          <th className="p-2.5 text-center">Warehouse Operator</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y font-semibold">

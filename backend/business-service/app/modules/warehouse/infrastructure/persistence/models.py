@@ -1,5 +1,5 @@
 """
-SQLAlchemy ORM models for Store Master, Store Zones, Store Bins, and real Store Manager User accounts.
+SQLAlchemy ORM models for Warehouse Master, Warehouse Zones, Warehouse Bins, and real Warehouse Operator User accounts.
 """
 from __future__ import annotations
 
@@ -16,19 +16,24 @@ from sqlalchemy import CheckConstraint, Integer, func
 from app.database.base import Base, GUID
 
 
-class StoreModel(Base):
-    __tablename__ = "store"
-    __table_args__ = (UniqueConstraint("store_code", name="uq_store_code"),)
+class WarehouseModel(Base):
+    __tablename__ = "warehouse_configuration"
+    __table_args__ = (
+        UniqueConstraint("warehouse_code", name="uq_warehouse_code"),
+        UniqueConstraint("singleton_key", name="uq_single_warehouse"),
+        CheckConstraint("singleton_key = 1", name="single_warehouse_only"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    store_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    store_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    singleton_key: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    warehouse_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    warehouse_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    store_manager_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    store_manager_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    warehouse_operator_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    warehouse_operator_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
-    store_type: Mapped[str] = mapped_column(String(64), nullable=False, default="RAW_MATERIAL", index=True)
+    warehouse_type: Mapped[str] = mapped_column(String(64), nullable=False, default="RAW_MATERIAL", index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -41,35 +46,35 @@ class StoreModel(Base):
         nullable=False,
     )
 
-    zones: Mapped[List[StoreZoneModel]] = relationship(
-        "StoreZoneModel",
-        back_populates="store",
+    zones: Mapped[List[WarehouseZoneModel]] = relationship(
+        "WarehouseZoneModel",
+        back_populates="warehouse",
         cascade="all, delete-orphan",
-        order_by="StoreZoneModel.zone_code.asc()",
+        order_by="WarehouseZoneModel.zone_code.asc()",
     )
 
-    bins: Mapped[List[StoreBinModel]] = relationship(
-        "StoreBinModel",
-        back_populates="store",
+    bins: Mapped[List[WarehouseBinModel]] = relationship(
+        "WarehouseBinModel",
+        back_populates="warehouse",
         cascade="all, delete-orphan",
-        order_by="StoreBinModel.bin_code.asc()",
+        order_by="WarehouseBinModel.bin_code.asc()",
     )
 
-    managers: Mapped[List[StoreManagerUserModel]] = relationship(
-        "StoreManagerUserModel",
-        back_populates="store",
+    managers: Mapped[List[UserAccountModel]] = relationship(
+        "UserAccountModel",
+        back_populates="warehouse",
         cascade="all, delete-orphan",
     )
 
 
-class StoreZoneModel(Base):
-    __tablename__ = "store_zone"
-    __table_args__ = (UniqueConstraint("store_id", "zone_code", name="uq_store_zone_code"),)
+class WarehouseZoneModel(Base):
+    __tablename__ = "warehouse_zone"
+    __table_args__ = (UniqueConstraint("warehouse_ref_id", "zone_code", name="uq_warehouse_zone_code"),)
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    store_id: Mapped[uuid.UUID] = mapped_column(
+    warehouse_ref_id: Mapped[uuid.UUID] = mapped_column(
         GUID,
-        ForeignKey("store.id", ondelete="RESTRICT"),
+        ForeignKey("warehouse_configuration.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -89,32 +94,32 @@ class StoreZoneModel(Base):
         nullable=False,
     )
 
-    store: Mapped[StoreModel] = relationship("StoreModel", back_populates="zones")
-    bins: Mapped[List[StoreBinModel]] = relationship(
-        "StoreBinModel",
+    warehouse: Mapped[WarehouseModel] = relationship("WarehouseModel", back_populates="zones")
+    bins: Mapped[List[WarehouseBinModel]] = relationship(
+        "WarehouseBinModel",
         back_populates="zone",
         cascade="all, delete-orphan",
-        order_by="StoreBinModel.bin_code.asc()",
+        order_by="WarehouseBinModel.bin_code.asc()",
     )
 
 
-class StoreBinModel(Base):
-    __tablename__ = "store_bin"
+class WarehouseBinModel(Base):
+    __tablename__ = "warehouse_bin"
     __table_args__ = (
-        UniqueConstraint("zone_id", "bin_code", name="uq_store_zone_bin_code"),
-        UniqueConstraint("store_id", "bin_code", name="uq_store_bin_code_scoped"),
+        UniqueConstraint("zone_id", "bin_code", name="uq_warehouse_zone_bin_code"),
+        UniqueConstraint("warehouse_ref_id", "bin_code", name="uq_warehouse_bin_code_scoped"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    store_id: Mapped[uuid.UUID] = mapped_column(
+    warehouse_ref_id: Mapped[uuid.UUID] = mapped_column(
         GUID,
-        ForeignKey("store.id", ondelete="RESTRICT"),
+        ForeignKey("warehouse_configuration.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     zone_id: Mapped[uuid.UUID] = mapped_column(
         GUID,
-        ForeignKey("store_zone.id", ondelete="RESTRICT"),
+        ForeignKey("warehouse_zone.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -146,18 +151,18 @@ class StoreBinModel(Base):
         nullable=False,
     )
 
-    store: Mapped[StoreModel] = relationship("StoreModel", back_populates="bins")
-    zone: Mapped[StoreZoneModel] = relationship("StoreZoneModel", back_populates="bins")
+    warehouse: Mapped[WarehouseModel] = relationship("WarehouseModel", back_populates="bins")
+    zone: Mapped[WarehouseZoneModel] = relationship("WarehouseZoneModel", back_populates="bins")
 
 
-class StoreManagerUserModel(Base):
-    __tablename__ = "store_manager_user"
+class UserAccountModel(Base):
+    __tablename__ = "user_account"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    store_id: Mapped[uuid.UUID] = mapped_column(
+    warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID,
-        ForeignKey("store.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("warehouse_configuration.id", ondelete="RESTRICT"),
+        nullable=True,
         index=True,
     )
     employee_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
@@ -165,9 +170,15 @@ class StoreManagerUserModel(Base):
     full_name: Mapped[str] = mapped_column(String(128), nullable=False)
     email: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
-    role: Mapped[str] = mapped_column(String(64), nullable=False, default="Store Manager")
+    role: Mapped[str] = mapped_column(String(64), nullable=False, default="Warehouse Operator")
+    shift_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    assembly_unit_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     applications: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=lambda: ["WMS"])
+    page_permissions: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     auth_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    auth_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -182,19 +193,19 @@ class StoreManagerUserModel(Base):
         nullable=False,
     )
 
-    store: Mapped[StoreModel] = relationship("StoreModel", back_populates="managers")
+    warehouse: Mapped[WarehouseModel] = relationship("WarehouseModel", back_populates="managers")
 
 
-class StoreRackModel(Base):
+class WarehouseRackModel(Base):
     """One shared PCS capacity for every legacy bin belonging to a zone/rack."""
-    __tablename__ = "store_rack"
+    __tablename__ = "warehouse_rack"
     __table_args__ = (
-        UniqueConstraint("zone_id", "rack_code", name="uq_store_rack_zone_code"),
+        UniqueConstraint("zone_id", "rack_code", name="uq_warehouse_rack_zone_code"),
         CheckConstraint("maximum_capacity > 0 AND maximum_capacity = CAST(maximum_capacity AS INTEGER)", name="rack_positive_capacity"),
         CheckConstraint("occupied_quantity >= 0 AND occupied_quantity <= maximum_capacity", name="rack_occupancy_bounds"),
     )
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    zone_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="RESTRICT"), nullable=False)
+    zone_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("warehouse_zone.id", ondelete="RESTRICT"), nullable=False)
     rack_code: Mapped[str] = mapped_column(String(64), nullable=False)
     maximum_capacity: Mapped[int] = mapped_column(Integer, nullable=False)
     occupied_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0, server_default="0")
@@ -203,7 +214,7 @@ class StoreRackModel(Base):
 class RackOccupancyEventModel(Base):
     __tablename__ = "rack_occupancy_event"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    rack_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("store_rack.id", ondelete="RESTRICT"), nullable=False, index=True)
+    rack_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("warehouse_rack.id", ondelete="RESTRICT"), nullable=False, index=True)
     balance_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     quantity_delta: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     reason: Mapped[str] = mapped_column(String(1000), nullable=False)

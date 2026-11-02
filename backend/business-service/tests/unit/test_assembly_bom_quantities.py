@@ -88,6 +88,36 @@ class AssemblyBomQuantityTests(unittest.IsolatedAsyncioTestCase):
         invalid=await self.client.post("/api/v1/assembly/products/FG-TEST/bom/materials",json={"material_code":"MAT-NEW","quantity_per_unit":0})
         self.assertEqual(invalid.status_code,422)
 
+    async def test_create_product_duplicate_name_check_works_on_sqlite(self):
+        payload = {
+            "product_code": "FG-FAN-001",
+            "product_name": "Fan",
+            "components": [{
+                "material_code": "MAT-2",
+                "material_name": "MAT-2",
+                "quantity_per_unit": 1,
+                "uom": "PCS",
+            }],
+        }
+        created = await self.client.post("/api/v1/assembly/products", json=payload)
+        self.assertEqual(created.status_code, 201, created.text)
+
+        payload["product_code"] = "FG-FAN-002"
+        payload["product_name"] = "  fAn  "
+        duplicate = await self.client.post("/api/v1/assembly/products", json=payload)
+        self.assertEqual(duplicate.status_code, 400, duplicate.text)
+        self.assertIn("already exists", duplicate.json()["detail"])
+
+    async def test_edit_material_updates_preview(self):
+        response = await self.client.put("/api/v1/assembly/products/FG-TEST/bom/materials", json={"material_code": "MAT-2", "quantity_per_unit": 3})
+        self.assertEqual(response.status_code, 200, response.text)
+        await self.session.commit()
+        preview = await self.client.get("/api/v1/assembly/products/FG-TEST/bom?quantity=10")
+        row = next(item for item in preview.json()["materials"] if item["material_code"] == "MAT-2")
+        self.assertEqual(row["required_quantity"], 30)
+        invalid = await self.client.put("/api/v1/assembly/products/FG-TEST/bom/materials", json={"material_code": "MAT-2", "quantity_per_unit": 0})
+        self.assertEqual(invalid.status_code, 422)
+
     async def test_add_material_rejects_unknown_master_and_unauthorized_role(self):
         unknown=await self.client.post("/api/v1/assembly/products/FG-TEST/bom/materials",json={"material_code":"UNKNOWN","quantity_per_unit":1})
         self.assertEqual(unknown.status_code,422)

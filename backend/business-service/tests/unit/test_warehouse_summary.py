@@ -17,14 +17,14 @@ def result(rows):
 class WarehouseSummaryTests(unittest.IsolatedAsyncioTestCase):
     async def summary(self, *, quantity=90, reserved=0, empty=False, batch_filter=None, movement_batch=None):
         balance = SimpleNamespace(id=uuid.uuid4(), material_code="MAT-LAPT-001", material_name="Laptop", quantity=Decimal(quantity), available_quantity=Decimal(quantity), batch_number="LOT-001", last_grn_number="GRN-2026-001", uom="PCS", updated_at=None)
-        location = SimpleNamespace(location_code="WH/ZONE/BIN-001", store_id=None, zone_id=None, bin_id=None, bin="BIN-001", zone="ZONE-001", warehouse_id="WH-1")
+        location = SimpleNamespace(location_code="WH/ZONE/BIN-001", warehouse_ref_id=None, zone_id=None, bin_id=None, bin="BIN-001", zone="ZONE-001", warehouse_id="WH-1")
         reservations = [SimpleNamespace(status="RESERVED", material_code="MAT-LAPT-001", reserved_quantity=Decimal(reserved), allocations=[{"location_code":location.location_code,"batch_number":"LOT-001","quantity":reserved}])] if reserved else []
         movement_rows = [(movement_batch, "PUTAWAY", Decimal(quantity))] if movement_batch else []
         session = AsyncMock()
         session.execute.side_effect = [result([]),result([]),result([]),result([]),result([]),result(reservations),result([]),result([] if empty else [(balance,location)])] + ([] if empty else [result(movement_rows),result([])])
         user = SimpleNamespace(username="warehouse",roles=["WAREHOUSE"],permissions=[],raw_claims={})
-        with patch("app.modules.storage.infrastructure.api.inventory_router._resolve_user_store_context",new=AsyncMock(return_value=(None,None))):
-            return await get_warehouse_inventory_summary(batch=batch_filter,user=user,uow=SimpleNamespace(session=session))
+        with patch("app.modules.storage.infrastructure.api.inventory_router._resolve_user_warehouse_context",new=AsyncMock(return_value=(None,None))):
+            return await get_warehouse_inventory_summary(user=user,uow=SimpleNamespace(session=session))
 
     async def test_putaway_stock_is_available_without_removed_quarantine_lookup(self):
         rows = await self.summary()

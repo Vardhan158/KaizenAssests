@@ -129,6 +129,9 @@ async def list_grns(
             GrnSummaryResponse(
                 grn_id=str(g.id),
                 grn_number=g.grn_number,
+                asn_number=g.asn_number,
+                gate_entry_id=str(g.gate_entry_id) if g.gate_entry_id else None,
+                gate_entry_number=g.gate_entry_number,
                 po_number=g.po_number,
                 supplier_name=g.supplier_name,
                 supplier_company_name=g.supplier_company_name or g.supplier_name,

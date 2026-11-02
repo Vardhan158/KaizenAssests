@@ -26,9 +26,9 @@ class StorageLocationModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     location_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    store_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True, index=True)
-    zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="SET NULL"), nullable=True, index=True)
-    bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_bin.id", ondelete="SET NULL"), nullable=True, index=True)
+    warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True, index=True)
+    zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_zone.id", ondelete="SET NULL"), nullable=True, index=True)
+    bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_bin.id", ondelete="SET NULL"), nullable=True, index=True)
     zone: Mapped[str] = mapped_column(String(128), nullable=False)
     rack: Mapped[str] = mapped_column(String(64), nullable=False)
     bin: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -55,9 +55,9 @@ class PutawayTaskModel(Base):
     uom: Mapped[str] = mapped_column(String(32), nullable=False)
     warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
     source_location: Mapped[str] = mapped_column(String(64), nullable=False, default="RECEIVING_AREA")
-    destination_store_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True, index=True)
-    destination_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="SET NULL"), nullable=True, index=True)
-    destination_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_bin.id", ondelete="SET NULL"), nullable=True, index=True)
+    destination_warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True, index=True)
+    destination_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_zone.id", ondelete="SET NULL"), nullable=True, index=True)
+    destination_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_bin.id", ondelete="SET NULL"), nullable=True, index=True)
     destination_location_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("storage_location.id", ondelete="RESTRICT"), nullable=True, index=True)
     destination_zone: Mapped[str | None] = mapped_column(String(128), nullable=True)
     destination_rack: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -88,9 +88,9 @@ class PutawayLocationAssignmentModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     putaway_task_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("putaway_task.id", ondelete="CASCADE"), nullable=False, index=True)
-    destination_store_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True)
-    destination_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="SET NULL"), nullable=True)
-    destination_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_bin.id", ondelete="SET NULL"), nullable=True, index=True)
+    destination_warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True)
+    destination_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_zone.id", ondelete="SET NULL"), nullable=True)
+    destination_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_bin.id", ondelete="SET NULL"), nullable=True, index=True)
     location_code: Mapped[str] = mapped_column(String(128), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     assigned_by: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -177,9 +177,9 @@ class AssemblyRequisitionModel(Base):
     priority: Mapped[str] = mapped_column(String(32), nullable=False, default="MEDIUM")
     required_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING", index=True)
-    assigned_store_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True)
-    assigned_store_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    assigned_store_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    assigned_warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True)
+    assigned_warehouse_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    assigned_warehouse_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     assigned_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -224,9 +224,9 @@ class AssemblyStockReservationModel(Base):
     reserved_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
     status: Mapped[str] = mapped_column(String(64), nullable=False, default="RESERVED FOR ASSEMBLY", index=True)
-    store_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True, index=True)
-    store_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    store_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True, index=True)
+    warehouse_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    warehouse_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     zone_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     bin_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     location_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -250,9 +250,9 @@ class PickupTaskModel(Base):
     task_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     requisition_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("assembly_requisition.id", ondelete="CASCADE"), nullable=False, index=True)
     requisition_number: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    store_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("store.id", ondelete="RESTRICT"), nullable=False, index=True)
-    store_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    store_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    warehouse_ref_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="RESTRICT"), nullable=False, index=True)
+    warehouse_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    warehouse_name: Mapped[str] = mapped_column(String(256), nullable=False)
     department: Mapped[str] = mapped_column(String(64), nullable=False, default="Assembly")
     material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     material_name: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -261,11 +261,11 @@ class PickupTaskModel(Base):
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
     priority: Mapped[str] = mapped_column(String(32), nullable=False, default="MEDIUM")
     required_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    suggested_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="SET NULL"), nullable=True)
+    suggested_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_zone.id", ondelete="SET NULL"), nullable=True)
     suggested_zone_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    picked_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="SET NULL"), nullable=True)
+    picked_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_zone.id", ondelete="SET NULL"), nullable=True)
     picked_zone_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ASSIGNED_TO_STORE", index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ASSIGNED_TO_WAREHOUSE", index=True)
     assigned_by: Mapped[str] = mapped_column(String(128), nullable=False)
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     started_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -290,9 +290,9 @@ class InventoryIssueTransactionModel(Base):
     requisition_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pickup_task_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("pickup_task.id", ondelete="SET NULL"), nullable=True)
     source_location_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("storage_location.id", ondelete="SET NULL"), nullable=True, index=True)
-    store_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("store.id", ondelete="RESTRICT"), nullable=False)
-    store_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="SET NULL"), nullable=True)
+    warehouse_ref_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="RESTRICT"), nullable=False)
+    warehouse_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_zone.id", ondelete="SET NULL"), nullable=True)
     zone_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     batch_number: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
@@ -325,8 +325,8 @@ class InventoryMovementHistoryModel(Base):
     batch_lot: Mapped[str | None] = mapped_column(String(128), nullable=True)
     from_location: Mapped[str] = mapped_column(String(128), nullable=False)
     to_location: Mapped[str] = mapped_column(String(128), nullable=False)
-    from_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_bin.id", ondelete="SET NULL"), nullable=True)
-    to_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_bin.id", ondelete="SET NULL"), nullable=True)
+    from_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_bin.id", ondelete="SET NULL"), nullable=True)
+    to_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_bin.id", ondelete="SET NULL"), nullable=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
     stock_before: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
@@ -334,15 +334,15 @@ class InventoryMovementHistoryModel(Base):
     performed_by: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
     user_role: Mapped[str | None] = mapped_column(String(64), nullable=True)
     warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, default="MAIN")
-    store_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True, index=True)
-    store_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True, index=True)
+    warehouse_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     reference_document: Mapped[str | None] = mapped_column(String(128), nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     performed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class MaterialReturnModel(Base):
-    """Stores assembly & production material returns (Part K)."""
+    """Warehouses assembly & production material returns (Part K)."""
     __tablename__ = "material_return"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
@@ -366,7 +366,7 @@ class MaterialReturnModel(Base):
 
 
 class CycleCountModel(Base):
-    """Stores Cycle Count tasks created by Warehouse Managers/Controllers (Part L)."""
+    """Warehouses Cycle Count tasks created by Warehouse Managers/Controllers (Part L)."""
     __tablename__ = "cycle_count"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
@@ -383,7 +383,7 @@ class CycleCountModel(Base):
 
 
 class CycleCountItemModel(Base):
-    """Stores individual line item counts & physical vs system variance for a Cycle Count."""
+    """Warehouses individual line item counts & physical vs system variance for a Cycle Count."""
     __tablename__ = "cycle_count_item"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
@@ -401,7 +401,7 @@ class CycleCountItemModel(Base):
 
 
 class StockAdjustmentModel(Base):
-    """Stores approved stock adjustments & audited inventory variance transactions (Part M)."""
+    """Warehouses approved stock adjustments & audited inventory variance transactions (Part M)."""
     __tablename__ = "stock_adjustment"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)

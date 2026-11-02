@@ -12,10 +12,10 @@ import json
 import secrets
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
@@ -24,7 +24,9 @@ from app.common.persistence.models import QuotationMagicLinkModel, SupplierUserM
 from app.config.settings import get_settings
 from app.database.session import UnitOfWork, get_uow
 from app.logging.logger import get_logger
-from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel
+from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
+from app.security.dependencies import CurrentUser, get_current_user
+from app.security.passwords import hash_password, verify_with_legacy
 
 logger = get_logger(__name__)
 
@@ -36,12 +38,12 @@ _SHORT_CODE_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # --- Request / Response Schemas ---
 
-class DevLoginRequest(BaseModel):
+class DevLoginRequest(BaseModel, extra="forbid"):
     username: str
     password: str
 
 
-class SupplierLoginRequest(BaseModel):
+class SupplierLoginRequest(BaseModel, extra="forbid"):
     username: str
     password: str
 
@@ -53,7 +55,7 @@ class SupplierLoginResponse(BaseModel):
     username: str
 
 
-class ChangePasswordRequest(BaseModel):
+class ChangePasswordRequest(BaseModel, extra="forbid"):
     username: str
     old_password: str
     new_password: str
@@ -173,10 +175,11 @@ async def resolve_magic_token_or_code(session, token_or_code: str) -> Tuple[bool
 @router.post("/login")
 async def dev_login(
     request: DevLoginRequest,
+    http_request: Request,
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
     """
-    Development login endpoint. Authenticates system roles and configured store managers.
+    Authenticate an active staff account created through User Management.
     """
     settings = get_settings()
     if settings.environment.lower() not in {"local", "test", "development", "dev"}:
@@ -186,6 +189,7 @@ async def dev_login(
         )
 
     req_username = (request.username or "").strip()
+    http_request.state.audit_actor = req_username or "Unknown"
     req_password = request.password or ""
     req_lower = req_username.lower()
     req_upper = req_username.upper()
@@ -199,162 +203,133 @@ async def dev_login(
             detail="Invalid username or password",
         )
 
-    # 1. Query StoreManagerUserModel
+    # 1. Query UserAccountModel
     account_result = await uow.session.execute(
-        select(StoreManagerUserModel)
-        .options(selectinload(StoreManagerUserModel.store))
+        select(UserAccountModel)
+        .options(selectinload(UserAccountModel.warehouse))
         .where(
             or_(
-                func.lower(StoreManagerUserModel.username) == req_lower,
-                func.upper(StoreManagerUserModel.employee_id) == req_upper,
-                func.lower(StoreManagerUserModel.full_name) == req_lower,
-                func.lower(StoreManagerUserModel.full_name) == req_unspaced,
-                func.replace(func.lower(StoreManagerUserModel.full_name), " ", "_") == req_lower,
+                func.lower(UserAccountModel.username) == req_lower,
+                func.upper(UserAccountModel.employee_id) == req_upper,
+                func.lower(UserAccountModel.full_name) == req_lower,
+                func.lower(UserAccountModel.full_name) == req_unspaced,
+                func.replace(func.lower(UserAccountModel.full_name), " ", "_") == req_lower,
             )
         )
-        .order_by(StoreManagerUserModel.created_at.desc())
+        .order_by(UserAccountModel.created_at.desc())
     )
     account = account_result.scalars().first()
 
     if account:
+        http_request.state.audit_actor = account.username
+        http_request.state.audit_employee_id = account.employee_id
+        http_request.state.audit_roles = account.role
         if account.status and account.status.upper() != "ACTIVE":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Account is inactive",
             )
 
-        expected_hash = hashlib.sha256(req_password.encode()).hexdigest()
-        is_password_valid = account.password_hash == expected_hash
+        now = datetime.now(timezone.utc)
+        locked_until = account.locked_until
+        if locked_until and locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until and locked_until > now:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password",
+            )
+
+        is_password_valid, needs_rehash = verify_with_legacy(req_password, account.password_hash)
         if not is_password_valid:
+            account.failed_login_attempts = int(account.failed_login_attempts or 0) + 1
+            if account.failed_login_attempts >= settings.login_max_failures:
+                account.locked_until = now + timedelta(minutes=settings.login_lockout_minutes)
+                account.failed_login_attempts = 0
+            await uow.commit()
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
             )
 
         session_token = secrets.token_urlsafe(48)
+        if needs_rehash:
+            account.password_hash = hash_password(req_password)
         account.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
-        account.last_login = datetime.now(timezone.utc)
+        account.auth_token_expires_at = now + timedelta(minutes=settings.local_session_lifetime_minutes)
+        account.failed_login_attempts = 0
+        account.locked_until = None
+        account.last_login = now
         await uow.commit()
 
-        role_key = (account.role or "STORE_MANAGER").strip().upper().replace(" ", "_")
+        role_key = (account.role or "WAREHOUSE_OPERATOR").strip().upper().replace(" ", "_")
         role = {
             "SUPER_ADMIN": "ADMIN",
             "ADMIN_OFFICER": "ADMIN",
             "PROCUREMENT_MANAGER": "MANAGER",
             "PROCUREMENT_OFFICER": "PROCUREMENT",
             "WAREHOUSE_MANAGER": "WAREHOUSE_MANAGER",
-            "STORE_OPERATOR": "STORE_KEEPER",
-            "STORE_MANAGER": "STORE_MANAGER",
+            "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
+            "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
         }.get(role_key, role_key)
 
-        token = (
-            f"mock-jwt-store-manager-{account.employee_id}"
-            if role == "STORE_MANAGER"
-            else (
-                f"mock-jwt-store-keeper-{account.employee_id}"
-                if role == "STORE_KEEPER"
-                else f"mock-jwt-db-user-{session_token}"
-            )
-        )
-
         return {
-            "token": token,
+            "token": f"mock-jwt-db-user-{session_token}",
             "username": account.username,
             "full_name": account.full_name,
             "employee_id": account.employee_id,
             "roles": [role],
-            "store_id": str(account.store_id) if account.store_id else None,
-            "store_code": account.store.store_code if account.store else None,
-            "store_name": account.store.store_name if account.store else None,
+            "warehouse_ref_id": str(account.warehouse_ref_id) if account.warehouse_ref_id else None,
+            "warehouse_code": account.warehouse.warehouse_code if account.warehouse else None,
+            "warehouse_name": account.warehouse.warehouse_name if account.warehouse else None,
             "applications": account.applications or [],
+            "page_permissions": account.page_permissions or {},
+            "expires_in": settings.local_session_lifetime_minutes * 60,
         }
 
-    # 2. Configured dev credentials lookup
-    normalized_username = req_lower
-    wh_uname = getattr(settings, "warehouse_username", "warehouse").lower()
-    sup_uname = getattr(settings, "supplier_username", "supplier").lower()
-    gate_sec_uname = getattr(settings, "gate_security_username", "gate_security").lower()
-    gate_ent_uname = getattr(settings, "gate_entry_username", "gate_entry").lower()
-    asm_uname = getattr(settings, "assembly_manager_username", "assembly_manager").lower()
-    grn_uname = getattr(settings, "grn_username", "grn").lower()
-
-    if normalized_username == wh_uname and settings.warehouse_password and req_password == settings.warehouse_password:
-        return {
-            "token": "mock-jwt-warehouse-token",
-            "username": getattr(settings, "warehouse_username", "warehouse"),
-            "roles": ["WAREHOUSE"],
-        }
-    elif (
-        normalized_username in (gate_sec_uname, gate_ent_uname, "gate_entry", "gate_security", "gate")
-        and req_password in (settings.gate_security_password, settings.gate_entry_password)
-    ):
-        return {
-            "token": "mock-jwt-gate-entry-token",
-            "username": req_username,
-            "roles": ["GATE_SECURITY"],
-        }
-    elif (
-        normalized_username in (asm_uname, "assembly", "assembly_manager")
-        and settings.assembly_manager_password
-        and req_password == settings.assembly_manager_password
-    ):
-        return {
-            "token": "mock-jwt-assembly-manager-token",
-            "username": getattr(settings, "assembly_manager_username", req_username),
-            "roles": ["ASSEMBLY_MANAGER"],
-        }
-    elif normalized_username == sup_uname and settings.supplier_password and req_password == settings.supplier_password:
-        return {
-            "token": "mock-jwt-supplier-token",
-            "username": getattr(settings, "supplier_username", "supplier"),
-            "roles": ["SUPPLIER"],
-        }
-    elif (
-        normalized_username in (grn_uname, "grn", "grn_manager", "operations_manager")
-        and settings.grn_password
-        and req_password == settings.grn_password
-    ):
-        return {
-            "token": "mock-jwt-grn-token",
-            "username": req_username,
-            "roles": ["GRN"],
-        }
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid username or password",
+    )
 
 
 @router.post("/supplier-login", response_model=SupplierLoginResponse)
 async def supplier_login(
     request: SupplierLoginRequest,
+    http_request: Request,
     uow: UnitOfWork = Depends(get_uow),
 ) -> SupplierLoginResponse:
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
-    stmt = select(SupplierUserModel).where(
-        SupplierUserModel.username == request.username,
-        SupplierUserModel.password_hash == password_hash,
-    )
+    http_request.state.audit_actor = (request.username or "").strip() or "Unknown"
+    stmt = select(SupplierUserModel).where(SupplierUserModel.username == request.username)
     result = await uow.session.execute(stmt)
     user = result.scalars().first()
 
-    if not user:
-        settings = get_settings()
-        if request.username == getattr(settings, "supplier_username", "supplier") and settings.supplier_password and request.password == settings.supplier_password:
-            return SupplierLoginResponse(
-                token="mock-jwt-supplier-token",
-                supplier_id="default-supplier-id",
-                must_change_password=False,
-                username=request.username,
-            )
+    password_valid, needs_rehash = verify_with_legacy(
+        request.password, user.password_hash if user else ""
+    )
+    if not user or not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid supplier username or password",
         )
 
+    if needs_rehash:
+        user.password_hash = hash_password(request.password)
+
+    settings = get_settings()
+    session_token = secrets.token_urlsafe(48)
+    user.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    user.auth_token_expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.local_session_lifetime_minutes
+    )
+    await uow.commit()
+
+    http_request.state.audit_actor = user.username
+    http_request.state.audit_employee_id = str(user.id)
+    http_request.state.audit_roles = "SUPPLIER"
+
     return SupplierLoginResponse(
-        token=f"supplier-mock-token-{user.id}-{user.supplier_id}",
+        token=f"supplier-db-token-{session_token}",
         supplier_id=str(user.supplier_id),
         must_change_password=user.must_change_password,
         username=user.username,
@@ -366,21 +341,19 @@ async def change_password(
     request: ChangePasswordRequest,
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
-    old_hash = hashlib.sha256(request.old_password.encode()).hexdigest()
-    stmt = select(SupplierUserModel).where(
-        SupplierUserModel.username == request.username,
-        SupplierUserModel.password_hash == old_hash,
-    )
+    stmt = select(SupplierUserModel).where(SupplierUserModel.username == request.username)
     result = await uow.session.execute(stmt)
     user = result.scalars().first()
-    if not user:
+    password_valid, _ = verify_with_legacy(
+        request.old_password, user.password_hash if user else ""
+    )
+    if not user or not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid old password",
         )
 
-    new_hash = hashlib.sha256(request.new_password.encode()).hexdigest()
-    user.password_hash = new_hash
+    user.password_hash = hash_password(request.new_password)
     user.must_change_password = False
     await uow.session.flush()
     await uow.commit()
@@ -390,6 +363,7 @@ async def change_password(
 @router.post("/magic-login", response_model=MagicLoginResponse)
 async def magic_login(
     request: MagicLoginRequest,
+    http_request: Request,
     uow: UnitOfWork = Depends(get_uow),
 ) -> MagicLoginResponse:
     valid, payload, error_message = await resolve_magic_token_or_code(uow.session, request.token)
@@ -401,6 +375,8 @@ async def magic_login(
         )
 
     username = payload.get("sub")
+    http_request.state.audit_actor = username or "Supplier"
+    http_request.state.audit_roles = "SUPPLIER"
     supplier_id_str = payload.get("supplier_id")
     rfq_id_str = payload.get("rfq_id")
     po_id_str = payload.get("po_id")
@@ -428,7 +404,7 @@ async def magic_login(
                 id=uuid.uuid4(),
                 supplier_id=sup_uuid,
                 username=username or f"sup_{supplier_id_str[:8]}",
-                password_hash=hashlib.sha256(secrets.token_hex(16).encode()).hexdigest(),
+                password_hash=hash_password(secrets.token_hex(16)),
                 must_change_password=False,
             )
             uow.session.add(user)
@@ -444,11 +420,23 @@ async def magic_login(
     user_id_str = str(user.id) if user else str(uuid.uuid4())
     effective_supplier_id = str(user.supplier_id) if user else str(supplier_id_str or "")
     effective_username = user.username if user else (username or "supplier")
+    http_request.state.audit_actor = effective_username
+    http_request.state.audit_employee_id = user_id_str
     now = int(time.time())
     expires_in_hours = max(round((exp - now) / 3600, 1), 0.0)
 
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to establish a supplier session",
+        )
+    session_token = secrets.token_urlsafe(48)
+    user.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    user.auth_token_expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+    await uow.commit()
+
     return MagicLoginResponse(
-        token=f"supplier-mock-token-{user_id_str}-{effective_supplier_id}",
+        token=f"supplier-db-token-{session_token}",
         supplier_id=effective_supplier_id,
         supplierId=effective_supplier_id,
         username=effective_username,
@@ -460,6 +448,41 @@ async def magic_login(
         email=email,
         expires_in_hours=expires_in_hours,
     )
+
+
+@router.post("/logout")
+async def logout(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    """Revoke the persisted local session before the client clears its copy."""
+    account = (
+        await uow.session.execute(
+            select(UserAccountModel).where(UserAccountModel.employee_id == user.subject)
+        )
+    ).scalar_one_or_none()
+    if account:
+        account.auth_token_hash = None
+        account.auth_token_expires_at = None
+        await uow.commit()
+        return {"success": True, "username": user.username}
+
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        try:
+            supplier_user_id = uuid.UUID(user.subject)
+        except ValueError:
+            supplier_user_id = None
+        if supplier_user_id:
+            supplier_account = (
+                await uow.session.execute(
+                    select(SupplierUserModel).where(SupplierUserModel.id == supplier_user_id)
+                )
+            ).scalar_one_or_none()
+            if supplier_account:
+                supplier_account.auth_token_hash = None
+                supplier_account.auth_token_expires_at = None
+                await uow.commit()
+    return {"success": True, "username": user.username}
 
 
 @router.get("/verify-magic-token")

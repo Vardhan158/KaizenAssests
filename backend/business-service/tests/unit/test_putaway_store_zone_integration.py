@@ -16,12 +16,10 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.receiving.infrastructure.persistence.models import GrnLineModel
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreManagerUserModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    UserAccountModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 
 
@@ -39,7 +37,7 @@ async def client(app):
 
 @pytest.mark.asyncio
 async def test_putaway_destination_assignment_and_validation(client: AsyncClient):
-    """Warehouse user assigns destination Store and Zone to a Putaway Task with strict backend validation."""
+    """Warehouse user assigns destination Warehouse and Zone to a Putaway Task with strict backend validation."""
     grn_id = uuid.uuid4()
     grn_number = f"GRN-{uuid.uuid4().hex[:6].upper()}"
     async with engine.begin() as conn:
@@ -49,37 +47,37 @@ async def test_putaway_destination_assignment_and_validation(client: AsyncClient
         )
 
     async with AsyncSessionFactory() as session:
-        # 1. Seed Store A and Store B
-        store_a = StoreModel(
-            store_code=f"STR-{uuid.uuid4().hex[:6].upper()}",
-            store_name="Mechanical Store",
+        # 1. Seed Warehouse A and Warehouse B
+        warehouse_a = WarehouseModel(
+            warehouse_code=f"STR-{uuid.uuid4().hex[:6].upper()}",
+            warehouse_name="Mechanical Warehouse",
             warehouse_id="Main Warehouse",
             status="ACTIVE",
         )
-        store_b = StoreModel(
-            store_code=f"STR-{uuid.uuid4().hex[:6].upper()}",
-            store_name="Electrical Store",
+        warehouse_b = WarehouseModel(
+            warehouse_code=f"STR-{uuid.uuid4().hex[:6].upper()}",
+            warehouse_name="Electrical Warehouse",
             warehouse_id="Main Warehouse",
             status="ACTIVE",
         )
-        session.add_all([store_a, store_b])
+        session.add_all([warehouse_a, warehouse_b])
         await session.flush()
 
-        # 2. Seed Zones for Store A and Store B
-        zone_a1 = StoreZoneModel(
-            store_id=store_a.id,
+        # 2. Seed Zones for Warehouse A and Warehouse B
+        zone_a1 = WarehouseZoneModel(
+            warehouse_ref_id=warehouse_a.id,
             zone_code=f"MEC-Z01-{uuid.uuid4().hex[:4].upper()}",
             zone_name="Heavy Motors Bay",
             status="ACTIVE",
         )
-        zone_a_inactive = StoreZoneModel(
-            store_id=store_a.id,
+        zone_a_inactive = WarehouseZoneModel(
+            warehouse_ref_id=warehouse_a.id,
             zone_code=f"MEC-Z02-{uuid.uuid4().hex[:4].upper()}",
             zone_name="Decommissioned Bay",
             status="INACTIVE",
         )
-        zone_b1 = StoreZoneModel(
-            store_id=store_b.id,
+        zone_b1 = WarehouseZoneModel(
+            warehouse_ref_id=warehouse_b.id,
             zone_code=f"ELE-Z01-{uuid.uuid4().hex[:4].upper()}",
             zone_name="Transformer Rack",
             status="ACTIVE",
@@ -105,8 +103,8 @@ async def test_putaway_destination_assignment_and_validation(client: AsyncClient
         session.add(task)
         await session.commit()
 
-        store_a_id = str(store_a.id)
-        store_b_id = str(store_b.id)
+        warehouse_a_id = str(warehouse_a.id)
+        warehouse_b_id = str(warehouse_b.id)
         zone_a1_id = str(zone_a1.id)
         zone_a_inact_id = str(zone_a_inactive.id)
         zone_b1_id = str(zone_b1.id)
@@ -118,33 +116,33 @@ async def test_putaway_destination_assignment_and_validation(client: AsyncClient
         "X-User-Permissions": "gate:read,gate:verify,gate:approve",
     }
 
-    # Test 1: Cross-store mismatch (Store A + Zone B1) -> Rejected 422
+    # Test 1: Cross-warehouse mismatch (Warehouse A + Zone B1) -> Rejected 422
     resp_mismatch = await client.put(
         f"/api/storage/putaway-tasks/{task_id}/location",
-        json={"store_id": store_a_id, "zone_id": zone_b1_id},
+        json={"warehouse_ref_id": warehouse_a_id, "zone_id": zone_b1_id},
         headers=headers_wh,
     )
     assert resp_mismatch.status_code == 422
-    assert "does not belong to Store" in resp_mismatch.json()["detail"]
+    assert "does not belong to Warehouse" in resp_mismatch.json()["detail"]
 
-    # Test 2: Inactive Zone (Store A + Inactive Zone) -> Rejected 422
+    # Test 2: Inactive Zone (Warehouse A + Inactive Zone) -> Rejected 422
     resp_inactive = await client.put(
         f"/api/storage/putaway-tasks/{task_id}/location",
-        json={"store_id": store_a_id, "zone_id": zone_a_inact_id},
+        json={"warehouse_ref_id": warehouse_a_id, "zone_id": zone_a_inact_id},
         headers=headers_wh,
     )
     assert resp_inactive.status_code == 422
     assert "inactive" in resp_inactive.json()["detail"].lower()
 
-    # Test 3: Valid Assignment (Store A + Zone A1) -> Success 200
+    # Test 3: Valid Assignment (Warehouse A + Zone A1) -> Success 200
     resp_valid = await client.put(
         f"/api/storage/putaway-tasks/{task_id}/location",
-        json={"store_id": store_a_id, "zone_id": zone_a1_id},
+        json={"warehouse_ref_id": warehouse_a_id, "zone_id": zone_a1_id},
         headers=headers_wh,
     )
     assert resp_valid.status_code == 200
     data = resp_valid.json()
-    assert data["destination_store_id"] == store_a_id
+    assert data["destination_warehouse_ref_id"] == warehouse_a_id
     assert data["destination_zone_id"] == zone_a1_id
     assert data["destination_location_id"] is not None
 
@@ -204,33 +202,33 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         )
 
     async with AsyncSessionFactory() as session:
-        # 2. Seed Store and Zone
-        store = StoreModel(
-            store_code=f"STR-{uuid.uuid4().hex[:6].upper()}",
-            store_name="Mechanical Store",
+        # 2. Seed Warehouse and Zone
+        warehouse = WarehouseModel(
+            warehouse_code=f"STR-{uuid.uuid4().hex[:6].upper()}",
+            warehouse_name="Mechanical Warehouse",
             warehouse_id="Main Warehouse",
             status="ACTIVE",
         )
-        session.add(store)
+        session.add(warehouse)
         await session.flush()
 
-        zone = StoreZoneModel(
-            store_id=store.id,
+        zone = WarehouseZoneModel(
+            warehouse_ref_id=warehouse.id,
             zone_code=f"MEC-Z10-{uuid.uuid4().hex[:4].upper()}",
             zone_name="Heavy Machinery Section",
             status="ACTIVE",
         )
-        other_store = StoreModel(
-            store_code=f"STR-{uuid.uuid4().hex[:6].upper()}",
-            store_name="Other Store",
+        other_warehouse = WarehouseModel(
+            warehouse_code=f"STR-{uuid.uuid4().hex[:6].upper()}",
+            warehouse_name="Other Warehouse",
             warehouse_id="Main Warehouse",
             status="ACTIVE",
         )
-        session.add(other_store)
+        session.add(other_warehouse)
         await session.flush()
 
-        other_zone = StoreZoneModel(
-            store_id=other_store.id,
+        other_zone = WarehouseZoneModel(
+            warehouse_ref_id=other_warehouse.id,
             zone_code=f"OTH-Z99-{uuid.uuid4().hex[:4].upper()}",
             zone_name="Wrong Zone",
             status="ACTIVE",
@@ -312,7 +310,7 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
             status="Active",
         ))
 
-        # 5. Seed Putaway Task assigned to Store + Zone
+        # 5. Seed Putaway Task assigned to Warehouse + Zone
         task = PutawayTaskModel(
             task_number=f"PUT-{uuid.uuid4().hex[:8].upper()}",
             grn_id=grn_id,
@@ -324,7 +322,7 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
             uom="PCS",
             warehouse_id="Main Warehouse",
             source_location="RECEIVING_AREA",
-            destination_store_id=store.id,
+            destination_warehouse_ref_id=warehouse.id,
             destination_zone_id=zone.id,
             destination_zone=zone.zone_code,
             destination_bin_id=bin_obj.id,
@@ -344,8 +342,8 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         bin_id = str(bin_obj.id)
         bin_code = bin_obj.bin_code
         other_zone_code = other_zone.zone_code
-        store_id = str(store.id)
-        store_code = store.store_code
+        warehouse_ref_id = str(warehouse.id)
+        warehouse_code = warehouse.warehouse_code
 
     headers_wh = {
         "Authorization": "Bearer mock-jwt-warehouse-token",
@@ -353,22 +351,22 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         "X-User-Permissions": "gate:read,gate:verify,gate:approve,storage:write",
     }
     headers_keeper = {
-        "Authorization": "Bearer mock-jwt-store-keeper-token",
-        "X-User-Roles": "STORE_KEEPER",
-        "X-User-Permissions": "store:read,storage:read,putaway:execute",
-        "X-Store-Id": store_id,
-        "X-Store-Code": store_code,
+        "Authorization": "Bearer mock-jwt-warehouse-operator-token",
+        "X-User-Roles": "WAREHOUSE_OPERATOR",
+        "X-User-Permissions": "warehouse:read,storage:read,putaway:execute",
+        "X-Warehouse-Id": warehouse_ref_id,
+        "X-Warehouse-Code": warehouse_code,
     }
 
     # Assign location to ensure storage_location exists
     assign_resp = await client.put(
         f"/api/storage/putaway-tasks/{task_id}/location",
-        json={"store_id": store_id, "zone_id": zone_id, "bin_id": bin_id},
+        json={"warehouse_ref_id": warehouse_ref_id, "zone_id": zone_id},
         headers=headers_wh,
     )
     assert assign_resp.status_code == 200
 
-    # Start Putaway as Store Keeper
+    # Start Putaway as Warehouse Operator
     start_resp = await client.post(f"/api/storage/putaway-tasks/{task_id}/start", headers=headers_keeper)
     assert start_resp.status_code == 200
     assert start_resp.json()["status"] == "IN_PROGRESS"
@@ -386,7 +384,7 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
     assert resp_bad_mat.status_code == 422
     assert "Material QR does not match" in resp_bad_mat.json()["detail"]
 
-    # Test 2: Mismatched Zone QR (belongs to other store) -> Rejected 422
+    # Test 2: Mismatched Zone QR (belongs to other warehouse) -> Rejected 422
     resp_bad_zone = await client.post(
         f"/api/storage/putaway-tasks/{task_id}/complete",
         json={
@@ -418,8 +416,8 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         "bin_code": bin_code,
         "zone_id": zone_id,
         "zone_code": zone_code,
-        "store_id": store_id,
-        "store_code": store_code,
+        "warehouse_ref_id": warehouse_ref_id,
+        "warehouse_code": warehouse_code,
         "warehouse_id": "Main Warehouse",
         "status": "ACTIVE",
     })
@@ -458,8 +456,8 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_inventory_locations_enriched_with_store_and_zone(client: AsyncClient):
-    """GET /api/storage/putaway-tasks/inventory-locations returns Store and Zone details."""
+async def test_inventory_locations_enriched_with_warehouse_and_zone(client: AsyncClient):
+    """GET /api/storage/putaway-tasks/inventory-locations returns Warehouse and Zone details."""
     headers_wh = {
         "Authorization": "Bearer mock-jwt-warehouse-token",
         "X-User-Roles": "WAREHOUSE_MANAGER",

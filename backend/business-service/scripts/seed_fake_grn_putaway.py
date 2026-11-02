@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import text
 
-import app.modules.store.infrastructure.persistence.models  # noqa
+import app.modules.warehouse.infrastructure.persistence.models  # noqa
 from app.database.session import engine
 
 ITEMS = [

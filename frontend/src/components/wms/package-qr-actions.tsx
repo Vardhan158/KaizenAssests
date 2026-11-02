@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export function PackageQrActions({ packageNumber }: { packageNumber?: string }) {
+export function PackageQrActions({ packageNumber, title = "Package QR", buttonLabel = "View Package QR" }: { packageNumber?: string; title?: string; buttonLabel?: string }) {
   const [open, setOpen] = useState(false);
   const [image, setImage] = useState<{ number: string; url: string } | null>(null);
   useEffect(() => {
@@ -34,30 +34,30 @@ export function PackageQrActions({ packageNumber }: { packageNumber?: string }) 
     const popup = window.open("", "_blank", "width=700,height=700");
     if (!popup) return toast.error("Allow pop-ups to print the package QR.");
     const doc = popup.document;
-    doc.title = `Package QR - ${image.number}`;
+    doc.title = `${title} - ${image.number}`;
     const style = doc.createElement("style");
     style.textContent = "@page { margin: 15mm; } body { font: 16px Arial, sans-serif; text-align: center; color: #000; } img { width: 280px; height: 280px; } p { overflow-wrap: anywhere; }";
     doc.head.appendChild(style);
-    const title = doc.createElement("h1");
-    title.textContent = "Package QR";
+    const heading = doc.createElement("h1");
+    heading.textContent = title;
     const label = doc.createElement("p");
     label.textContent = image.number;
     const qr = doc.createElement("img");
     qr.alt = `QR for package ${image.number}`;
     qr.onload = () => { popup.focus(); popup.print(); };
     qr.onerror = () => { popup.close(); toast.error("Unable to load package QR for printing."); };
-    doc.body.append(title, qr, label);
+    doc.body.append(heading, qr, label);
     qr.src = image.url;
   };
   return <>
     <Button type="button" variant="outline" className="rounded-xl" disabled={!ready} onClick={() => setOpen(true)}>
-      <Eye className="mr-2 size-4" />View Package QR
+      <Eye className="mr-2 size-4" />{buttonLabel}
     </Button>
     <InformationTooltip help="packageQr" />
     <Dialog open={open && ready} onOpenChange={setOpen}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Package QR</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="break-all">{packageNumber}</DialogDescription>
         </DialogHeader>
         {ready && <img src={image!.url} alt={`QR for package ${packageNumber}`} className="mx-auto w-full max-w-sm rounded-lg bg-white" />}

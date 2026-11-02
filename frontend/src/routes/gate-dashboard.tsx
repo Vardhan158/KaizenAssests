@@ -32,6 +32,7 @@ function GateDashboard() {
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [activityPage, setActivityPage] = useState(1);
   const [selectedDetailsDrawer, setSelectedDetailsDrawer] = useState<any | null>(null);
 
   const loadDashboard = async () => {
@@ -117,6 +118,12 @@ function GateDashboard() {
     const asn = String(e.asn_number || "").toLowerCase();
     return gp.includes(q) || veh.includes(q) || sup.includes(q) || asn.includes(q);
   });
+  const activityPageCount = Math.max(1, Math.ceil(filteredEntries.length / 5));
+  const currentActivityPage = Math.min(activityPage, activityPageCount);
+  const activityStart = (currentActivityPage - 1) * 5;
+  const pagedEntries = filteredEntries.slice(activityStart, activityStart + 5);
+  useEffect(() => { setActivityPage(1); }, [searchQuery]);
+  useEffect(() => { setActivityPage(page => Math.min(page, activityPageCount)); }, [activityPageCount]);
 
   const metrics = dashboardData?.stats || dashboardData?.metrics || dashboardData || {};
   const totalEntries =
@@ -133,6 +140,20 @@ function GateDashboard() {
     metrics.totalExits ??
     metrics.totalGateExits ??
     entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
+  // Current status distributions; no historical counts are inferred from totals.
+  const statusBars = (statuses: string[]) => statuses.map(status => ({
+    label: status.replaceAll("_", " "),
+    value: entries.filter((entry: any) => String(entry.status).toUpperCase() === status).length,
+  }));
+  const gateCharts = {
+    entries: statusBars(["AWAITING_DOCK", "DOCK_ASSIGNED", "RECEIVING", "COMPLETED", "RELEASED", "VEHICLE_EXITED"]),
+    inside: statusBars(["INSIDE_FACILITY", "AWAITING_DOCK", "DOCK_ASSIGNED", "RECEIVING", "COMPLETED", "RELEASED"]),
+    dock: statusBars(["AWAITING_DOCK", "DOCK_ASSIGNED", "RECEIVING"]),
+    exits: [
+      { label: "Exited", value: Number(totalExits) },
+      { label: "Inside", value: Number(vehiclesInside) },
+    ],
+  };
 
   return (
     <AppShell
@@ -153,6 +174,7 @@ function GateDashboard() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             label="Total Entries"
+            sparkline={gateCharts.entries}
             value={String(totalEntries)}
             delta="All gate entries registered"
             icon={Truck}
@@ -160,6 +182,7 @@ function GateDashboard() {
           />
           <StatCard
             label="Vehicles Inside"
+            sparkline={gateCharts.inside}
             value={String(vehiclesInside)}
             delta="Currently inside facility"
             icon={ShieldCheck}
@@ -167,6 +190,7 @@ function GateDashboard() {
           />
           <StatCard
             label="Awaiting Dock"
+            sparkline={gateCharts.dock}
             value={String(awaitingDock)}
             delta="Pending dock check-in"
             icon={Clock3}
@@ -174,6 +198,7 @@ function GateDashboard() {
           />
           <StatCard
             label="Total Exits"
+            sparkline={gateCharts.exits}
             value={String(totalExits)}
             delta="All vehicles exited facility"
             icon={LogOut}
@@ -219,7 +244,8 @@ function GateDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {filteredEntries.map((e: any, idx: number) => {
+                  {!loading && !filteredEntries.length && <tr><td colSpan={8} className="p-6 text-center text-muted-foreground">No gate pass activity found.</td></tr>}
+                  {pagedEntries.map((e: any, idx: number) => {
                     const passNo =
                       e.gate_entry_no || e.gate_entry_number || e.gate_pass_number || "—";
                     const vehNo = e.vehicle_number || "—";
@@ -260,6 +286,14 @@ function GateDashboard() {
                 </tbody>
               </table>
             </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm">
+              <p className="text-muted-foreground">Showing {filteredEntries.length ? activityStart + 1 : 0}–{Math.min(activityStart + 5, filteredEntries.length)} of {filteredEntries.length} entries</p>
+              <nav aria-label="Gate pass activity pagination" className="flex items-center gap-3">
+                <Button size="sm" variant="outline" disabled={currentActivityPage === 1} onClick={() => setActivityPage(currentActivityPage - 1)}>Previous</Button>
+                <span aria-live="polite">{currentActivityPage} / {activityPageCount}</span>
+                <Button size="sm" variant="outline" disabled={currentActivityPage === activityPageCount} onClick={() => setActivityPage(currentActivityPage + 1)}>Next</Button>
+              </nav>
+            </div>
           </CardContent>
         </Card>
 
@@ -268,56 +302,64 @@ function GateDashboard() {
           open={Boolean(selectedDetailsDrawer)}
           onOpenChange={() => setSelectedDetailsDrawer(null)}
         >
-          <DialogContent className="max-w-lg rounded-2xl bg-card p-6 shadow-2xl">
+          <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl bg-card p-6 shadow-2xl">
             <DialogHeader>
-              <DialogTitle className="font-black text-base">
-                INBOUND ENTRY RECORD DETAILS
+              <DialogTitle className="pr-6 text-left font-semibold leading-snug">
+                Inbound entry record details
               </DialogTitle>
             </DialogHeader>
 
             {selectedDetailsDrawer && (
-              <div className="space-y-3 text-xs">
-                <div className="rounded-xl bg-muted/40 p-3 border space-y-1.5">
-                  <p className="flex justify-between">
-                    <span className="text-muted-foreground">Gate Pass Number:</span>{" "}
-                    <span className="font-mono font-bold text-primary">
+              <div className="space-y-5 text-sm">
+                <section className="rounded-xl border bg-muted/20 p-4">
+                  <h3 className="mb-3 text-sm font-semibold">Entry / Shipment</h3>
+                  <dl className="grid gap-4 sm:grid-cols-2 [&_dd]:mt-1 [&_dd]:break-words [&_dd]:leading-relaxed">
+                  <div className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">Gate Pass Number</dt>
+                    <dd className="font-mono font-semibold text-primary">
                       {selectedDetailsDrawer.gate_pass_number ||
                         selectedDetailsDrawer.gate_entry_no ||
                         "—"}
-                    </span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span className="text-muted-foreground">Vehicle Number:</span>{" "}
-                    <span className="font-bold text-foreground">
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">Invoice Number</dt>
+                    <dd className="font-semibold text-foreground">
+                      {selectedDetailsDrawer.invoice_number || "INV-2026-9901"}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">Assigned Dock</dt>
+                    <dd className="font-semibold text-foreground">
+                      {selectedDetailsDrawer.dock_number || selectedDetailsDrawer.dock_name || "—"}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">Status</dt>
+                    <dd className="font-semibold text-foreground">
+                      {selectedDetailsDrawer.status || "INSIDE_FACILITY"}
+                    </dd>
+                  </div>
+                  </dl>
+                </section>
+                <section className="rounded-xl border bg-muted/20 p-4">
+                  <h3 className="mb-3 text-sm font-semibold">Vehicle / Driver</h3>
+                  <dl className="grid gap-4 sm:grid-cols-2 [&_dd]:mt-1 [&_dd]:break-words [&_dd]:leading-relaxed">
+                  <div className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">Vehicle Number</dt>
+                    <dd className="font-semibold text-foreground">
                       {selectedDetailsDrawer.vehicle_number}
-                    </span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span className="text-muted-foreground">Driver Name:</span>{" "}
-                    <span className="font-bold text-foreground">
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">Driver Name</dt>
+                    <dd className="font-semibold text-foreground">
                       {selectedDetailsDrawer.driver_name || "Suresh Gowda"} (
                       {selectedDetailsDrawer.driver_contact || "+91 98450 12345"})
-                    </span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span className="text-muted-foreground">Invoice Number:</span>{" "}
-                    <span className="font-bold text-foreground">
-                      {selectedDetailsDrawer.invoice_number || "INV-2026-9901"}
-                    </span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span className="text-muted-foreground">Assigned Dock:</span>{" "}
-                    <span className="font-bold text-emerald-600">
-                      {selectedDetailsDrawer.dock_number || selectedDetailsDrawer.dock_name || "—"}
-                    </span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span className="text-muted-foreground">Status:</span>{" "}
-                    <span className="font-bold uppercase text-emerald-600">
-                      {selectedDetailsDrawer.status || "INSIDE_FACILITY"}
-                    </span>
-                  </p>
-                </div>
+                    </dd>
+                  </div>
+                  </dl>
+                </section>
 
                 <Button
                   className="w-full rounded-xl font-bold"

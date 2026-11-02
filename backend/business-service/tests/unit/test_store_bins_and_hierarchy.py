@@ -1,11 +1,11 @@
 """
-Unit & Access Control Tests for Store Bins & Location Hierarchy.
+Unit & Access Control Tests for Warehouse Bins & Location Hierarchy.
 Tests:
 - Bin Sequential Code Generation (BIN-{zone_code}-001, 002)
 - Bin CRUD and Status Management
 - Bin QR Code Generation & Scan Lookup
-- Store Manager IDOR Defense and Store Isolation
-- 3-Level Hierarchy View (Store -> Zone -> Bin)
+- Warehouse Operator IDOR Defense and Warehouse Isolation
+- 3-Level Hierarchy View (Warehouse -> Zone -> Bin)
 - Putaway Verification and Execution against exact Bins
 """
 import datetime
@@ -19,7 +19,7 @@ from sqlalchemy import select
 from app.database.session import AsyncSessionFactory, engine
 from app.database.base import Base
 from app.main import app
-from app.modules.store.infrastructure.persistence.models import StoreBinModel, StoreModel, StoreZoneModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseBinModel, WarehouseModel, WarehouseZoneModel
 
 
 @pytest.fixture(autouse=True)
@@ -35,8 +35,8 @@ async def cleanup_engine():
         try:
             test_bins = (
                 await session.execute(
-                    select(StoreBinModel).where(
-                        StoreBinModel.bin_name.like("Test %") | StoreBinModel.bin_name.like("Bin %")
+                    select(WarehouseBinModel).where(
+                        WarehouseBinModel.bin_name.like("Test %") | WarehouseBinModel.bin_name.like("Bin %")
                     )
                 )
             ).scalars().all()
@@ -45,22 +45,22 @@ async def cleanup_engine():
 
             test_zones = (
                 await session.execute(
-                    select(StoreZoneModel).where(
-                        StoreZoneModel.zone_name.like("Test Bin %") | StoreZoneModel.zone_name.like("Test %")
+                    select(WarehouseZoneModel).where(
+                        WarehouseZoneModel.zone_name.like("Test Bin %") | WarehouseZoneModel.zone_name.like("Test %")
                     )
                 )
             ).scalars().all()
             for z in test_zones:
                 await session.delete(z)
 
-            test_stores = (
+            test_warehouses = (
                 await session.execute(
-                    select(StoreModel).where(
-                        StoreModel.store_name.like("Test Bin Store %")
+                    select(WarehouseModel).where(
+                        WarehouseModel.warehouse_name.like("Test Bin Warehouse %")
                     )
                 )
             ).scalars().all()
-            for s in test_stores:
+            for s in test_warehouses:
                 await session.delete(s)
 
             await session.commit()
@@ -78,22 +78,22 @@ async def test_bin_crud_and_code_generation():
             "X-User-Roles": "WAREHOUSE,ADMIN",
         }
 
-        # 1. Create Store
-        store_res = await client.post(
-            "/api/v1/stores",
+        # 1. Create Warehouse
+        warehouse_res = await client.post(
+            "/api/v1/warehouse",
             json={
-                "store_name": "Test Bin Store Electrical",
-                "description": "Store for bin testing",
+                "warehouse_name": "Test Bin Warehouse Electrical",
+                "description": "Warehouse for bin testing",
                 "status": "ACTIVE",
             },
             headers=warehouse_headers,
         )
-        assert store_res.status_code == 201
-        store = store_res.json()
+        assert warehouse_res.status_code == 201
+        warehouse = warehouse_res.json()
 
         # 2. Create Zone
         zone_res = await client.post(
-            f"/api/v1/stores/{store['id']}/zones",
+            f"/api/v1/warehouse/{warehouse['id']}/zones",
             json={
                 "zone_name": "Test Bin High Voltage Bay",
                 "description": "Panel bay for testing bins",
@@ -166,10 +166,10 @@ async def test_bin_crud_and_code_generation():
         assert bin1["bin_code"] in bin_codes
         assert bin2["bin_code"] in bin_codes
 
-        # 8. List Bins for Store
-        store_bins_res = await client.get(f"/api/v1/stores/{store['id']}/bins", headers=warehouse_headers)
-        assert store_bins_res.status_code == 200
-        assert len(store_bins_res.json()) == 2
+        # 8. List Bins for Warehouse
+        warehouse_bins_res = await client.get(f"/api/v1/warehouse/{warehouse['id']}/bins", headers=warehouse_headers)
+        assert warehouse_bins_res.status_code == 200
+        assert len(warehouse_bins_res.json()) == 2
 
         # 9. Get Single Bin
         get_bin_res = await client.get(f"/api/v1/bins/{bin1['id']}", headers=warehouse_headers)
@@ -208,16 +208,16 @@ async def test_bin_qr_and_scan_lookup():
             "X-User-Name": "warehouse_user",
         }
 
-        # Setup Store, Zone, Bin
-        store_res = await client.post(
-            "/api/v1/stores",
-            json={"store_name": "Test Bin Store QR Test", "status": "ACTIVE"},
+        # Setup Warehouse, Zone, Bin
+        warehouse_res = await client.post(
+            "/api/v1/warehouse",
+            json={"warehouse_name": "Test Bin Warehouse QR Test", "status": "ACTIVE"},
             headers=warehouse_headers,
         )
-        store = store_res.json()
+        warehouse = warehouse_res.json()
 
         zone_res = await client.post(
-            f"/api/v1/stores/{store['id']}/zones",
+            f"/api/v1/warehouse/{warehouse['id']}/zones",
             json={"zone_name": "Test Bin QR Zone"},
             headers=warehouse_headers,
         )
@@ -237,7 +237,7 @@ async def test_bin_qr_and_scan_lookup():
         assert qr_payload_res["bin_id"] == bin_data["id"]
         assert qr_payload_res["bin_code"] == bin_data["bin_code"]
         assert qr_payload_res["zone_id"] == zone["id"]
-        assert qr_payload_res["store_id"] == store["id"]
+        assert qr_payload_res["warehouse_ref_id"] == warehouse["id"]
         assert "qr_payload" in qr_payload_res
 
         parsed = json.loads(qr_payload_res["qr_payload"])
@@ -273,7 +273,7 @@ async def test_bin_qr_and_scan_lookup():
 
 
 @pytest.mark.asyncio
-async def test_store_manager_bin_isolation_and_idor():
+async def test_warehouse_operator_bin_isolation_and_idor():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         warehouse_headers = {
@@ -281,40 +281,40 @@ async def test_store_manager_bin_isolation_and_idor():
             "X-User-Name": "warehouse_user",
         }
 
-        # 1. Create Store Alpha & Store Beta
+        # 1. Create Warehouse Alpha & Warehouse Beta
         res_a = await client.post(
-            "/api/v1/stores",
-            json={"store_name": "Test Bin Store Alpha"},
+            "/api/v1/warehouse",
+            json={"warehouse_name": "Test Bin Warehouse Alpha"},
             headers=warehouse_headers,
         )
-        store_a = res_a.json()
+        warehouse_a = res_a.json()
 
         res_b = await client.post(
-            "/api/v1/stores",
-            json={"store_name": "Test Bin Store Beta"},
+            "/api/v1/warehouse",
+            json={"warehouse_name": "Test Bin Warehouse Beta"},
             headers=warehouse_headers,
         )
-        store_b = res_b.json()
+        warehouse_b = res_b.json()
 
-        # 2. Create Zones and Bins in Store Alpha & Store Beta
-        za_res = await client.post(f"/api/v1/stores/{store_a['id']}/zones", json={"zone_name": "Test Alpha Zone"}, headers=warehouse_headers)
+        # 2. Create Zones and Bins in Warehouse Alpha & Warehouse Beta
+        za_res = await client.post(f"/api/v1/warehouse/{warehouse_a['id']}/zones", json={"zone_name": "Test Alpha Zone"}, headers=warehouse_headers)
         zone_a = za_res.json()
         ba_res = await client.post(f"/api/v1/zones/{zone_a['id']}/bins", json={"bin_name": "Test Alpha Bin 1"}, headers=warehouse_headers)
         bin_a = ba_res.json()
 
-        zb_res = await client.post(f"/api/v1/stores/{store_b['id']}/zones", json={"zone_name": "Test Beta Zone"}, headers=warehouse_headers)
+        zb_res = await client.post(f"/api/v1/warehouse/{warehouse_b['id']}/zones", json={"zone_name": "Test Beta Zone"}, headers=warehouse_headers)
         zone_b = zb_res.json()
         bb_res = await client.post(f"/api/v1/zones/{zone_b['id']}/bins", json={"bin_name": "Test Beta Bin 1"}, headers=warehouse_headers)
         bin_b = bb_res.json()
 
-        # 3. Authenticate as Store Manager Alpha
+        # 3. Authenticate as Warehouse Operator Alpha
         mgr_a_headers = {
             "X-User-Id": "00000000-0000-0000-0000-000000000020",
-            "X-User-Name": "store_mgr_bin_alpha",
-            "X-User-Roles": "STORE_MANAGER",
+            "X-User-Name": "warehouse_mgr_bin_alpha",
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
             "X-Employee-Id": "EMP-MGR-BIN-A",
-            "X-Store-Id": store_a["id"],
-            "X-Store-Code": store_a["store_code"],
+            "X-Warehouse-Id": warehouse_a["id"],
+            "X-Warehouse-Code": warehouse_a["warehouse_code"],
         }
 
         # 4. Manager A lists bins in own zone -> 200 OK
@@ -374,22 +374,22 @@ async def test_global_3_level_hierarchy_view():
         }
 
         # Setup 3 levels
-        store_res = await client.post("/api/v1/stores", json={"store_name": "Test Bin Store Hier Test"}, headers=warehouse_headers)
-        store = store_res.json()
-        z_res = await client.post(f"/api/v1/stores/{store['id']}/zones", json={"zone_name": "Test Hier Zone"}, headers=warehouse_headers)
+        warehouse_res = await client.post("/api/v1/warehouse", json={"warehouse_name": "Test Bin Warehouse Hier Test"}, headers=warehouse_headers)
+        warehouse = warehouse_res.json()
+        z_res = await client.post(f"/api/v1/warehouse/{warehouse['id']}/zones", json={"zone_name": "Test Hier Zone"}, headers=warehouse_headers)
         zone = z_res.json()
         b_res = await client.post(f"/api/v1/zones/{zone['id']}/bins", json={"bin_name": "Test Hier Bin"}, headers=warehouse_headers)
         bin_data = b_res.json()
 
         # Fetch hierarchy
-        res = await client.get("/api/v1/stores/hierarchy/all", headers=warehouse_headers)
+        res = await client.get("/api/v1/warehouse/hierarchy/all", headers=warehouse_headers)
         assert res.status_code == 200
         hierarchy = res.json()
 
-        found_store = next((s for s in hierarchy if s["id"] == store["id"]), None)
-        assert found_store is not None
-        assert "zones" in found_store
-        found_zone = next((z for z in found_store["zones"] if z["id"] == zone["id"]), None)
+        found_warehouse = next((s for s in hierarchy if s["id"] == warehouse["id"]), None)
+        assert found_warehouse is not None
+        assert "zones" in found_warehouse
+        found_zone = next((z for z in found_warehouse["zones"] if z["id"] == zone["id"]), None)
         assert found_zone is not None
         assert "bins" in found_zone
         found_bin = next((b for b in found_zone["bins"] if b["id"] == bin_data["id"]), None)
@@ -406,8 +406,8 @@ async def test_putaway_completion_with_exact_bin_qr_and_validations():
     from app.modules.storage.infrastructure.persistence.models import PutawayTaskModel
 
     test_uid = uuid.uuid4().hex[:6].upper()
-    store_id = uuid.uuid4()
-    other_store_id = uuid.uuid4()
+    warehouse_ref_id = uuid.uuid4()
+    other_warehouse_ref_id = uuid.uuid4()
     zone_id = uuid.uuid4()
     bin_id = uuid.uuid4()
     inactive_bin_id = uuid.uuid4()
@@ -416,30 +416,30 @@ async def test_putaway_completion_with_exact_bin_qr_and_validations():
     mat_code = f"MAT-BIN-{test_uid}"
 
     async with session_scope() as session:
-        # 1. Stores
-        store = StoreModel(
-            id=store_id,
-            store_code=f"STR-{test_uid}",
-            store_name=f"Store {test_uid}",
+        # 1. Warehouses
+        warehouse = WarehouseModel(
+            id=warehouse_ref_id,
+            warehouse_code=f"STR-{test_uid}",
+            warehouse_name=f"Warehouse {test_uid}",
             warehouse_id="WH-001",
             status="ACTIVE",
         )
-        session.add(store)
+        session.add(warehouse)
 
-        other_store = StoreModel(
-            id=other_store_id,
-            store_code=f"STR-OTH-{test_uid}",
-            store_name=f"Other Store {test_uid}",
+        other_warehouse = WarehouseModel(
+            id=other_warehouse_ref_id,
+            warehouse_code=f"STR-OTH-{test_uid}",
+            warehouse_name=f"Other Warehouse {test_uid}",
             warehouse_id="WH-001",
             status="ACTIVE",
         )
-        session.add(other_store)
+        session.add(other_warehouse)
         await session.flush()
 
         # 2. Zone
-        zone = StoreZoneModel(
+        zone = WarehouseZoneModel(
             id=zone_id,
-            store_id=store.id,
+            warehouse_ref_id=warehouse.id,
             zone_code=f"ZON-{test_uid}",
             zone_name=f"Zone {test_uid}",
             status="ACTIVE",
@@ -448,9 +448,9 @@ async def test_putaway_completion_with_exact_bin_qr_and_validations():
         await session.flush()
 
         # 3. Active Bin & Inactive Bin
-        active_bin = StoreBinModel(
+        active_bin = WarehouseBinModel(
             id=bin_id,
-            store_id=store.id,
+            warehouse_ref_id=warehouse.id,
             zone_id=zone.id,
             bin_code=f"BIN-{zone.zone_code}-001",
             bin_name=f"Primary Bin {test_uid}",
@@ -462,9 +462,9 @@ async def test_putaway_completion_with_exact_bin_qr_and_validations():
         )
         session.add(active_bin)
 
-        inactive_bin = StoreBinModel(
+        inactive_bin = WarehouseBinModel(
             id=inactive_bin_id,
-            store_id=store.id,
+            warehouse_ref_id=warehouse.id,
             zone_id=zone.id,
             bin_code=f"BIN-{zone.zone_code}-002",
             bin_name=f"Inactive Bin {test_uid}",
@@ -528,8 +528,8 @@ async def test_putaway_completion_with_exact_bin_qr_and_validations():
             uom="PCS",
             warehouse_id="WH-001",
             source_location="DOCK-01",
-            destination_store_id=store_id,
-            status="ASSIGNED_TO_STORE",
+            destination_warehouse_ref_id=warehouse_ref_id,
+            status="ASSIGNED_TO_WAREHOUSE",
             created_by="tester",
             created_at=datetime.datetime.now(datetime.timezone.utc),
         )
@@ -562,7 +562,7 @@ async def test_putaway_completion_with_exact_bin_qr_and_validations():
             "bin_id": str(bin_id),
             "bin_code": f"BIN-{zone.zone_code}-001",
             "zone_id": str(zone_id),
-            "store_id": str(store_id),
+            "warehouse_ref_id": str(warehouse_ref_id),
         })
 
         res_complete = await client.post(
@@ -582,6 +582,6 @@ async def test_putaway_completion_with_exact_bin_qr_and_validations():
 
         # 3. Verify target bin occupied_quantity is updated
         async with session_scope() as session:
-            b_obj = await session.get(StoreBinModel, bin_id)
+            b_obj = await session.get(WarehouseBinModel, bin_id)
             assert b_obj.occupied_quantity == Decimal("10.0")
 

@@ -52,7 +52,7 @@ async def test_e2e_prompt13_final_gate_exit_and_complete_audit():
         }
         wh_headers = {
             "Authorization": "Bearer mock-wh-token",
-            "X-User-Roles": "WAREHOUSE_MANAGER,STORE_MANAGER",
+            "X-User-Roles": "WAREHOUSE_MANAGER,WAREHOUSE_OPERATOR",
             "X-User-Name": "warehouse_manager",
         }
 

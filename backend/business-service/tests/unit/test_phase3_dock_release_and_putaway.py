@@ -1,14 +1,14 @@
-"""Unit and integration tests for Phase 3 — Store Manager/Keeper: Dock Release + Putaway.
+"""Unit and integration tests for Phase 3 — Warehouse Operator/Keeper: Dock Release + Putaway.
 
 Validates:
-1. Dock release responsibility by assigned Store Manager/Keeper.
+1. Dock release responsibility by assigned Warehouse Operator/Keeper.
 2. Rejection of Warehouse Manager attempting normal dock release after assignment.
-3. Rejection of Store Manager from an unrelated Store attempting dock release.
+3. Rejection of Warehouse Operator from an unrelated Warehouse attempting dock release.
 4. Validation checks before dock release (receiving completed, occupied dock, not double released, warehouse match).
-5. Putaway task creation inheriting assigned store from gate dock assignment.
-6. Store Manager/Keeper Putaway execution with Material QR and Store -> Zone -> Bin hierarchy.
-7. Rejection of Putaway into another Store/Zone/Bin, wrong warehouse, quarantined material, excess quantity.
-8. Transactional inventory accounting across MaterialStock, StoreBin, StorageLocation, and LocationBalances.
+5. Putaway task creation inheriting assigned warehouse from gate dock assignment.
+6. Warehouse Operator/Keeper Putaway execution with Material QR and Warehouse -> Zone -> Bin hierarchy.
+7. Rejection of Putaway into another Warehouse/Zone/Bin, wrong warehouse, quarantined material, excess quantity.
+8. Transactional inventory accounting across MaterialStock, WarehouseBin, StorageLocation, and LocationBalances.
 """
 
 from __future__ import annotations
@@ -51,11 +51,11 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreManagerUserModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    UserAccountModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 
 
@@ -83,48 +83,48 @@ async def test_phase3_dock_release_authorization_and_validation():
             )
             session.add(dock1)
 
-            # 2. Seed Stores
-            store_a = StoreModel(
+            # 2. Seed Warehouses
+            warehouse_a = WarehouseModel(
                 id=uuid.uuid4(),
-                store_code=f"STR-P3-ELEC-{uuid.uuid4().hex[:4].upper()}",
-                store_name="Electrical Store",
+                warehouse_code=f"STR-P3-ELEC-{uuid.uuid4().hex[:4].upper()}",
+                warehouse_name="Electrical Warehouse",
                 warehouse_id=wh_id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
-            store_b = StoreModel(
+            warehouse_b = WarehouseModel(
                 id=uuid.uuid4(),
-                store_code=f"STR-P3-MECH-{uuid.uuid4().hex[:4].upper()}",
-                store_name="Mechanical Store",
+                warehouse_code=f"STR-P3-MECH-{uuid.uuid4().hex[:4].upper()}",
+                warehouse_name="Mechanical Warehouse",
                 warehouse_id=wh_id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
-            session.add_all([store_a, store_b])
+            session.add_all([warehouse_a, warehouse_b])
 
-            # 3. Seed Store Manager Users
-            mgr_a = StoreManagerUserModel(
+            # 3. Seed Warehouse Operator Users
+            mgr_a = UserAccountModel(
                 id=uuid.uuid4(),
                 employee_id=f"EMP-P3-{uuid.uuid4().hex[:6].upper()}",
-                username=f"store_mgr_p3_a_{uuid.uuid4().hex[:4]}",
-                full_name="Electrical Store Keeper",
-                email=f"store.a.{uuid.uuid4().hex[:4]}@wms.com",
+                username=f"warehouse_mgr_p3_a_{uuid.uuid4().hex[:4]}",
+                full_name="Electrical Warehouse Operator",
+                email=f"warehouse.a.{uuid.uuid4().hex[:4]}@wms.com",
                 password_hash="mock_hash_a",
-                store_id=store_a.id,
+                warehouse_ref_id=warehouse_a.id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
-            mgr_b = StoreManagerUserModel(
+            mgr_b = UserAccountModel(
                 id=uuid.uuid4(),
                 employee_id=f"EMP-P3-{uuid.uuid4().hex[:6].upper()}",
-                username=f"store_mgr_p3_b_{uuid.uuid4().hex[:4]}",
-                full_name="Mechanical Store Keeper",
-                email=f"store.b.{uuid.uuid4().hex[:4]}@wms.com",
+                username=f"warehouse_mgr_p3_b_{uuid.uuid4().hex[:4]}",
+                full_name="Mechanical Warehouse Operator",
+                email=f"warehouse.b.{uuid.uuid4().hex[:4]}@wms.com",
                 password_hash="mock_hash_b",
-                store_id=store_b.id,
+                warehouse_ref_id=warehouse_b.id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
@@ -145,7 +145,7 @@ async def test_phase3_dock_release_authorization_and_validation():
                 created_at=now_naive,
                 updated_at=now_naive,
             )
-            session.add_all([dock1, store_a, store_b, mgr_a, mgr_b, sup])
+            session.add_all([dock1, warehouse_a, warehouse_b, mgr_a, mgr_b, sup])
             await session.flush()
 
             po_id = uuid.uuid4()
@@ -214,13 +214,13 @@ async def test_phase3_dock_release_authorization_and_validation():
                 warehouse_id=wh_id,
                 dock_number=dock1.dock_number,
                 status="GRN_POSTED",
-                posted_by="store_mgr_p3_a",
+                posted_by="warehouse_mgr_p3_a",
                 posted_at=now_tz,
             )
             session.add(grn)
             await session.flush()
 
-            # Operational Dock Assignment linked to Store A (Electrical Store)
+            # Operational Dock Assignment linked to Warehouse A (Electrical Warehouse)
             assignment = DockAssignmentModel(
                 id=uuid.uuid4(),
                 gate_entry_id=entry_id,
@@ -228,9 +228,9 @@ async def test_phase3_dock_release_authorization_and_validation():
                 po_id=po_id,
                 vehicle_number=asn.vehicle_number,
                 dock_number=dock1.dock_number,
-                assigned_store_id=store_a.id,
-                assigned_store_code=store_a.store_code,
-                assigned_store_name=store_a.store_name,
+                assigned_warehouse_ref_id=warehouse_a.id,
+                assigned_warehouse_code=warehouse_a.warehouse_code,
+                assigned_warehouse_name=warehouse_a.warehouse_name,
                 assigned_by="wh_mgr_1",
                 assigned_at=now_tz,
                 dock_arrival_at=now_tz,
@@ -242,10 +242,10 @@ async def test_phase3_dock_release_authorization_and_validation():
             await session.commit()
 
             entry_id_str = str(entry_id)
-            store_a_id_str = str(store_a.id)
-            store_b_id_str = str(store_b.id)
-            store_a_code = store_a.store_code
-            store_b_code = store_b.store_code
+            warehouse_a_id_str = str(warehouse_a.id)
+            warehouse_b_id_str = str(warehouse_b.id)
+            warehouse_a_code = warehouse_a.warehouse_code
+            warehouse_b_code = warehouse_b.warehouse_code
 
         headers_wh = {
             "Authorization": "Bearer mock-jwt-warehouse-token",
@@ -253,31 +253,31 @@ async def test_phase3_dock_release_authorization_and_validation():
             "X-User-Permissions": "gate:verify,gate:write",
         }
         headers_mgr_b = {
-            "Authorization": "Bearer mock-jwt-store-mgr-b-token",
-            "X-User-Roles": "STORE_MANAGER,STORE_KEEPER",
-            "X-User-Permissions": "gate:verify,store:write",
-            "X-Store-Id": store_b_id_str,
-            "X-Store-Code": store_b_code,
+            "Authorization": "Bearer mock-jwt-warehouse-mgr-b-token",
+            "X-User-Roles": "WAREHOUSE_OPERATOR,WAREHOUSE_OPERATOR",
+            "X-User-Permissions": "gate:verify,warehouse:write",
+            "X-Warehouse-Id": warehouse_b_id_str,
+            "X-Warehouse-Code": warehouse_b_code,
         }
         headers_mgr_a = {
-            "Authorization": "Bearer mock-jwt-store-mgr-a-token",
-            "X-User-Roles": "STORE_MANAGER,STORE_KEEPER",
-            "X-User-Permissions": "gate:verify,store:write",
-            "X-Store-Id": store_a_id_str,
-            "X-Store-Code": store_a_code,
+            "Authorization": "Bearer mock-jwt-warehouse-mgr-a-token",
+            "X-User-Roles": "WAREHOUSE_OPERATOR,WAREHOUSE_OPERATOR",
+            "X-User-Permissions": "gate:verify,warehouse:write",
+            "X-Warehouse-Id": warehouse_a_id_str,
+            "X-Warehouse-Code": warehouse_a_code,
         }
 
         # Case 1: Warehouse Manager attempts normal dock release -> Rejected with 403
         resp_wm = await client.post(f"/api/gate-entries/{entry_id_str}/release-dock", headers=headers_wh)
         assert resp_wm.status_code == 403
-        assert "assigned Store Manager/Keeper" in resp_wm.json()["detail"]
+        assert "assigned Warehouse Operator/Keeper" in resp_wm.json()["detail"]
 
-        # Case 2: Store Manager of Store B (Mechanical Store) attempts dock release -> Rejected with 403
+        # Case 2: Warehouse Operator of Warehouse B (Mechanical Warehouse) attempts dock release -> Rejected with 403
         resp_sm_b = await client.post(f"/api/gate-entries/{entry_id_str}/release-dock", headers=headers_mgr_b)
         assert resp_sm_b.status_code == 403
-        assert "only release docks assigned to your Store" in resp_sm_b.json()["detail"]
+        assert "only release docks assigned to your Warehouse" in resp_sm_b.json()["detail"]
 
-        # Case 3: Store Manager of Store A (Assigned Electrical Store) releases dock -> Succeeds 200
+        # Case 3: Warehouse Operator of Warehouse A (Assigned Electrical Warehouse) releases dock -> Succeeds 200
         resp_sm_a = await client.post(f"/api/gate-entries/{entry_id_str}/release-dock", headers=headers_mgr_a)
         assert resp_sm_a.status_code == 200
         data = resp_sm_a.json()
@@ -300,7 +300,7 @@ async def test_phase3_dock_release_authorization_and_validation():
 
 @pytest.mark.asyncio
 async def test_phase3_putaway_hierarchy_and_inventory_accounting():
-    """Tests the Putaway execution flow: Material QR -> Store -> Zone -> Bin -> Inventory update."""
+    """Tests the Putaway execution flow: Material QR -> Warehouse -> Zone -> Bin -> Inventory update."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         now_tz = datetime.datetime.now(datetime.timezone.utc)
@@ -309,28 +309,28 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
         item_code = f"MAT-CBL-{uuid.uuid4().hex[:6].upper()}"
 
         async with session_scope() as session:
-            # 1. Seed Store, Zone, Bin hierarchy
-            store = StoreModel(
+            # 1. Seed Warehouse, Zone, Bin hierarchy
+            warehouse = WarehouseModel(
                 id=uuid.uuid4(),
-                store_code=f"STR-P3-ELEC-{uuid.uuid4().hex[:4].upper()}",
-                store_name="Electrical Store",
+                warehouse_code=f"STR-P3-ELEC-{uuid.uuid4().hex[:4].upper()}",
+                warehouse_name="Electrical Warehouse",
                 warehouse_id=wh_id,
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
-            zone = StoreZoneModel(
+            zone = WarehouseZoneModel(
                 id=uuid.uuid4(),
-                store_id=store.id,
+                warehouse_ref_id=warehouse.id,
                 zone_code=f"ZON-P3-{uuid.uuid4().hex[:4].upper()}",
                 zone_name="Cable Storage Zone",
                 status="ACTIVE",
                 created_at=now_tz,
                 updated_at=now_tz,
             )
-            bin_obj = StoreBinModel(
+            bin_obj = WarehouseBinModel(
                 id=uuid.uuid4(),
-                store_id=store.id,
+                warehouse_ref_id=warehouse.id,
                 zone_id=zone.id,
                 bin_code=f"BIN-P3-{uuid.uuid4().hex[:4].upper()}",
                 bin_name="Heavy Cable Bin 01",
@@ -365,7 +365,7 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
                 created_at=now_naive,
                 updated_at=now_naive,
             )
-            session.add_all([store, zone, bin_obj, dock2, sup2])
+            session.add_all([warehouse, zone, bin_obj, dock2, sup2])
             await session.flush()
 
             po2_id = uuid.uuid4()
@@ -428,9 +428,9 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
                 po_id=po2_id,
                 vehicle_number=asn2.vehicle_number,
                 dock_number=dock2.dock_number,
-                assigned_store_id=store.id,
-                assigned_store_code=store.store_code,
-                assigned_store_name=store.store_name,
+                assigned_warehouse_ref_id=warehouse.id,
+                assigned_warehouse_code=warehouse.warehouse_code,
+                assigned_warehouse_name=warehouse.warehouse_name,
                 assigned_by="wh_mgr_1",
                 assigned_at=now_tz,
                 dock_arrival_at=now_tz,
@@ -451,7 +451,7 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
                 received_quantity=Decimal("200.0"),
                 verification_status="MATCHED",
                 exception_quantity=Decimal("0.0"),
-                recorded_by="store_keeper",
+                recorded_by="warehouse_keeper",
                 recorded_at=now_tz,
             )
             session.add(rec_line)
@@ -536,7 +536,7 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
             session.add(hu)
             await session.flush()
 
-            # 4. Seed Putaway Task pre-assigned to Store
+            # 4. Seed Putaway Task pre-assigned to Warehouse
             task_id = uuid.uuid4()
             task = PutawayTaskModel(
                 id=task_id,
@@ -550,12 +550,7 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
                 uom="MTR",
                 warehouse_id=wh_id,
                 source_location="RECEIVING_AREA",
-                destination_store_id=store.id,
-                destination_zone_id=zone.id,
-                destination_zone=zone.zone_code,
-                destination_bin_id=bin_obj.id,
-                destination_bin=bin_obj.bin_code,
-                destination_bin_code=bin_obj.bin_code,
+                destination_warehouse_ref_id=warehouse.id,
                 status="PUTAWAY_PENDING",
                 created_by="system",
                 created_at=now_tz,
@@ -566,15 +561,15 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
             task_id_str = str(task_id)
             hu_barcode = hu.barcode_value
             bin_code = bin_obj.bin_code
-            store_id_str = str(store.id)
-            store_code_str = store.store_code
+            warehouse_ref_id_str = str(warehouse.id)
+            warehouse_code_str = warehouse.warehouse_code
 
         headers_keeper = {
-            "Authorization": "Bearer mock-jwt-store-keeper-token",
-            "X-User-Roles": "STORE_KEEPER,STORE_MANAGER",
-            "X-User-Permissions": "store:write,putaway:execute",
-            "X-Store-Id": store_id_str,
-            "X-Store-Code": store_code_str,
+            "Authorization": "Bearer mock-jwt-warehouse-operator-token",
+            "X-User-Roles": "WAREHOUSE_OPERATOR,WAREHOUSE_OPERATOR",
+            "X-User-Permissions": "warehouse:write,putaway:execute",
+            "X-Warehouse-Id": warehouse_ref_id_str,
+            "X-Warehouse-Code": warehouse_code_str,
         }
 
         # Negative Test: Scan invalid Material QR
@@ -628,7 +623,7 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
             assert h.status == "STORED"
             assert bin_code in h.current_location
 
-            b = (await session.execute(select(StoreBinModel).where(StoreBinModel.bin_code == bin_code))).scalar_one()
+            b = (await session.execute(select(WarehouseBinModel).where(WarehouseBinModel.bin_code == bin_code))).scalar_one()
             assert b.occupied_quantity == Decimal("300.0")  # 100 + 200
 
             s = (await session.execute(select(MaterialStockModel).where(MaterialStockModel.material_code == item_code))).scalar_one()

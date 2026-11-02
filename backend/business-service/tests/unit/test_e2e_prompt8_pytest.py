@@ -28,7 +28,7 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
 )
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel
-from app.modules.store.infrastructure.persistence.models import StoreModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel
 
 
 @pytest.mark.asyncio
@@ -80,15 +80,15 @@ async def test_e2e_prompt8_inbound_flow():
         dup_ge_res = await client.post("/api/gate-entries", json=dup_ge_payload, headers=gate_headers)
         assert dup_ge_res.status_code in (400, 409, 422), "Duplicate active Gate Entry for same PO must be rejected"
 
-        # 3. VERIFY DOCK ALLOCATION & RECEIVING STORE
+        # 3. VERIFY DOCK ALLOCATION & RECEIVING WAREHOUSE_OPERATOR
         async with session_scope() as session:
             dock_alloc = (await session.execute(
                 select(DockAssignmentModel).where(DockAssignmentModel.gate_entry_id == ge.id)
             )).scalar_one_or_none()
             assert dock_alloc is not None, "Dock assignment record must exist"
             assert dock_alloc.dock_number == "DK-0CE4"
-            assert dock_alloc.assigned_store_code == "STR-1E6BD7"
-            assert dock_alloc.assigned_store_name == "Electrical Store"
+            assert dock_alloc.assigned_warehouse_code == "STR-1E6BD7"
+            assert dock_alloc.assigned_warehouse_name == "Electrical Warehouse"
 
             # Verify Dock status is OCCUPIED
             dock = (await session.execute(
@@ -97,18 +97,18 @@ async def test_e2e_prompt8_inbound_flow():
             assert dock is not None
             assert dock.status == "OCCUPIED"
 
-            # Verify Store is ACTIVE and in Main Warehouse
-            store = (await session.execute(
-                select(StoreModel).where(StoreModel.store_code == "STR-1E6BD7")
+            # Verify Warehouse is ACTIVE and in Main Warehouse
+            warehouse = (await session.execute(
+                select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-1E6BD7")
             )).scalar_one_or_none()
-            assert store is not None
-            assert store.status == "ACTIVE"
-            assert store.warehouse_id == "Main Warehouse"
+            assert warehouse is not None
+            assert warehouse.status == "ACTIVE"
+            assert warehouse.warehouse_id == "Main Warehouse"
 
         # Verify duplicate dock assignment is rejected
         dup_dock_res = await client.post(
             f"/api/gate-entries/{gate_entry_id}/assign-dock",
-            json={"dock_id": "DK-0CE4", "store_id": "STR-1E6BD7"},
+            json={"dock_id": "DK-0CE4", "warehouse_ref_id": "STR-1E6BD7"},
             headers=wh_headers,
         )
         assert dup_dock_res.status_code in (400, 409, 422), "Duplicate dock assignment must be rejected"

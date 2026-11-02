@@ -9,6 +9,7 @@ import {
   type AssemblyOrder,
   type AssemblyAttentionItem,
   type AssemblyActivityItem,
+  type AssemblyMaterialRequest,
 } from "@/lib/api-client";
 import {
   AlertTriangle,
@@ -152,6 +153,8 @@ function AssemblyDashboard() {
 
   const [materialRequestCount, setMaterialRequestCount] = useState<number | null>(null);
   const [fgAvailable, setFgAvailable] = useState<number | null>(null);
+  const [materialRequests, setMaterialRequests] = useState<AssemblyMaterialRequest[]>([]);
+  const [fgChart, setFgChart] = useState<{ label: string; value: number }[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadDashboard = useCallback(async (isManual = false) => {
@@ -165,12 +168,23 @@ function AssemblyDashboard() {
     if (dashboard.status === "fulfilled") {
       setData(dashboard.value);
     } else failed.push("production status, activity and attention items");
-    if (requests.status === "fulfilled") setMaterialRequestCount(requests.value.length);
+    if (requests.status === "fulfilled") {
+      setMaterialRequestCount(requests.value.length);
+      setMaterialRequests(requests.value);
+    }
     else {
       setMaterialRequestCount(null);
       failed.push("material request count");
     }
-    if (inventory.status === "fulfilled") setFgAvailable(inventory.value.available);
+    if (inventory.status === "fulfilled") {
+      setFgAvailable(inventory.value.available);
+      setFgChart([
+        { label: "Available", value: inventory.value.available },
+        { label: "Reserved", value: inventory.value.reserved },
+        { label: "Packed", value: inventory.value.packed },
+        { label: "Dispatched", value: inventory.value.dispatched },
+      ]);
+    }
     else {
       setFgAvailable(null);
       failed.push("finished goods availability");
@@ -186,6 +200,24 @@ function AssemblyDashboard() {
     void loadDashboard();
   }, [loadDashboard]);
   const kpis = data?.kpis;
+  const kpiCharts = useMemo(() => {
+    const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date();
+      date.setDate(date.getDate() - 6 + index);
+      return { key: dayKey(date), label: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) };
+    });
+    const countByDay = (dates: (string | null)[]) => days.map(day => ({
+      label: day.label,
+      value: dates.filter(value => value && dayKey(new Date(value)) === day.key).length,
+    }));
+    const orders = data?.active_orders || [];
+    return {
+      requests: countByDay(materialRequests.map(request => request.created_at)),
+      production: countByDay(orders.filter(order => ["IN_PRODUCTION", "IN-PROGRESS", "RUNNING"].includes(order.status.toUpperCase())).map(order => order.started_at || order.created_at)),
+      quality: countByDay(orders.filter(order => order.status.toUpperCase() === "QC_PENDING").map(order => order.updated_at || order.created_at)),
+    };
+  }, [data, materialRequests]);
   const metricValue = (value: number | null | undefined) =>
     loading ? "..." : value == null ? "Unavailable" : value.toLocaleString();
 
@@ -237,16 +269,6 @@ function AssemblyDashboard() {
       subtitle="Operational monitoring, production tracking & quality status"
       actions={
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => loadDashboard(true)}
-            disabled={refreshing}
-            className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80"
-          >
-            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} />
-            Refresh
-          </Button>
           <AssemblyWorkflowHelp />
           <Button
             size="sm"
@@ -280,6 +302,7 @@ function AssemblyDashboard() {
         >
           <StatCard
             label="Material Requests"
+            sparkline={kpiCharts.requests}
             value={metricValue(materialRequestCount)}
             delta="Total assembly requisitions"
             icon={Boxes}
@@ -289,6 +312,7 @@ function AssemblyDashboard() {
           />
           <StatCard
             label="In Production"
+            sparkline={kpiCharts.production}
             value={metricValue(kpis?.in_production)}
             delta="Runs currently on assembly lines"
             icon={Factory}
@@ -298,6 +322,7 @@ function AssemblyDashboard() {
           />
           <StatCard
             label="QC Pending"
+            sparkline={kpiCharts.quality}
             value={metricValue(kpis?.qc_pending)}
             delta="Runs awaiting quality inspection"
             icon={ShieldCheck}
@@ -307,6 +332,7 @@ function AssemblyDashboard() {
           />
           <StatCard
             label="FG Available"
+            sparkline={fgChart}
             value={metricValue(fgAvailable)}
             delta="Available quantity after reservations"
             icon={PackageCheck}

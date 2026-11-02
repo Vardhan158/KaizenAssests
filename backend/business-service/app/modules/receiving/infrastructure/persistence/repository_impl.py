@@ -48,7 +48,7 @@ from app.modules.dock.infrastructure.persistence.models import (
     DockAllocationRequestModel,
     DockMasterModel,
 )
-from app.modules.store.infrastructure.persistence.models import StoreModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel
 
 from app.modules.receiving.application.repository import (
     AsnDocumentSnapshot,
@@ -121,6 +121,43 @@ def _is_uuid_string(val: str | None) -> bool:
         return True
     except Exception:
         return False
+
+
+def _asn_materials_for_vehicle(asn: AsnModel, vehicle_number: str | None) -> list[dict] | None:
+    """Return the submitted shipment manifest for one vehicle, when present."""
+    def normalize(value: object) -> str:
+        return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+    target = normalize(vehicle_number)
+    assignment = next(
+        (entry for entry in (asn.logistics or []) if isinstance(entry, dict) and entry.get("type") == "transport_assignment"),
+        None,
+    )
+    vehicles = assignment.get("vehicles", []) if isinstance(assignment, dict) else []
+    selected_index = next(
+        (
+            index
+            for index, entry in enumerate(vehicles)
+            if isinstance(entry, dict) and normalize(entry.get("vehicle_number")) == target
+        ),
+        None,
+    )
+    selected = vehicles[selected_index] if selected_index is not None else None
+    materials = selected.get("materials") if isinstance(selected, dict) else None
+    if isinstance(materials, list):
+        return materials
+    if selected_index is None or len(vehicles) <= 1:
+        return None
+    return [
+        {
+            "item_code": line.item_code,
+            "material_name": line.material_name,
+            "shipped_quantity": line.shipped_quantity,
+            "uom": line.uom,
+        }
+        for line_index, line in enumerate(asn.lines or [])
+        if line_index % len(vehicles) == selected_index
+    ]
 
 
 async def _resolve_real_supplier_names(
@@ -422,7 +459,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
         """
         Return the newest ASN linked to the PO.
 
-        The current ASN table stores po_id as text, so UUID PO IDs are
+        The current ASN table warehouses po_id as text, so UUID PO IDs are
         compared using their canonical string representation.
         """
 
@@ -870,11 +907,37 @@ class SqlAlchemyGrnRepository(GrnRepository):
         )
 
         if not grn_uuid and asn_receipt and asn_number:
-            # Repeated Fetch Details must resume the same persisted draft.
-            existing_id = await self._session.scalar(
-                select(GrnModel.id).where(GrnModel.asn_number == asn_number.strip())
-                .order_by(GrnModel.created_at.desc()).limit(1)
-            )
+            # An ASN can arrive in multiple vehicles. Resume only the draft
+            # associated with this exact arrival so each truck has its own GRN.
+            identity_filter = None
+            if gate_entry_id:
+                identity_filter = GrnModel.gate_entry_id == _uuid_or_none(gate_entry_id)
+            elif gate_entry_number:
+                identity_filter = func.upper(GrnModel.gate_entry_number) == gate_entry_number.strip().upper()
+            elif vehicle_number:
+                normalized_vehicle = "".join(ch for ch in vehicle_number.upper() if ch.isalnum())
+                stored_vehicle = func.upper(func.replace(func.replace(GrnModel.vehicle_number, "-", ""), " ", ""))
+                identity_filter = stored_vehicle == normalized_vehicle
+            existing_id = None
+            if identity_filter is not None:
+                existing_id = await self._session.scalar(
+                    select(GrnModel.id)
+                    .where(GrnModel.asn_number == asn_number.strip(), identity_filter)
+                    .order_by(GrnModel.created_at.desc())
+                    .limit(1)
+                )
+            if not existing_id and gate_entry_number:
+                # Resume drafts created before gate_entry_id was included in
+                # the GRN request, while still scoping them to this arrival.
+                existing_id = await self._session.scalar(
+                    select(GrnModel.id)
+                    .where(
+                        GrnModel.asn_number == asn_number.strip(),
+                        func.upper(GrnModel.gate_entry_number) == gate_entry_number.strip().upper(),
+                    )
+                    .order_by(GrnModel.created_at.desc())
+                    .limit(1)
+                )
             if existing_id:
                 grn_uuid = existing_id
 
@@ -890,7 +953,10 @@ class SqlAlchemyGrnRepository(GrnRepository):
             existing = res.scalar_one_or_none()
 
         if existing:
-            if not grn_id and str(existing.status).upper() in {"COMPLETED", "PARTIALLY_COMPLETED", "PARTIALLY COMPLETED", "POSTED"}:
+            # Partial receipts are still active work: QC, batch capture, and
+            # remaining quantities must be resumable for this same vehicle.
+            # Only fully closed receipts should be redirected to history.
+            if not grn_id and str(existing.status).upper().replace(" ", "_") in {"COMPLETED", "POSTED", "RECEIVING_COMPLETE"}:
                 raise ValueError(f"ASN already received under {existing.grn_number}. Open GRN History to view it.")
             existing.dock_number = dock_number
             existing.receipt_type = receipt_type
@@ -923,21 +989,33 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 )
                 asn_for_lines = asn_result.scalars().first()
                 if asn_for_lines:
-                    for line in (asn_for_lines.lines or []):
+                    vehicle_manifest = _asn_materials_for_vehicle(asn_for_lines, vehicle_number or existing.vehicle_number)
+                    source_lines = vehicle_manifest if vehicle_manifest is not None else [
+                        {
+                            "item_code": line.item_code,
+                            "material_name": line.material_name,
+                            "uom": line.uom,
+                            "shipped_quantity": line.shipped_quantity,
+                        }
+                        for line in (asn_for_lines.lines or [])
+                    ]
+                    for line in source_lines:
+                        item_code = line.get("item_code") or line.get("material_code") or ""
+                        quantity = line.get("shipped_quantity", line.get("quantity", 0)) or 0
                         existing.lines.append(
                             GrnLineModel(
                                 id=uuid.uuid4(),
-                                item_code=line.item_code,
-                                material_name=line.material_name or line.item_code,
+                                item_code=item_code,
+                                material_name=line.get("material_name") or item_code,
                                 material_category="General",
-                                uom=line.uom or "PCS",
-                                ordered_quantity=line.shipped_quantity or Decimal("0"),
+                                uom=line.get("uom") or "PCS",
+                                ordered_quantity=Decimal(str(quantity)),
                                 received_quantity=Decimal("0"),
                                 good_quantity=Decimal("0"),
                                 damaged_quantity=Decimal("0"),
                                 rejected_quantity=Decimal("0"),
                                 quality_approved_quantity=Decimal("0"),
-                                balance_quantity=line.shipped_quantity or Decimal("0"),
+                                balance_quantity=Decimal(str(quantity)),
                             )
                         )
             existing.updated_at = now
@@ -994,6 +1072,20 @@ class SqlAlchemyGrnRepository(GrnRepository):
                     gate_model = gate_result.scalar_one_or_none()
                     if gate_model is not None:
                         gate = self._to_gate_entry_snapshot(gate_model)
+                if gate is not None and not gate.asn_id:
+                    explicit_assignment_result = await self._session.execute(
+                        select(DockAssignmentModel)
+                        .where(DockAssignmentModel.gate_entry_id == _uuid_or_none(gate.id))
+                        .limit(1)
+                    )
+                    explicit_assignment = explicit_assignment_result.scalars().first()
+                    if (
+                        explicit_assignment is not None
+                        and _uuid_or_none(explicit_assignment.asn_id) == _uuid_or_none(asn.id)
+                    ):
+                        gate_linked_by_assignment = True
+                        gate_id_val = _uuid_or_none(gate.id)
+                        gate_num_val = gate.gate_entry_number
                 if gate is None:
                     gate = await self.find_latest_gate_entry_for_asn(asn.id)
 
@@ -1161,16 +1253,34 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 if not (warehouse_id or "").strip():
                     warehouse_id = await _warehouse_for_receiving_dock(self._session, assignment.dock_number)
 
-                duplicate_result = await self._session.execute(
-                    select(GrnModel)
-                    .options(selectinload(GrnModel.lines))
-                    .where(
-                        GrnModel.asn_id == asn_id_val,
-                        GrnModel.status.notin_(["CANCELLED", "VOID"]),
+                duplicate_conditions = [
+                    GrnModel.asn_id == asn_id_val,
+                    GrnModel.status.notin_(["CANCELLED", "VOID"]),
+                ]
+                if gate_id_val and gate_num_val:
+                    duplicate_conditions.append(
+                        or_(
+                            GrnModel.gate_entry_id == gate_id_val,
+                            func.upper(GrnModel.gate_entry_number) == gate_num_val.strip().upper(),
+                        )
                     )
-                    .limit(1)
-                )
-                existing_for_asn = duplicate_result.scalar_one_or_none()
+                elif gate_id_val:
+                    duplicate_conditions.append(GrnModel.gate_entry_id == gate_id_val)
+                elif gate_num_val:
+                    duplicate_conditions.append(
+                        func.upper(GrnModel.gate_entry_number) == gate_num_val.strip().upper()
+                    )
+                elif vehicle_number:
+                    duplicate_conditions.append(GrnModel.vehicle_number == vehicle_number)
+                existing_for_asn = None
+                if len(duplicate_conditions) > 2:
+                    duplicate_result = await self._session.execute(
+                        select(GrnModel)
+                        .options(selectinload(GrnModel.lines))
+                        .where(*duplicate_conditions)
+                        .limit(1)
+                    )
+                    existing_for_asn = duplicate_result.scalar_one_or_none()
                 if existing_for_asn is not None:
                     # This ASN already has the receiving event. Resume and
                     # update that GRN instead of creating or rejecting a
@@ -1280,21 +1390,33 @@ class SqlAlchemyGrnRepository(GrnRepository):
         # from the persisted ASN shipment lines so Item Receiving opens with
         # the actual material, quantity, and UOM from the shipment.
         if asn_receipt and asn is not None:
-            for line in (asn.lines or []):
+            vehicle_manifest = _asn_materials_for_vehicle(asn, vehicle_number)
+            source_lines = vehicle_manifest if vehicle_manifest is not None else [
+                {
+                    "item_code": line.item_code,
+                    "material_name": line.material_name,
+                    "uom": line.uom,
+                    "shipped_quantity": line.shipped_quantity,
+                }
+                for line in (asn.lines or [])
+            ]
+            for line in source_lines:
+                item_code = line.get("item_code") or line.get("material_code") or ""
+                quantity = line.get("shipped_quantity", line.get("quantity", 0)) or 0
                 new_grn.lines.append(
                     GrnLineModel(
                         id=uuid.uuid4(),
-                        item_code=line.item_code,
-                        material_name=line.material_name or line.item_code,
+                        item_code=item_code,
+                        material_name=line.get("material_name") or item_code,
                         material_category="General",
-                        uom=line.uom or "PCS",
-                        ordered_quantity=line.shipped_quantity or Decimal("0"),
+                        uom=line.get("uom") or "PCS",
+                        ordered_quantity=Decimal(str(quantity)),
                         received_quantity=Decimal("0"),
                         good_quantity=Decimal("0"),
                         damaged_quantity=Decimal("0"),
                         rejected_quantity=Decimal("0"),
                         quality_approved_quantity=Decimal("0"),
-                        balance_quantity=line.shipped_quantity or Decimal("0"),
+                        balance_quantity=Decimal(str(quantity)),
                     )
                 )
 
@@ -1757,10 +1879,31 @@ class SqlAlchemyGrnRepository(GrnRepository):
         file_path: str,
         uploaded_by: str,
     ) -> GrnDocumentModel:
+        normalized_type = document_type.strip().upper()
+        if normalized_type == "ASN COPY":
+            existing = (
+                await self._session.execute(
+                    select(GrnDocumentModel)
+                    .where(
+                        GrnDocumentModel.grn_id == grn_id,
+                        GrnDocumentModel.document_type == normalized_type,
+                    )
+                    .order_by(GrnDocumentModel.uploaded_at.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+            if existing:
+                existing.file_name = file_name
+                existing.file_path = file_path
+                existing.uploaded_by = uploaded_by
+                existing.uploaded_at = datetime.now(timezone.utc)
+                await self._session.flush()
+                return existing
+
         doc = GrnDocumentModel(
             id=uuid.uuid4(),
             grn_id=grn_id,
-            document_type=document_type,
+            document_type=normalized_type,
             file_name=file_name,
             file_path=file_path,
             uploaded_by=uploaded_by,
@@ -1814,42 +1957,63 @@ class SqlAlchemyGrnRepository(GrnRepository):
         if verification_notes:
             grn.verification_notes = verification_notes
 
-        # Retrieve dock assignment for store routing & manager assignment
+        # Retrieve the assignment for this exact vehicle arrival.  An ASN can
+        # contain several vehicles, so ASN/PO alone must never select an
+        # assignment: doing so can attach a completed GRN to a sibling vehicle
+        # and leave the real allocation stuck at DOCK_ASSIGNED.
         dock_assignment = None
-        da_conditions = []
-        if grn.id:
-            da_conditions.append(DockAssignmentModel.prepared_grn_id == grn.id)
         if grn.gate_entry_id:
-            da_conditions.append(DockAssignmentModel.gate_entry_id == grn.gate_entry_id)
-        if grn.asn_id:
-            da_conditions.append(DockAssignmentModel.asn_id == grn.asn_id)
-        if grn.po_id:
-            da_conditions.append(DockAssignmentModel.po_id == grn.po_id)
-        if grn.vehicle_number:
-            da_conditions.append(DockAssignmentModel.vehicle_number == grn.vehicle_number)
-
-        if da_conditions:
-            da_res = await self._session.execute(
+            dock_assignment = (await self._session.execute(
+                select(DockAssignmentModel).where(
+                    DockAssignmentModel.gate_entry_id == grn.gate_entry_id
+                )
+            )).scalar_one_or_none()
+        elif grn.gate_entry_number:
+            dock_assignment = (await self._session.execute(
                 select(DockAssignmentModel)
-                .where(or_(*da_conditions))
-                .order_by(DockAssignmentModel.assigned_at.desc())
-            )
-            dock_assignment = da_res.scalars().first()
-            if dock_assignment:
-                dock_assignment.prepared_grn_id = grn.id
-                dock_assignment.receiving_completed_at = now
-                dock_assignment.receiving_completed_by = posted_by
-                if dock_assignment.gate_entry_id:
-                    ge_res = await self._session.execute(
-                        select(GateEntryModel).where(GateEntryModel.id == dock_assignment.gate_entry_id)
-                    )
-                    ge_obj = ge_res.scalar_one_or_none()
-                    if ge_obj:
-                        ge_obj.status = "RECEIVING_COMPLETED"
+                .join(GateEntryModel, GateEntryModel.id == DockAssignmentModel.gate_entry_id)
+                .where(
+                    func.upper(GateEntryModel.gate_entry_number)
+                    == grn.gate_entry_number.strip().upper()
+                )
+            )).scalar_one_or_none()
+        elif grn.vehicle_number and grn.dock_number:
+            normalized_vehicle = grn.vehicle_number.replace("-", "").replace(" ", "").upper()
+            dock_assignment = (await self._session.execute(
+                select(DockAssignmentModel).where(
+                    func.upper(
+                        func.replace(func.replace(DockAssignmentModel.vehicle_number, "-", ""), " ", "")
+                    ) == normalized_vehicle,
+                    func.upper(DockAssignmentModel.dock_number) == grn.dock_number.strip().upper(),
+                    DockAssignmentModel.asn_id == grn.asn_id,
+                )
+            )).scalar_one_or_none()
 
-        base_dest_store_id = dock_assignment.assigned_store_id if dock_assignment else None
+        if dock_assignment:
+            # Repair an earlier broad ASN/PO match before claiming the unique
+            # prepared_grn_id for the correct vehicle assignment.
+            conflicting_assignment = (await self._session.execute(
+                select(DockAssignmentModel).where(
+                    DockAssignmentModel.prepared_grn_id == grn.id,
+                    DockAssignmentModel.id != dock_assignment.id,
+                )
+            )).scalar_one_or_none()
+            if conflicting_assignment:
+                conflicting_assignment.prepared_grn_id = None
+            dock_assignment.prepared_grn_id = grn.id
+            dock_assignment.receiving_completed_at = now
+            dock_assignment.receiving_completed_by = posted_by
+            if dock_assignment.gate_entry_id:
+                ge_res = await self._session.execute(
+                    select(GateEntryModel).where(GateEntryModel.id == dock_assignment.gate_entry_id)
+                )
+                ge_obj = ge_res.scalar_one_or_none()
+                if ge_obj:
+                    ge_obj.status = "RECEIVING_COMPLETED"
+
+        base_dest_warehouse_ref_id = dock_assignment.assigned_warehouse_ref_id if dock_assignment else None
         base_assigned_to = (
-            (dock_assignment.assigned_store_manager_username or dock_assignment.assigned_store_manager_id or dock_assignment.assigned_store_manager_name)
+            (dock_assignment.assigned_warehouse_operator_username or dock_assignment.assigned_warehouse_operator_id or dock_assignment.assigned_warehouse_operator_name)
             if dock_assignment
             else None
         )
@@ -1857,30 +2021,30 @@ class SqlAlchemyGrnRepository(GrnRepository):
         assigned_at = (dock_assignment.assigned_at if dock_assignment else None) or now
 
         # Fallback to dock definition if not populated on dock assignment
-        if not base_dest_store_id and grn.dock_number:
+        if not base_dest_warehouse_ref_id and grn.dock_number:
             dock_res = await self._session.execute(
                 select(DockModel).where(DockModel.dock_number == grn.dock_number)
             )
             dock_obj = dock_res.scalars().first()
-            if dock_obj and getattr(dock_obj, "assigned_store_id", None):
-                base_dest_store_id = dock_obj.assigned_store_id
-                base_assigned_to = base_assigned_to or getattr(dock_obj, "assigned_store_manager_username", None) or getattr(dock_obj, "assigned_store_manager_id", None)
+            if dock_obj and getattr(dock_obj, "assigned_warehouse_ref_id", None):
+                base_dest_warehouse_ref_id = dock_obj.assigned_warehouse_ref_id
+                base_assigned_to = base_assigned_to or getattr(dock_obj, "assigned_warehouse_operator_username", None) or getattr(dock_obj, "assigned_warehouse_operator_id", None)
 
-        # Pre-fetch all active stores to match by category
-        store_res = await self._session.execute(
-            select(StoreModel).where(StoreModel.status == "ACTIVE").order_by(StoreModel.created_at.asc())
+        # Pre-fetch all active warehouses to match by category
+        warehouse_res = await self._session.execute(
+            select(WarehouseModel).where(WarehouseModel.status == "ACTIVE").order_by(WarehouseModel.created_at.asc())
         )
-        active_stores = list(store_res.scalars().all())
+        active_warehouses = list(warehouse_res.scalars().all())
 
         # Post inventory updates & putaway tasks
         for line in grn.lines:
-            dest_store_id = base_dest_store_id
+            dest_warehouse_ref_id = base_dest_warehouse_ref_id
             assigned_to = base_assigned_to
 
-            if dest_store_id and not assigned_to:
-                for st in active_stores:
-                    if st.id == dest_store_id:
-                        assigned_to = st.store_manager_name or st.store_manager_id
+            if dest_warehouse_ref_id and not assigned_to:
+                for st in active_warehouses:
+                    if st.id == dest_warehouse_ref_id:
+                        assigned_to = st.warehouse_operator_name or st.warehouse_operator_id
                         break
             # Only QC-accepted material may create a putaway task. Received
             # but rejected, damaged, or held quantities remain unavailable.
@@ -1967,7 +2131,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     uom=bindparam("uom"),
                                     warehouse_id=bindparam("wh"),
                                     source_location=bindparam("source"),
-                                    destination_store_id=bindparam("dest_store_id"),
+                                    destination_warehouse_ref_id=bindparam("dest_warehouse_ref_id"),
                                     assigned_to=bindparam("assigned_to"),
                                     assigned_by=bindparam("assigned_by"),
                                     assigned_at=bindparam("assigned_at"),
@@ -1987,7 +2151,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     "uom": line.uom or "PCS",
                                     "wh": grn.warehouse_id,
                                     "source": f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
-                                    "dest_store_id": dest_store_id,
+                                    "dest_warehouse_ref_id": dest_warehouse_ref_id,
                                     "assigned_to": assigned_to,
                                     "assigned_by": assigned_by,
                                     "assigned_at": assigned_at,
@@ -2020,7 +2184,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     uom=bindparam("uom"),
                                     warehouse_id=bindparam("wh"),
                                     source_location=bindparam("source"),
-                                    destination_store_id=bindparam("dest_store_id"),
+                                    destination_warehouse_ref_id=bindparam("dest_warehouse_ref_id"),
                                     assigned_to=bindparam("assigned_to"),
                                     assigned_by=bindparam("assigned_by"),
                                     assigned_at=bindparam("assigned_at"),
@@ -2039,7 +2203,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                             "uom": line.uom or "PCS",
                             "wh": grn.warehouse_id,
                             "source": f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
-                            "dest_store_id": dest_store_id,
+                            "dest_warehouse_ref_id": dest_warehouse_ref_id,
                             "assigned_to": assigned_to,
                             "assigned_by": assigned_by,
                             "assigned_at": assigned_at,
@@ -2073,6 +2237,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
             conditions.append(
                 or_(
                     GrnModel.grn_number.ilike(term),
+                    GrnModel.asn_number.ilike(term),
+                    GrnModel.gate_entry_number.ilike(term),
                     GrnModel.po_number.ilike(term),
                     GrnModel.supplier_name.ilike(term),
                     GrnModel.vehicle_number.ilike(term),

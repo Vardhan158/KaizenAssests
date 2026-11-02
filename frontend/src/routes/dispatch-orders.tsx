@@ -184,11 +184,11 @@ function DispatchOrdersPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [res, balances, stores, putawayTasks, assemblyFinishedGoods, driverList, vehicleList] =
+      const [res, balances, warehouses, putawayTasks, assemblyFinishedGoods, driverList, vehicleList] =
         await Promise.all([
           api.getDispatches().catch(() => ({ items: [], total: 0 })),
           api.getInventoryLocationBalances().catch(() => []),
-          api.getStores().catch(() => []),
+          api.getWarehouses().catch(() => []),
           api.getPutawayTasks().catch(() => []),
           api.getAssemblyFinishedGoods().catch(() => []),
           api.getDrivers().catch(() => []),
@@ -199,17 +199,17 @@ function DispatchOrdersPage() {
       setDrivers(Array.isArray(driverList) ? driverList : []);
       setVehicles(Array.isArray(vehicleList) ? vehicleList : []);
 
-      const fgStore = (stores || []).find(
+      const fgWarehouse = (warehouses || []).find(
         (s: any) =>
-          String(s.store_type || "").toUpperCase() === "FINISHED_GOODS" ||
-          String(s.store_name || "")
+          String(s.warehouse_type || "").toUpperCase() === "FINISHED_GOODS" ||
+          String(s.warehouse_name || "")
             .toUpperCase()
             .includes("FINISHED GOODS"),
       );
 
       const fgBalances = (balances || []).filter((b: any) =>
-        fgStore
-          ? b.store_id === fgStore.id || b.store_code === fgStore.store_code
+        fgWarehouse
+          ? b.warehouse_ref_id === fgWarehouse.id || b.warehouse_code === fgWarehouse.warehouse_code
           : String(b.location_code || b.zone_code || "")
               .toUpperCase()
               .includes("FG"),
@@ -506,7 +506,7 @@ function DispatchOrdersPage() {
     const matchesPriority =
       !priorityFilter || order.priority?.toLowerCase() === priorityFilter.toLowerCase();
     const matchesWarehouse =
-      !warehouseFilter || order.warehouse_id?.toLowerCase().includes(warehouseFilter.toLowerCase());
+      true;
     const matchesDriver =
       !driverFilter ||
       order.driver_id?.toLowerCase().includes(driverFilter.toLowerCase()) ||
@@ -521,9 +521,8 @@ function DispatchOrdersPage() {
       subtitle="Advanced filtering, stock reservation, and outbound finished goods order management"
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-xl" onClick={() => void loadData()}>
-            <RefreshCw className="size-4" /> Refresh
-          </Button>
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" className="rounded-xl" onClick={() => void loadData()}>
+            <RefreshCw className="size-4" /></Button>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
               <Button className="rounded-xl shadow-glow" onClick={handleOpenCreate}>
@@ -869,7 +868,7 @@ function DispatchOrdersPage() {
                                 dispatch_qty: Math.min(50, avail || 50),
                               },
                             ]);
-                            toast.success("Finished good added from FG Store", {
+                            toast.success("Finished good added from FG Warehouse", {
                               description: `${unadded.material_name || unadded.material_code}`,
                             });
                           } else {
@@ -1250,22 +1249,7 @@ function DispatchOrdersPage() {
                 </select>
               </div>
 
-              {/* Warehouse Filter */}
-              <div>
-                <Label className="text-[10px] font-bold uppercase text-muted-foreground mb-1 block">
-                  Warehouse
-                </Label>
-                <select
-                  value={warehouseFilter}
-                  onChange={(e) => setWarehouseFilter(e.target.value)}
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-xs shadow-sm focus:ring-2 focus:ring-primary font-semibold h-10"
-                >
-                  <option value="">All Warehouses</option>
-                  <option value="Bangalore FG Warehouse">Bangalore FG Warehouse</option>
-                  <option value="Main FG Depot">Main FG Depot</option>
-                  <option value="WH-01">WH-01</option>
-                </select>
-              </div>
+
             </div>
 
             <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t">

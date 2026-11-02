@@ -1,14 +1,16 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { useSearch, createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CheckCircle2,
+  Clock3,
   ChevronDown,
   CircleHelp,
   Eye,
   FileText,
   Loader2,
+  RefreshCw,
   Search,
   Trash2,
   Truck,
@@ -17,6 +19,7 @@ import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -41,12 +44,25 @@ const todayDate = () => {
 };
 
 const statuses: Record<string, string> = {
-  SUBMITTED: "bg-sky-50 text-sky-700 border-sky-200",
-  APPROVED: "bg-sky-50 text-sky-700 border-sky-200",
-  PENDING: "bg-amber-50 text-amber-700 border-amber-200",
-  CANCELLED: "bg-rose-50 text-rose-700 border-rose-200",
-  COMPLETED: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  VEHICLE_EXITED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  SUBMITTED: "supplier-status-submitted",
+  APPROVED: "supplier-status-active",
+  PENDING: "supplier-status-waiting",
+  AWAITING_DOCK: "supplier-status-waiting",
+  AWAITING_ARRIVAL: "supplier-status-waiting",
+  GATE_ENTRY_CREATED: "supplier-status-waiting",
+  DOCK_ALLOCATED: "supplier-status-active",
+  DOCK_ASSIGNED: "supplier-status-active",
+  RECEIVING: "supplier-status-active",
+  OCCUPIED: "supplier-status-active",
+  IN_PROGRESS: "supplier-status-active",
+  UNLOADING_IN_PROGRESS: "supplier-status-active",
+  QUALITY_INSPECTION_REQUIRED: "supplier-status-waiting",
+  GRN_PENDING: "supplier-status-waiting",
+  CANCELLED: "supplier-status-rejected",
+  REJECTED: "supplier-status-rejected",
+  COMPLETED: "supplier-status-complete",
+  GRN_POSTED: "supplier-status-complete",
+  VEHICLE_EXITED: "supplier-status-complete",
 };
 
 const statusDescriptions: Record<string, string> = {
@@ -94,6 +110,9 @@ function SupplierDashboard() {
   const [asnsLoading, setAsnsLoading] = useState(true);
   const [asnsError, setAsnsError] = useState("");
   const [query, setQuery] = useState("");
+  const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
+  useEffect(() => { if (typeof moduleSearchParams.search === "string") setQuery(moduleSearchParams.search); }, [moduleSearchParams.search]);
+  const [deliveryPage, setDeliveryPage] = useState(1);
   const [selected, setSelected] = useState<any>(null);
   const [trendDays, setTrendDays] = useState<7 | 30 | 90>(7);
 
@@ -362,6 +381,13 @@ function SupplierDashboard() {
       );
   }, [asns, query]);
 
+  const deliveryPageSize = 5;
+  const deliveryPageCount = Math.max(1, Math.ceil(rows.length / deliveryPageSize));
+  const currentDeliveryPage = Math.min(deliveryPage, deliveryPageCount);
+  const visibleDeliveries = rows.slice((currentDeliveryPage - 1) * deliveryPageSize, currentDeliveryPage * deliveryPageSize);
+  useEffect(() => { setDeliveryPage(1); }, [query]);
+  useEffect(() => { setDeliveryPage((page) => Math.min(page, deliveryPageCount)); }, [deliveryPageCount]);
+
   const submitted = asns.filter(
     (a) => String(a.status || "SUBMITTED").toUpperCase() === "SUBMITTED",
   ).length;
@@ -371,13 +397,13 @@ function SupplierDashboard() {
     {
       title: "Total deliveries",
       value: asns.length,
-      icon: FileText,
+      icon: Truck,
       tooltip: "Total number of delivery notices registered in the system.",
     },
     {
       title: "Awaiting arrival",
       value: submitted,
-      icon: Truck,
+      icon: Clock3,
       tooltip: "Delivery notices submitted and waiting for the vehicle to check in at the gate.",
     },
     {
@@ -447,6 +473,24 @@ function SupplierDashboard() {
     }));
   }, [asns, trendDays]);
 
+  const kpiCharts = useMemo(() => {
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const day = new Date();
+      day.setHours(0, 0, 0, 0);
+      day.setDate(day.getDate() - (6 - index));
+      return day;
+    });
+    return ["deliveries", "arrival", "vehicles"].map((kind) => days.map((day) => {
+      const matching = asns.filter((asn) => {
+        const date = new Date(asn.submitted_at || asn.created_at || asn.shipment_date || "");
+        return !Number.isNaN(date.getTime()) && date.toDateString() === day.toDateString();
+      });
+      if (kind === "vehicles") return new Set(matching.map((asn) => asn.vehicle_number).filter(Boolean)).size;
+      if (kind === "arrival") return matching.filter((asn) => String(asn.status || "SUBMITTED").toUpperCase() === "SUBMITTED").length;
+      return matching.length;
+    }));
+  }, [asns]);
+
   return (
     <TooltipProvider delayDuration={150}>
       <AppShell
@@ -454,11 +498,22 @@ function SupplierDashboard() {
         subtitle="Manage delivery notices and track incoming shipments."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              data-refresh-control="true"
+              aria-label="Refresh supplier dashboard"
+              title="Refresh supplier dashboard"
+              disabled={asnsLoading}
+              onClick={() => void loadAsns()}
+            >
+              {asnsLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            </Button>
             <button
               ref={deliveryHelpTriggerRef}
               type="button"
               onClick={() => setIsDeliveryHelpOpen(true)}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="supplier-guide-button inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               aria-haspopup="dialog"
               aria-expanded={isDeliveryHelpOpen}
               aria-controls="supplier-asn-help-dialog"
@@ -466,37 +521,25 @@ function SupplierDashboard() {
               <CircleHelp className="size-4 shrink-0" aria-hidden="true" />
               <span>Supplier Guide</span>
             </button>
-            <Tooltip delayDuration={150}>
-              <TooltipTrigger asChild>
-                <Link
-                  to="/supplier/asns/new"
-                  search={{ open: "create" }}
-                  className="inline-flex h-10 shrink-0 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                  <Truck className="mr-2 size-4" />
-                  Create ASN
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent
-                side="bottom"
-                align="end"
-                className="max-w-xs border border-border bg-popover text-xs text-popover-foreground shadow-soft"
-              >
-                Create a new Advance Shipping Notice to inform warehouse receiving of incoming goods
-                before truck arrival.
-              </TooltipContent>
-            </Tooltip>
+            <Link
+              to="/supplier/asns/new"
+              search={{ open: "create" }}
+              className="inline-flex h-10 shrink-0 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <Truck className="mr-2 size-4" />
+              Create ASN
+            </Link>
           </div>
         }
       >
-        <div className="space-y-5">
+        <div className="supplier-module-page supplier-visual-content space-y-5">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {metrics.map(({ title, value, icon: Icon, tooltip }) => (
+            {metrics.map(({ title, value, icon: Icon, tooltip }, metricIndex) => (
               <div
                 key={title}
-                className="flex min-h-24 items-center justify-between rounded-xl border border-border bg-card px-4 py-3.5"
+                className="supplier-visual-kpi flex min-h-24 items-center justify-between rounded-xl border border-border bg-card px-4 py-3.5"
               >
-                <div>
+                <div className="supplier-kpi-copy">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-medium text-muted-foreground">{title}</p>
                   </div>
@@ -518,14 +561,20 @@ function SupplierDashboard() {
                   </p>
                 </div>
 
-                <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <div className="supplier-kpi-icon flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <Icon className="size-4" aria-hidden="true" />
+                </div>
+                <div className="supplier-kpi-spark" role="img" aria-label={`${title}, last seven days: ${kpiCharts[metricIndex].join(", ")}`}>
+                  {kpiCharts[metricIndex].map((count, day) => (
+                    <span key={day} style={{ height: `${count > 0 ? Math.max(12, count / Math.max(1, ...kpiCharts[metricIndex]) * 100) : 3}%`, opacity: count > 0 ? 0.35 + day * 0.09 : 0.12 }} />
+                  ))}
                 </div>
               </div>
             ))}
           </div>
 
           {/* ASN History Table Section */}
+          <div className="supplier-dashboard-panels grid items-start gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
           <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -578,7 +627,6 @@ function SupplierDashboard() {
                     <th scope="col" className="px-3.5 py-3">
                       <div className="inline-flex items-center gap-1">
                         <span>Status</span>
-                        <InformationTooltip help="workflowStatus" />
                       </div>
                     </th>
                     <th scope="col" className="px-3.5 py-3">
@@ -633,7 +681,7 @@ function SupplierDashboard() {
                       </td>
                     </tr>
                   )}
-                  {rows.map((asn) => {
+                  {visibleDeliveries.map((asn) => {
                     const key = String(asn.id || asn.asn_number);
                     const status = String(asn.status || "SUBMITTED").toUpperCase();
                     return (
@@ -663,14 +711,14 @@ function SupplierDashboard() {
                         <td className="px-3.5 py-3">
                           <div className="inline-flex items-center gap-1.5">
                             <span
-                              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
+                              className={`supplier-delivery-status inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
                                 statuses[status] || "bg-muted text-muted-foreground border-border"
                               }`}
                             >
+                              <span className="supplier-status-dot" aria-hidden="true" />
                               {status.replaceAll("_", " ")}
                             </span>
-                            <InformationTooltip help="workflowStatus" />
-                          </div>
+                              </div>
                         </td>
                         <td className="px-3.5 py-3 text-muted-foreground">
                           {asn.created_at
@@ -709,14 +757,19 @@ function SupplierDashboard() {
               </table>
             </div>
 
-            <div className="mt-3 text-xs text-muted-foreground" aria-live="polite">
-              {query
-                ? `${rows.length} of ${asns.length} deliveries`
-                : `${rows.length} ${rows.length === 1 ? "delivery" : "deliveries"}`}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm text-muted-foreground">
+              <p aria-live="polite">
+                Showing {rows.length ? (currentDeliveryPage - 1) * deliveryPageSize + 1 : 0}–{Math.min(currentDeliveryPage * deliveryPageSize, rows.length)} of {rows.length} deliveries
+              </p>
+              <nav aria-label="Delivery history pagination" className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={currentDeliveryPage === 1 || asnsLoading} onClick={() => setDeliveryPage(currentDeliveryPage - 1)}>Previous</Button>
+                <span className="min-w-12 text-center text-xs" aria-current="page">{currentDeliveryPage} / {deliveryPageCount}</span>
+                <Button variant="outline" size="sm" disabled={currentDeliveryPage >= deliveryPageCount || asnsLoading} onClick={() => setDeliveryPage(currentDeliveryPage + 1)}>Next</Button>
+              </nav>
             </div>
           </section>
 
-          {/* Bottom: ASN Submission Trend */}
+          {/* ASN Submission Trend beside delivery history */}
           <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -725,30 +778,22 @@ function SupplierDashboard() {
                   Delivery notices submitted in the selected period.
                 </p>
               </div>
-              <label className="relative inline-flex h-10 items-center rounded-lg border border-border bg-background pl-3 pr-8 text-sm font-medium text-foreground transition-colors hover:border-slate-400 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 cursor-pointer">
-                <span className="sr-only">ASN activity range</span>
-                <span aria-hidden="true">
-                  {trendDays === 7
-                    ? "Last 7 Days"
-                    : trendDays === 30
-                      ? "Last 30 Days"
-                      : "Last 90 Days"}
-                </span>
-                <select
+              <Select
+                value={String(trendDays)}
+                onValueChange={(value) => setTrendDays(Number(value) as 7 | 30 | 90)}
+              >
+                <SelectTrigger
                   aria-label="ASN activity range"
-                  className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-                  value={trendDays}
-                  onChange={(event) => setTrendDays(Number(event.target.value) as 7 | 30 | 90)}
+                  className="h-11 w-[156px] gap-3 rounded-[10px] border-[#DFE7F0] bg-white text-sm font-medium text-[#172B4D] shadow-none hover:border-[#B3C8D9] focus:ring-2 focus:ring-[#0866B1]/20"
                 >
-                  <option value={7}>Last 7 Days</option>
-                  <option value={30}>Last 30 Days</option>
-                  <option value={90}>Last 90 Days</option>
-                </select>
-                <ChevronDown
-                  className="pointer-events-none absolute right-2.5 size-4 text-muted-foreground"
-                  aria-hidden="true"
-                />
-              </label>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="supplier-activity-range-menu rounded-xl border-[#DFE7F0] bg-white p-1 text-[#172B4D] shadow-[0_8px_24px_rgb(23_43_77_/_0.10)]">
+                  <SelectItem value="7">Last 7 Days</SelectItem>
+                  <SelectItem value="30">Last 30 Days</SelectItem>
+                  <SelectItem value="90">Last 90 Days</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {asnsLoading && asns.length === 0 ? (
@@ -787,8 +832,10 @@ function SupplierDashboard() {
             )}
           </section>
 
+          </div>
+
           <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
-            <DialogContent className="max-w-lg rounded-2xl bg-card p-6 shadow-2xl">
+            <DialogContent id="supplier-asn-details-dialog" className="max-w-lg rounded-2xl bg-card p-6 shadow-2xl">
               <DialogHeader>
                 <DialogTitle className="font-black text-lg text-primary">
                   ASN Details · {selected?.asn_number || "—"}
@@ -1192,14 +1239,6 @@ function SupplierDashboard() {
                 >
                   Close
                 </Button>
-                <Link
-                  to="/supplier/asns/new"
-                  search={{ open: "create" }}
-                  onClick={() => setIsDeliveryHelpOpen(false)}
-                  className="inline-flex h-10 items-center justify-center rounded-xl bg-sky-600 px-5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
-                >
-                  Create ASN
-                </Link>
               </div>
             </DialogContent>
           </Dialog>

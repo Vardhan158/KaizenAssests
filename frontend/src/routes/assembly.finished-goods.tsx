@@ -3,6 +3,7 @@ import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { AppShell } from "@/components/wms/app-shell";
+import { StatCard } from "@/components/wms/primitives";
 import { FgQrInput } from "@/components/wms/fg-qr-input";
 import {
   OriginalMaterialQrPreview,
@@ -22,7 +23,9 @@ import {
   Download,
   LayoutDashboard,
   Eye,
+  Factory,
   Layers3,
+  LockKeyhole,
   PackageCheck,
   Printer,
   QrCode,
@@ -47,7 +50,7 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/finished-goods")({
   beforeLoad: () =>
-    requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "STORE_MANAGER", "QUALITY"]),
+    requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "WAREHOUSE_OPERATOR", "QUALITY"]),
   head: () => ({ meta: [{ title: "Finished Goods · KaizenAssests" }] }),
   component: AssemblyFinishedGoodsPage,
 });
@@ -223,7 +226,7 @@ function AssemblyFinishedGoodsPage() {
     try {
       const res = await api.getAssemblyFinishedGoods({
         group_by: "product",
-      });
+      } as any);
       setItems(res || []);
     } catch (err: any) {
       if (!background)
@@ -324,20 +327,28 @@ function AssemblyFinishedGoodsPage() {
     if (!search.trim()) return items;
     const q = search.toLowerCase().trim();
     return items.filter(
-      (fg) =>
+      (fg: any) =>
         fg.order_number?.toLowerCase().includes(q) ||
         fg.product_name?.toLowerCase().includes(q) ||
         fg.product_code?.toLowerCase().includes(q) ||
         fg.serial_number?.toLowerCase().includes(q) ||
         fg.batch_number?.toLowerCase().includes(q) ||
         fg.location_code?.toLowerCase().includes(q) ||
-        fg.batches?.some((batch) =>
+        fg.batches?.some((batch: any) =>
           [batch.batch_number, batch.order_number, batch.serial_number, batch.location_code].some(
             (value) => value?.toLowerCase().includes(q),
           ),
         ),
     );
   }, [items, search]);
+  const [listPage, setListPage] = useState(1);
+  const listPageCount = Math.max(1, Math.ceil(filteredItems.length / 10));
+  const currentListPage = Math.min(listPage, listPageCount);
+  const listStart = (currentListPage - 1) * 10;
+  const pagedRows = filteredItems.slice(listStart, listStart + 10);
+  useEffect(() => { setListPage(1); }, [search]);
+  useEffect(() => { setListPage(page => Math.min(page, listPageCount)); }, [listPageCount]);
+
 
   const detailBatches = useMemo(() => {
     const timestamp = (batch: AssemblyFinishedGoodItem) => {
@@ -345,7 +356,7 @@ function AssemblyFinishedGoodsPage() {
       return Number.isFinite(value) ? value : Infinity;
     };
     return detailsFg
-      ? [...(detailsFg.batches || [detailsFg])].sort(
+      ? [...((detailsFg as any).batches || [detailsFg])].sort(
           (a, b) => timestamp(a) - timestamp(b) || a.id.localeCompare(b.id),
         )
       : [];
@@ -375,32 +386,39 @@ function AssemblyFinishedGoodsPage() {
             <ShieldCheck className="size-3.5 text-purple-500" />
             Quality Checks
           </Button>
-          <Button
+          <Button data-refresh-control="true" aria-label="Refresh" title="Refresh"
             variant="outline"
             size="sm"
             onClick={() => fetchItems(true)}
             disabled={refreshing}
             className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80"
           >
-            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} />
-            Refresh
-          </Button>
+            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} /></Button>
         </div>
       }
     >
       <div className="min-w-0 space-y-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard compact label="Products" value={items.length.toLocaleString()} delta="Finished-good SKUs" icon={Layers3} tone="primary" />
+          <StatCard compact label="Produced" value={items.reduce((sum, item) => sum + Number((item as any).produced_quantity ?? item.quantity ?? 0), 0).toLocaleString()} delta="Total manufactured quantity" icon={Factory} tone="teal" />
+          <StatCard compact label="Available" value={items.reduce((sum, item) => sum + Number((item as any).available_quantity ?? item.quantity ?? 0), 0).toLocaleString()} delta="Ready for customer dispatch" icon={PackageCheck} tone="success" />
+          <StatCard compact label="Reserved" value={items.reduce((sum, item) => sum + Number((item as any).reserved_quantity ?? 0), 0).toLocaleString()} delta="Allocated finished-goods stock" icon={LockKeyhole} tone="warning" />
+        </div>
         <FgLoading />
         {/* Main Work Center Table Card */}
         <div className="min-w-0 rounded-2xl border border-border/70 bg-card p-5 shadow-soft space-y-4">
           {/* Header & Controls */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-border/60">
-            <p className="text-xs text-muted-foreground">
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-semibold"><PackageCheck className="size-5 text-primary" />Finished goods inventory</h2>
+              <p className="text-sm text-muted-foreground">
               Showing <strong className="text-foreground">{filteredItems.length}</strong> of{" "}
               {items.length} products
-            </p>
+              </p>
+            </div>
 
             {/* Search input */}
-            <div className="relative w-full sm:w-80 sm:shrink-0">
+            <div className="relative w-full sm:w-96 sm:shrink-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <input
                 type="text"
@@ -408,7 +426,7 @@ function AssemblyFinishedGoodsPage() {
                 placeholder="Search batch, product or order..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-xl border border-border bg-card pl-8 pr-7 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
+                className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
               />
               {search && (
                 <button
@@ -456,7 +474,8 @@ function AssemblyFinishedGoodsPage() {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border/70">
-              <table className="w-full min-w-[800px] text-left text-xs">
+              <table className="w-full min-w-[980px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle [&_td]:tabular-nums">
+                <colgroup><col className="w-[23%]" /><col className="w-[11%]" /><col className="w-[11%]" /><col className="w-[11%]" /><col className="w-[11%]" /><col className="w-[20%]" /><col className="w-[13%]" /></colgroup>
                 <thead className="bg-muted/50">
                   <tr className="border-b border-border/70 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     <th scope="col" className="py-3 px-4">
@@ -484,11 +503,16 @@ function AssemblyFinishedGoodsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {filteredItems.map((fg) => (
+                  {pagedRows.map((fg) => {
+                    const available = Number(fg.available_quantity ?? fg.quantity ?? 0);
+                    const reserved = Number(fg.reserved_quantity ?? 0);
+                    const dispatched = Number(fg.dispatched_quantity ?? 0);
+                    const productStatus = available > 0 ? "AVAILABLE" : reserved > 0 ? "RESERVED" : "OUT OF STOCK";
+                    return (
                     <tr key={fg.id} className="group hover:bg-muted/40 transition-colors">
                       {/* Product */}
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-foreground text-xs">
+                      <td className="py-4 px-4">
+                        <div className="font-semibold text-foreground">
                           {fg.product_name}
                         </div>
                         <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
@@ -497,10 +521,10 @@ function AssemblyFinishedGoodsPage() {
                       </td>
 
                       {[
-                        fg.produced_quantity ?? fg.quantity,
-                        fg.available_quantity ?? fg.quantity,
-                        fg.reserved_quantity ?? 0,
-                        fg.dispatched_quantity ?? 0,
+                        (fg as any).produced_quantity ?? fg.quantity,
+                        (fg as any).available_quantity ?? fg.quantity,
+                        (fg as any).reserved_quantity ?? 0,
+                        (fg as any).dispatched_quantity ?? 0,
                       ].map((quantity, index) => (
                         <td
                           key={index}
@@ -516,12 +540,16 @@ function AssemblyFinishedGoodsPage() {
                         <span
                           className={cn(
                             "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
-                            (fg.available_quantity ?? 0) > 0
+                            available > 0
                               ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : reserved > 0
+                              ? "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                              : dispatched > 0
+                              ? "border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300"
                               : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300",
                           )}
                         >
-                          {(fg.available_quantity ?? 0) > 0 ? "AVAILABLE" : "OUT OF STOCK"}
+                          {productStatus}
                         </span>
                         {((fg.batches || [fg]) as any[]).filter(b => b.main_fg_id).map(b => <p key={b.id} className="mt-1 text-[11px]">{b.main_fg_id}: {b.dispatch_status} ({b.dispatched_sections}/8)</p>)}
                       </td>
@@ -543,30 +571,39 @@ function AssemblyFinishedGoodsPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
+          {!loading && filteredItems.length > 0 && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
+            <p className="text-muted-foreground">Showing {listStart + 1} to {Math.min(listStart + 10, filteredItems.length)} of {filteredItems.length} products</p>
+            <nav aria-label="Products pagination" className="flex items-center gap-3">
+              <Button className="rounded-xl" size="sm" variant="outline" disabled={currentListPage === 1} onClick={() => setListPage(currentListPage - 1)}>Previous</Button>
+              <span className="min-w-16 text-center text-xs font-medium">{currentListPage} / {listPageCount}</span>
+              <Button className="rounded-xl" size="sm" variant="outline" disabled={currentListPage === listPageCount} onClick={() => setListPage(currentListPage + 1)}>Next</Button>
+            </nav>
+          </div>}
         </div>
 
         {/* ========================================================================= */}
         <Dialog open={!!detailsFg} onOpenChange={(open) => !open && setDetailsFg(null)}>
-          <DialogContent className="flex w-[calc(100vw-2rem)] max-w-4xl max-h-[85dvh] flex-col gap-0 overflow-hidden rounded-2xl p-0">
-            <DialogHeader className="shrink-0 border-b border-border/60 p-5 pr-10">
-              <DialogTitle>Finished Goods Details</DialogTitle>
+          <DialogContent className="flex w-[calc(100vw-2rem)] max-w-6xl max-h-[90dvh] flex-col gap-0 overflow-hidden rounded-2xl p-0">
+            <DialogHeader className="shrink-0 border-b border-border/60 bg-gradient-to-r from-primary/5 via-background to-background p-6 pr-12">
+              <DialogTitle className="flex items-center gap-2 text-xl"><PackageCheck className="size-5 text-primary" />Finished Goods Details</DialogTitle>
               <DialogDescription className="text-xs">
                 {detailsFg?.product_name} ({detailsFg?.product_code})
               </DialogDescription>
-              <dl className="grid grid-cols-3 gap-3 pt-3 text-left text-xs">
+              <dl className="grid grid-cols-1 gap-3 pt-4 text-left text-xs sm:grid-cols-3">
                 {[
-                  ["Produced", detailsFg?.produced_quantity ?? detailsFg?.quantity],
-                  ["Available", detailsFg?.available_quantity],
-                  ["Reserved", detailsFg?.reserved_quantity],
+                  ["Produced", (detailsFg as any)?.produced_quantity ?? detailsFg?.quantity],
+                  ["Available", (detailsFg as any)?.available_quantity],
+                  ["Reserved", (detailsFg as any)?.reserved_quantity],
                 ].map(([label, value]) => (
-                  <div key={String(label)} className="rounded-xl bg-muted/40 p-3">
-                    <dt className="text-muted-foreground">{label}</dt>
-                    <dd className="mt-1 font-semibold text-foreground">
+                  <div key={String(label)} className="rounded-xl border border-border/60 bg-background/90 p-4 shadow-sm">
+                    <dt className="font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+                    <dd className="mt-1 text-lg font-bold tabular-nums text-foreground">
                       {value == null ? "Unavailable" : Number(value).toLocaleString()}{" "}
                       {detailsFg?.uom}
                     </dd>
@@ -574,12 +611,13 @@ function AssemblyFinishedGoodsPage() {
                 ))}
               </dl>
             </DialogHeader>
-            <div className="min-h-0 flex-1 overflow-auto px-5 pb-4">
-              <p className="py-3 text-xs text-muted-foreground">
+            <div className="min-h-0 flex-1 overflow-auto px-6 pb-5">
+              <p className="my-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-200">
                 FIFO: oldest stock received first, matching dispatch allocation. Zero available
                 stock cannot be newly allocated.
               </p>
-              <table className="w-full min-w-[650px] text-left text-xs">
+              <div className="overflow-x-auto rounded-xl border border-border/70"><table className="w-full min-w-[980px] table-fixed text-left text-xs">
+                <colgroup><col className="w-[21%]" /><col className="w-[14%]" /><col className="w-[12%]" /><col className="w-[12%]" /><col className="w-[16%]" /><col className="w-[25%]" /></colgroup>
                 <thead className="sticky top-0 z-10 bg-muted text-[11px] uppercase text-muted-foreground">
                   <tr>
                     {[
@@ -601,11 +639,14 @@ function AssemblyFinishedGoodsPage() {
                     const expanded = expandedBatches.includes(batch.id);
                     const available = Number(batch.available_quantity ?? batch.quantity);
                     const reserved = Number(batch.reserved_quantity ?? 0);
+                    const batchStatus = reserved > 0
+                      ? available > 0 ? "Partially Reserved" : "Reserved for Dispatch"
+                      : available > 0 ? "Available" : "Out of stock";
                     return (
                       <Fragment key={batch.id}>
-                        <tr className="align-top">
-                          <td className="px-3 py-3">
-                            <p className="font-mono font-semibold">
+                        <tr className="align-middle hover:bg-muted/20">
+                          <td className="px-4 py-4">
+                            <p className="break-all font-mono font-semibold leading-5">
                               {batch.batch_number || batch.serial_number || batch.order_number}
                             </p>
                             <button
@@ -646,21 +687,15 @@ function AssemblyFinishedGoodsPage() {
                                     : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300",
                               )}
                             >
-                              {reserved > 0
-                                ? available > 0
-                                  ? "Partially Reserved"
-                                  : "Reserved for Dispatch"
-                                : available > 0
-                                  ? "Available"
-                                  : "Out of stock"}
+                              {batchStatus}
                             </span>
                           </td>
-                          <td className="px-3 py-3 text-right">
-                            <div className="flex flex-wrap justify-end gap-2">
+                          <td className="px-4 py-4">
+                            <div className="ml-auto grid max-w-56 gap-2">
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="h-8 rounded-xl text-xs gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50"
+                                className="h-8 w-full justify-start rounded-xl text-xs gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50"
                                 onClick={() => setTraceabilityFg(batch)}
                               >
                                 <Layers3 className="size-3.5" />
@@ -669,7 +704,7 @@ function AssemblyFinishedGoodsPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="h-8 rounded-xl text-xs gap-1.5"
+                                className="h-8 w-full justify-start rounded-xl text-xs gap-1.5"
                                 onClick={() => {
                                   setScannedQr("");
                                   setScanError(null);
@@ -681,7 +716,7 @@ function AssemblyFinishedGoodsPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="h-8 rounded-xl text-xs gap-1.5"
+                                className="h-8 w-full justify-start rounded-xl text-xs gap-1.5"
                                 onClick={() => {
                                   setDetailsFg(null);
                                   void handleOpenPrintModal(batch);
@@ -738,7 +773,7 @@ function AssemblyFinishedGoodsPage() {
                     );
                   })}
                 </tbody>
-              </table>
+              </table></div>
             </div>
             <DialogFooter className="shrink-0 border-t border-border/60 px-5 py-3">
               <Button
@@ -1208,31 +1243,34 @@ function AssemblyFinishedGoodsPage() {
         {/* PRINT QR LABEL MODAL */}
         {/* ========================================================================= */}
         <Dialog open={!!selectedFg} onOpenChange={(open) => !open && setSelectedFg(null)}>
-          <DialogContent className="max-w-md p-6 rounded-2xl">
-            <DialogHeader className="border-b border-border/60 pb-3">
-              <DialogTitle className="flex items-center gap-2 text-foreground text-lg font-bold">
-                <Tag className="size-5 text-primary" />
+          <DialogContent className="flex max-h-[92dvh] w-[calc(100vw-2rem)] max-w-6xl flex-col gap-0 overflow-hidden rounded-2xl p-0">
+            <DialogHeader className="shrink-0 border-b border-border/60 bg-gradient-to-r from-primary/5 via-background to-background px-6 py-5 pr-12">
+              <DialogTitle className="flex items-center gap-2 text-xl font-bold text-foreground">
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10"><Tag className="size-5 text-primary" /></span>
                 Finished Goods QR Identification Label
               </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground mt-1">
+              <DialogDescription className="ml-11 mt-1 max-w-2xl text-sm text-muted-foreground">
                 Print the FG batch QR identification label for Assembly storage and customer
                 dispatch.
               </DialogDescription>
             </DialogHeader>
 
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {labelLoading ? (
               <div className="py-12 text-center text-xs text-muted-foreground space-y-2">
                 <RefreshCw className="size-6 animate-spin text-primary mx-auto" />
                 <p>Generating barcode & QR matrix...</p>
               </div>
             ) : selectedFg ? (
-              <div className="space-y-4 pt-2">
+              <div className="space-y-6">
                 <FgSections sections={(selectedFg as any).sections} />
                 {/* Visual Label Preview */}
-                <div
-                  ref={printRef}
-                  className="rounded-2xl border-2 border-dashed border-border bg-card p-5 text-card-foreground shadow-2xs space-y-3"
-                >
+                <section className="mx-auto max-w-xl space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div><h3 className="text-sm font-semibold">Main finished-good label</h3><p className="text-xs text-muted-foreground">Print-ready batch identification label</p></div>
+                    <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700">QC Certified</Badge>
+                  </div>
+                <div ref={printRef} className="space-y-3 rounded-2xl border-2 border-dashed border-border bg-card p-5 text-card-foreground shadow-sm">
                   <div className="border-b-2 border-border pb-2 text-center">
                     <span className="text-[10px] font-black uppercase tracking-widest text-primary">
                       KaizenAssests Assembly Execution
@@ -1301,10 +1339,13 @@ function AssemblyFinishedGoodsPage() {
                     ✓ QC CERTIFIED - READY FOR CUSTOMER DISPATCH
                   </div>
                 </div>
+                </section>
               </div>
             ) : null}
+            </div>
 
-            <DialogFooter className="pt-2">
+            <DialogFooter className="shrink-0 border-t border-border/60 bg-background px-6 py-4">
+              <Button variant="ghost" size="sm" onClick={() => setSelectedFg(null)} className="rounded-xl">Close</Button>
               <Button
                 variant="outline"
                 size="sm"

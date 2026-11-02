@@ -1,5 +1,5 @@
 import unittest
-from app.modules.store.infrastructure.api.location_router import _next_alphabetic_zone_code
+from app.modules.warehouse.infrastructure.api.location_router import _next_alphabetic_zone_code
 
 class AlphabeticZoneCodeTests(unittest.TestCase):
     def test_first_zone(self):

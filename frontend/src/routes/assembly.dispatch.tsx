@@ -1,5 +1,5 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { PackageQrActions } from "@/components/wms/package-qr-actions";
@@ -31,6 +31,7 @@ type Section = {
 };
 type Pickup = {
   id: string;
+  fg_id?: string | null;
   request_number: string;
   supplier_name?: string;
   product_name: string;
@@ -42,6 +43,8 @@ type Pickup = {
   dispatch_id?: string;
   dispatch_status?: string;
   requested_on?: string;
+  created_at?: string;
+  submitted_at?: string;
   priority_rank?: number | null;
   workflow_status?: string;
   processing_group?: "0" | "1" | "2" | "COMPLETE";
@@ -192,10 +195,15 @@ function AssemblyDispatchPage() {
     if (!isCurrent()) return (result || []) as Pickup[];
     setRequests(
       [...(result || [])].sort(
-        (a: Pickup, b: Pickup) =>
-          (a.priority_rank ?? Infinity) - (b.priority_rank ?? Infinity) ||
-          (a.requested_on || "").localeCompare(b.requested_on || "") ||
-          a.id.localeCompare(b.id),
+        (a: Pickup, b: Pickup) => {
+          const requestTime = (request: Pickup) => {
+            const value = Date.parse(request.requested_on || request.created_at || request.submitted_at || "");
+            return Number.isNaN(value) ? 0 : value;
+          };
+          return requestTime(b) - requestTime(a) ||
+            String(b.request_number || "").localeCompare(String(a.request_number || ""), undefined, { numeric: true }) ||
+            b.id.localeCompare(a.id);
+        },
       ),
     );
     setError("");
@@ -360,16 +368,14 @@ function AssemblyDispatchPage() {
       title="FG Dispatch"
       subtitle="Supplier pickup verification, picking, packing and loading from the Assembly FG Area"
       actions={
-        <Button
+        <Button data-refresh-control="true" aria-label="Refresh" title="Refresh"
           variant="outline"
           size="sm"
           className="rounded-xl gap-2"
           disabled={busy || loading}
           onClick={() => void act(async () => {})}
         >
-          <RefreshCw className="size-4" />
-          Refresh
-        </Button>
+          <RefreshCw className="size-4" /></Button>
       }
     >
       <div className="min-w-0 space-y-5">
@@ -385,7 +391,11 @@ function AssemblyDispatchPage() {
           className="min-w-0 rounded-2xl border border-border/70 bg-card p-4 sm:p-5 shadow-soft space-y-4"
           aria-label="Supplier pickup requests"
         >
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="border-b border-border/60 pb-4">
+            <h2 className="text-lg font-semibold">Dispatch requests</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Review pickup requests and track dispatch progress.</p>
+          </div>
+          <div className="flex flex-col items-stretch justify-between gap-4 xl:flex-row xl:items-center">
             <div role="group" aria-label="Dispatch status" className="flex flex-wrap gap-2">
               {[
                 ["ALL", "All"],
@@ -398,7 +408,7 @@ function AssemblyDispatchPage() {
                   key={key}
                   size="sm"
                   variant={filter === key ? "default" : "outline"}
-                  className="rounded-xl text-xs"
+                  className="min-h-10 rounded-xl px-3 text-sm"
                   aria-pressed={filter === key}
                   onClick={() => setFilter(key!)}
                 >
@@ -406,14 +416,14 @@ function AssemblyDispatchPage() {
                 </Button>
               ))}
             </div>
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+            <div className="relative w-full min-w-0 xl:w-96 xl:shrink-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
                 aria-label="Search dispatch requests"
                 placeholder="Search request, supplier or vehicle..."
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="pl-9 rounded-xl text-xs"
+                className="h-11 pl-9 rounded-xl text-sm"
               />
             </div>
           </div>
@@ -423,7 +433,7 @@ function AssemblyDispatchPage() {
             </p>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border/70">
-              <table className="w-full min-w-[750px] text-left text-xs">
+              <table className="w-full min-w-[900px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
                 <thead className="bg-muted/50 text-[11px] uppercase text-muted-foreground">
                   <tr>
                     {[
@@ -983,13 +993,26 @@ function AssemblyDispatchPage() {
               </p>
             ) : (
               <>
-                {step === 0 && selected.next_to_process === false && (
+                {step === 0 && selected.fg_id && (
+                  <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+                    <p className="font-semibold">Transport-section pickup</p>
+                    <p>
+                      This request uses the finished-good section flow, so FIFO allocation is not
+                      required. Gate Security must record the vehicle arrival first. The section QR
+                      codes can then be verified and loaded from Finished Goods Records.
+                    </p>
+                    <Button asChild className="rounded-xl">
+                      <Link to="/assembly/finished-goods">Open Finished Goods Records</Link>
+                    </Button>
+                  </div>
+                )}
+                {step === 0 && !selected.fg_id && selected.next_to_process === false && (
                   <p role="status" className="text-xs text-muted-foreground">
                     {selected.priority_reason ||
                       "An older eligible request must be allocated first. Open the request marked Next to Process."}
                   </p>
                 )}
-                {step === 0 && (
+                {step === 0 && !selected.fg_id && (
                   <div className="space-y-3">
                     <label className="flex items-start gap-2 text-xs">
                       <input
@@ -1029,6 +1052,7 @@ function AssemblyDispatchPage() {
                             <th className="p-3">FIFO Batch</th>
                             <th className="p-3 text-right">Quantity</th>
                             <th className="p-3 text-right">Verification</th>
+                            <th className="p-3 text-right">QR Label</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1045,6 +1069,9 @@ function AssemblyDispatchPage() {
                                   ? "Verified"
                                   : "Scan required"}
                               </td>
+                              <td className="p-3 text-right">
+                                <PackageQrActions packageNumber={batch.qr_code} title="Finished Goods QR" buttonLabel="View FG QR" />
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1052,6 +1079,9 @@ function AssemblyDispatchPage() {
                     </div>
                     {!picked ? (
                       <>
+                        <p className="text-xs text-muted-foreground">
+                          Scan a finished-goods label for one of the allocated FIFO batches. Raw-material QR labels are not accepted here.
+                        </p>
                         <FgQrInput value={qr} onChange={setQr} disabled={busy} />
                         <div className="flex flex-wrap gap-2">
                           <Button
@@ -1065,7 +1095,7 @@ function AssemblyDispatchPage() {
                                 );
                                 if (!batch)
                                   throw new Error(
-                                    "Scan a finished-goods QR allocated to this request",
+                                    "This QR does not match an allocated finished good. Use View FG QR on one of the listed FIFO batches, then scan that label.",
                                   );
                                 const result = await api.scanAllocatedFinishedGoods(
                                   dispatch.id,

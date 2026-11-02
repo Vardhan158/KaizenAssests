@@ -13,6 +13,7 @@ import {
   Boxes,
   CheckCircle2,
   ClipboardList,
+  Info,
   Clock3,
   DoorOpen,
   Download,
@@ -25,6 +26,7 @@ import {
   Camera,
   Mail,
   PackageCheck,
+  Phone,
   Plus,
   Printer,
   QrCode,
@@ -64,6 +66,7 @@ import {
   QrNotFoundModal,
   type QrScanResultData,
 } from "@/components/wms/qr-scan-result-modal";
+import { AdminTablePagination } from "@/components/admin/admin-table-pagination";
 
 export const Route = createFileRoute("/grn")({
   validateSearch: (
@@ -75,7 +78,9 @@ export const Route = createFileRoute("/grn")({
     gatePassId?: string;
     dock?: string;
     po?: string;
+    search?: string;
   } => ({
+    search: typeof search.search === "string" ? search.search : undefined,
     tab: (search.tab as string) || "dashboard",
     page: Number(search.page) || 1,
     grn_id:
@@ -141,6 +146,7 @@ type GrnHeaderState = {
   supplier_company_name: string;
   supplier_email?: string;
   asn_number: string;
+  gate_entry_id?: string;
   gate_entry_number: string;
   warehouse_name: string;
   receiving_dock: string;
@@ -204,6 +210,21 @@ function formatCardDate(dateVal?: string | null): string {
   }
 }
 
+const formatApiDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}Z`).toLocaleString();
+};
+
+const normalizeVehicleKey = (value: unknown) =>
+  String(value || "").replace(/[\s-]/g, "").toUpperCase();
+
+const isCompletedGrnStatus = (value: unknown) =>
+  ["COMPLETED", "POSTED", "RECEIVING_COMPLETE", "RECEIVING_COMPLETED", "APPROVED", "ACCEPTED"].includes(
+    String(value || "").trim().toUpperCase(),
+  );
+
 function isUuidString(val?: string | null): boolean {
   if (!val) return false;
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
@@ -243,6 +264,8 @@ function normalizeGrnRecord(r: any) {
     po_id: r.po_id || r.poId || "",
     asn_id: r.asn_id || r.asnId || "",
     asn_number: r.asn_number || r.asnNumber || "",
+    gate_entry_id: r.gate_entry_id || r.gateEntryId || "",
+    gate_entry_number: r.gate_entry_number || r.gateEntryNumber || "",
     supplier_name: resolvedSupplierName,
     supplier_company_name: rawCompanyName || resolvedSupplierName,
     supplier_email: r.supplier_email || r.supplierEmail || "",
@@ -311,6 +334,14 @@ function GrnPageWorkflow() {
     }
   }, [search.tab, search.page, search.gatePassId, search.dock, search.po]);
 
+  useEffect(() => {
+    if (search.tab && search.tab !== "wizard") {
+      sessionRestoreRequest.current += 1;
+      resumeRequest.current = null;
+      setLoadingContext(false);
+    }
+  }, [search.tab]);
+
   // User Info (Client-Side Safe for SSR)
   const [loggedInUserName, setLoggedInUserName] = useState<string>("GRN Officer");
   useEffect(() => {
@@ -324,7 +355,9 @@ function GrnPageWorkflow() {
   const [deletingGrn, setDeletingGrn] = useState(false);
   const [totalRecordCount, setTotalRecordCount] = useState<number>(0);
   const [loadingRecords, setLoadingRecords] = useState(false);
+  const [recordsLoadError, setRecordsLoadError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  useEffect(() => { if (search.search !== undefined) setSearchTerm(search.search); }, [search.search]);
 
   // Page 1 - Header Form State
   const [header, setHeader] = useState<GrnHeaderState>({
@@ -345,10 +378,19 @@ function GrnPageWorkflow() {
   });
 
   const contextRequest = useRef(0);
+  const vehicleDraftRequest = useRef(0);
+  const completedGrnConflictRef = useRef(false);
   const saveLock = useRef(false);
   const resumeRequest = useRef<string | null>(null);
+  const sessionRestoreRequest = useRef(0);
+  // Async draft restoration can finish after the user selects Dashboard or
+  // History. Track the live URL tab during render so a stale restore request
+  // can never redirect the page back to Create GRN.
+  const routeTabRef = useRef(search.tab);
+  routeTabRef.current = search.tab;
   const [grnId, setGrnId] = useState<string | null>(null);
   const [dockOptions, setDockOptions] = useState<any[]>([]);
+  const [asnVehicleArrivals, setAsnVehicleArrivals] = useState<any[]>([]);
   const [loadingContext, setLoadingContext] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
   const [dockReleasePrompt, setDockReleasePrompt] = useState<string | null>(null);
@@ -821,8 +863,25 @@ function GrnPageWorkflow() {
 
   // Dashboard & Detail Drawer State
   const [selectedGrnDetail, setSelectedGrnDetail] = useState<any | null>(null);
+  const [detailDockInfo, setDetailDockInfo] = useState<{
+    dock: any | null;
+    allocation: any | null;
+    isReleased: boolean;
+    loading: boolean;
+    releasing: boolean;
+  }>({
+    dock: null,
+    allocation: null,
+    isReleased: true,
+    loading: false,
+    releasing: false,
+  });
+  const [detailGateEntry, setDetailGateEntry] = useState<any | null>(null);
   const [dashboardStatusFilter, setDashboardStatusFilter] = useState<string>("ALL");
+  const [receiptPage, setReceiptPage] = useState(1);
+  const [activityLimit, setActivityLimit] = useState(5);
   const [recordsStatusFilter, setRecordsStatusFilter] = useState<string>("ALL");
+  const [recordsPage, setRecordsPage] = useState(1);
   const [showAssignDockModal, setShowAssignDockModal] = useState(false);
   const [assigningDockId, setAssigningDockId] = useState("");
   const [assigningVehicle, setAssigningVehicle] = useState("");
@@ -870,9 +929,26 @@ function GrnPageWorkflow() {
     );
   };
 
+  const dashboardReceipts = grnRecords.filter((record) =>
+    isRecordMatchingSearch(record, searchTerm) && isRecordMatchingStatus(record.status, dashboardStatusFilter));
+  const filteredGrnRecords = grnRecords.filter((record) =>
+    isRecordMatchingSearch(record, searchTerm) && isRecordMatchingStatus(record.status, recordsStatusFilter));
+  const recordsPageCount = Math.max(1, Math.ceil(filteredGrnRecords.length / 10));
+  const currentRecordsPage = Math.min(recordsPage, recordsPageCount);
+  const visibleGrnRecords = filteredGrnRecords.slice((currentRecordsPage - 1) * 10, currentRecordsPage * 10);
+  useEffect(() => { setRecordsPage(1); }, [searchTerm, recordsStatusFilter]);
+  useEffect(() => { setRecordsPage((page) => Math.min(page, recordsPageCount)); }, [recordsPageCount]);
+  const receiptPageSize = 5;
+  const receiptPageCount = Math.max(1, Math.ceil(dashboardReceipts.length / receiptPageSize));
+  const currentReceiptPage = Math.min(receiptPage, receiptPageCount);
+  const visibleDashboardReceipts = dashboardReceipts.slice((currentReceiptPage - 1) * receiptPageSize, currentReceiptPage * receiptPageSize);
+  useEffect(() => { setReceiptPage(1); }, [searchTerm, dashboardStatusFilter]);
+  useEffect(() => { setReceiptPage((page) => Math.min(page, receiptPageCount)); }, [receiptPageCount]);
+
   // Fetch Records
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
+    setRecordsLoadError("");
     try {
       const res = await api.getGrns({ limit: 200 });
       if (res && Array.isArray(res.items)) {
@@ -889,12 +965,40 @@ function GrnPageWorkflow() {
       }
     } catch (err: any) {
       console.warn("API loadRecords fallback:", err);
-      setGrnRecords([]);
-      setTotalRecordCount(0);
+      setRecordsLoadError(err?.message || "The GRN records service could not be reached.");
     } finally {
       setLoadingRecords(false);
     }
   }, []);
+
+  async function openCompletedGrnHistory(grnNumber: string): Promise<void> {
+    completedGrnConflictRef.current = true;
+    vehicleDraftRequest.current += 1;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    setGrnId(null);
+    localStorage.removeItem("active_grn_id");
+    setSaveStatus("idle");
+    setActiveTab("records");
+    setRecordsPage(1);
+    void navigate({ to: "/grn", search: { tab: "records", page: 1 } });
+    void loadRecords();
+
+    try {
+      const detail = await api.getGrnDetail(grnNumber);
+      if (detail) setSelectedGrnDetail(normalizeGrnRecord(detail));
+    } catch (detailError) {
+      console.warn("Could not open completed GRN details:", detailError);
+    }
+    toast.info(`This vehicle has already been received as ${grnNumber}. Opened GRN History.`);
+  }
+
+  async function openExistingCompletedGrn(error: unknown): Promise<boolean> {
+    const message = error instanceof Error ? error.message : String(error || "");
+    const grnNumber = message.match(/ASN already received under\s+(GRN-[A-Z0-9-]+)/i)?.[1];
+    if (!grnNumber) return false;
+    await openCompletedGrnHistory(grnNumber);
+    return true;
+  }
 
   useEffect(() => {
     if (activeTab === "dashboard" || activeTab === "records") {
@@ -944,6 +1048,7 @@ function GrnPageWorkflow() {
   useEffect(() => {
     const urlGrnId = String((search as any).grn_id || "").toLowerCase();
     if (
+      search.tab !== "wizard" ||
       activeTab !== "wizard" ||
       !grnId ||
       (urlGrnId && urlGrnId !== "undefined" && urlGrnId !== "null")
@@ -954,7 +1059,103 @@ function GrnPageWorkflow() {
       search: { tab: "wizard", page: currentPage, grn_id: grnId },
       replace: true,
     });
-  }, [activeTab, grnId, (search as any).grn_id, currentPage, navigate]);
+  }, [search.tab, activeTab, grnId, (search as any).grn_id, currentPage, navigate]);
+
+  async function selectInboundVehicle(arrivalId: string) {
+    const arrival = asnVehicleArrivals.find(
+      (item) => String(item.id || item.gate_entry_number) === arrivalId,
+    );
+    if (!arrival) return;
+    const completedForArrival = grnRecords.some(
+      (record) =>
+        normalizeVehicleKey(record.vehicle_number) === normalizeVehicleKey(arrival.vehicle_number) &&
+        String(record.asn_number || record.asnNumber || "").trim().toUpperCase() ===
+          String(header.asn_number || "").trim().toUpperCase() &&
+        isCompletedGrnStatus(record.status),
+    );
+    if (completedForArrival) {
+      toast.error("This vehicle is already linked to a completed GRN for this ASN.");
+      return;
+    }
+    completedGrnConflictRef.current = false;
+    const requestId = ++vehicleDraftRequest.current;
+    setGrnId(null);
+    localStorage.removeItem("active_grn_id");
+    setHeader((previous) => ({
+      ...previous,
+      grn_number: "Assigning GRN number...",
+      gate_entry_number: arrival.gate_entry_number || previous.gate_entry_number,
+      gate_entry_id: arrival.id || previous.gate_entry_id,
+      vehicle_number: arrival.vehicle_number || "",
+      driver_name: arrival.driver_name || "",
+      receiving_dock: arrival.dock_number || arrival.assigned_dock_id || "",
+    }));
+
+    const vehicleLines: GrnLineItem[] = (Array.isArray(arrival.expected_materials)
+      ? arrival.expected_materials
+      : []).map((line: any) => {
+      const poQuantity = Number(line.quantity ?? line.shipped_quantity ?? line.po_quantity ?? 0);
+      const receivedQuantity = Number(line.received_quantity ?? 0);
+      return {
+        material_name: line.material_name || line.item_code || "Material",
+        item_code: line.item_code || line.material_code || "",
+        po_quantity: poQuantity,
+        received_quantity: receivedQuantity,
+        good_quantity: Number(line.good_quantity ?? 0),
+        damaged_quantity: Number(line.damaged_quantity ?? 0),
+        balance_quantity: Math.max(poQuantity - receivedQuantity, 0),
+        uom: line.uom || "PCS",
+        material_category: line.material_category || "Raw Materials",
+        quality_approved_quantity: 0,
+        quality_result: "PENDING",
+      };
+    });
+    setMaterials(vehicleLines);
+    const approvals: Record<string, number> = {};
+    const batches: Record<string, BatchEntry[]> = {};
+    vehicleLines.forEach((line, index) => {
+      const key = grnMaterialKey(line, index);
+      approvals[key] = 0;
+      batches[key] = [];
+    });
+    setQualityApproved(approvals);
+    setMaterialBatches(batches);
+    setDamagePhotos({});
+
+    const dockNumber = arrival.dock_number || arrival.assigned_dock_id || "";
+    if (!dockNumber || !header.asn_number.trim()) return;
+    try {
+      const draft = await api.createGrnHeader({
+        receipt_type: "ASN_RECEIPT",
+        asn_number: header.asn_number.trim(),
+        gate_entry_id: arrival.id || undefined,
+        gate_entry_number: arrival.gate_entry_number || undefined,
+        dock_number: dockNumber,
+        supplier_name: header.supplier_name,
+        supplier_company_name: header.supplier_company_name,
+        warehouse_id: header.warehouse_id || undefined,
+        warehouse_name: header.warehouse_name,
+        vehicle_number: arrival.vehicle_number || "",
+        driver_name: arrival.driver_name || "",
+      });
+      if (requestId !== vehicleDraftRequest.current) return;
+      const draftId = draft.grn_id || draft.grnId;
+      const draftNumber = draft.grn_number || draft.grnNumber;
+      if (!draftId || !draftNumber) throw new Error("The backend did not assign a GRN number.");
+      setGrnId(String(draftId));
+      localStorage.setItem("active_grn_id", String(draftId));
+      setHeader((previous) => ({ ...previous, grn_number: String(draftNumber) }));
+      setSaveStatus("saved");
+      // The server may have returned an existing draft for this exact gate
+      // arrival. Rehydrate its material lines, QC decisions, batches, and
+      // damage evidence so switching between vehicles never loses progress.
+      await loadExistingGrnSession(String(draftId), arrival);
+    } catch (error: any) {
+      if (requestId !== vehicleDraftRequest.current) return;
+      setHeader((previous) => ({ ...previous, grn_number: "" }));
+      toast.error(error?.message || "Could not assign a GRN number for this vehicle.");
+    }
+  }
 
   // Page 1: Auto-fetch the complete receiving context from the ASN.
   async function fetchPoContext(targetPoNumber?: string) {
@@ -972,7 +1173,9 @@ function GrnPageWorkflow() {
     }
     if (saveLock.current) return;
     const requestId = ++contextRequest.current;
+    completedGrnConflictRef.current = false;
     setLoadingContext(true);
+    setAsnVehicleArrivals([]);
     try {
       // Resolve the ASN first, then load the receiving context by its
       // authoritative PO. This returns the persisted gate-entry number that
@@ -1034,6 +1237,54 @@ function GrnPageWorkflow() {
         ctx.gate_entry?.driver_name ||
         ctx.gate_entry?.driverName ||
         "";
+      let matchingArrivals: any[] = [];
+      if (String(asnNum).toUpperCase().startsWith("ASN-")) {
+        try {
+          const arrivalResponse = await api.getInboundArrivals();
+          const allArrivals = Array.isArray(arrivalResponse)
+            ? arrivalResponse
+            : Array.isArray(arrivalResponse?.items)
+              ? arrivalResponse.items
+              : [];
+          const normalizedAsn = String(asnNum).trim().toUpperCase();
+          const asnId = String(
+            resolvedContext.asn_id || resolvedContext.asnId || resolvedContext.id ||
+            ctx.asn_id || ctx.asnId || ctx.asn?.id || "",
+          );
+          matchingArrivals = allArrivals
+            .filter((arrival: any) =>
+              String(arrival.asn_number || "").trim().toUpperCase() === normalizedAsn ||
+              Boolean(asnId && String(arrival.asn_id || "") === asnId),
+            )
+            .filter((arrival: any, index: number, rows: any[]) =>
+              rows.findIndex((row) => String(row.id || row.gate_entry_number) === String(arrival.id || arrival.gate_entry_number)) === index,
+            )
+            .sort((a: any, b: any) =>
+              String(b.arrival_time || "").localeCompare(String(a.arrival_time || "")),
+            );
+        } catch (arrivalError) {
+          console.warn("Could not load vehicle arrivals for ASN:", arrivalError);
+          toast.error("Could not load arrived vehicles for this ASN. Refresh and try again.");
+        }
+      }
+      setAsnVehicleArrivals(matchingArrivals);
+      const selectedArrival =
+        matchingArrivals.find(
+          (arrival: any) =>
+            gateNum &&
+            String(arrival.gate_entry_number || "").trim().toUpperCase() ===
+              String(gateNum).trim().toUpperCase(),
+        ) ||
+        matchingArrivals.find(
+          (arrival: any) =>
+            vehicleNum &&
+            String(arrival.vehicle_number || "").replace(/[\s-]/g, "").toUpperCase() ===
+              String(vehicleNum).replace(/[\s-]/g, "").toUpperCase(),
+        ) ||
+        matchingArrivals[0];
+      const selectedGateNum = selectedArrival?.gate_entry_number || gateNum;
+      const selectedVehicleNum = selectedArrival?.vehicle_number || vehicleNum;
+      const selectedDriverName = selectedArrival?.driver_name || driverName;
       const warehouseName =
         resolvedContext.warehouse_name ||
         resolvedContext.warehouseName ||
@@ -1053,8 +1304,8 @@ function GrnPageWorkflow() {
         const norm = (value: unknown) => String(value || "").trim().toUpperCase();
         const allocationMaterial = norm(allocation.material_reference);
         return Boolean(
-          (vehicleNum && norm(allocation.vehicle_number) === norm(vehicleNum)) ||
-          (gateNum && norm(allocation.existing_gate_pass_id) === norm(gateNum)) ||
+          (selectedVehicleNum && norm(allocation.vehicle_number) === norm(selectedVehicleNum)) ||
+          (selectedGateNum && norm(allocation.existing_gate_pass_id) === norm(selectedGateNum)) ||
           (resolvedPoNumber && allocationMaterial.includes(norm(resolvedPoNumber))) ||
           (numToFetch && allocationMaterial.includes(norm(numToFetch))) ||
           (supplierName && norm(allocation.vendor_reference).includes(norm(supplierName)))
@@ -1062,10 +1313,12 @@ function GrnPageWorkflow() {
       }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
       const allocationGateNumber =
         matchedAllocationDock?.current_allocation?.existing_gate_pass_id || "";
-      const resolvedGateEntryNumber = gateNum || allocationGateNumber;
+      const resolvedGateEntryNumber = selectedGateNum || allocationGateNumber;
 
       // Auto-detect allocated dock from warehouse allocation, gate entry, or PO context
       let prefilledDock =
+        selectedArrival?.dock_number ||
+        selectedArrival?.assigned_dock_id ||
         resolvedContext.prefilled_dock_number ||
         resolvedContext.prefilledDockNumber ||
         resolvedContext.gate_entry?.dock_number ||
@@ -1083,20 +1336,34 @@ function GrnPageWorkflow() {
         supplier_company_name: supplierComp,
         supplier_email: supplierEmail,
         asn_number: asnNum,
+        gate_entry_id: selectedArrival?.id || resolvedContext.gate_entry_id || resolvedContext.gateEntryId || "",
         gate_entry_number: resolvedGateEntryNumber,
         warehouse_id: resolvedContext.warehouse_id || resolvedContext.warehouseId || "",
         warehouse_name: warehouseName,
         grn_number: generatedGrnNum,
-        vehicle_number: vehicleNum,
-        driver_name: driverName,
+        vehicle_number: selectedVehicleNum,
+        driver_name: selectedDriverName,
         receiving_dock: prefilledDock,
         invoice_number: "",
         received_by: loggedInUserName,
       });
 
       setDamagePhotos({});
-      const resolvedGrnId =
-        resolvedContext.grn_id || resolvedContext.grnId || ctx.grn_id || ctx.grnId || null;
+      const contextGateId = resolvedContext.gate_entry_id || resolvedContext.gateEntryId || "";
+      const contextGateNumber = resolvedContext.gate_entry_number || resolvedContext.gateEntryNumber || "";
+      const contextVehicle = resolvedContext.vehicle_number || resolvedContext.vehicleNumber || "";
+      const selectedVehicleKey = String(selectedVehicleNum || "").replace(/[\s-]/g, "").toUpperCase();
+      const contextVehicleKey = String(contextVehicle).replace(/[\s-]/g, "").toUpperCase();
+      const contextMatchesSelectedArrival = Boolean(
+        selectedArrival && (
+          (contextGateId && String(contextGateId) === String(selectedArrival.id)) ||
+          (contextGateNumber && String(contextGateNumber).trim().toUpperCase() === String(selectedGateNum || "").trim().toUpperCase()) ||
+          (contextVehicleKey && selectedVehicleKey && contextVehicleKey === selectedVehicleKey)
+        ),
+      );
+      const resolvedGrnId = contextMatchesSelectedArrival
+        ? resolvedContext.grn_id || resolvedContext.grnId || ctx.grn_id || ctx.grnId || null
+        : null;
       if (resolvedGrnId) {
         setGrnId(String(resolvedGrnId));
         localStorage.setItem("active_grn_id", String(resolvedGrnId));
@@ -1116,9 +1383,17 @@ function GrnPageWorkflow() {
         });
       }
 
-      const mapped: GrnLineItem[] = (resolvedContext.lines || ctx.lines || []).map((l: any) => {
+      const vehicleMaterials = Array.isArray(selectedArrival?.expected_materials)
+        ? selectedArrival.expected_materials
+        : [];
+      const sourceLines = vehicleMaterials.length
+        ? vehicleMaterials
+        : resolvedContext.lines || ctx.lines || [];
+      const mapped: GrnLineItem[] = sourceLines.map((l: any) => {
         const sourceMaterial = l.material || l.material_master || {};
-        const poQty = Number(l.ordered_quantity ?? l.orderedQuantity ?? l.quantity ?? 100);
+        const poQty = Number(
+          l.quantity ?? l.shipped_quantity ?? l.po_quantity ?? l.ordered_quantity ?? l.orderedQuantity ?? 100,
+        );
         // ASN/PO quantities are reference quantities only. A new receipt must
         // be physically counted by the operator before it is accepted.
         const recQty = Number(l.received_quantity ?? l.receivedQuantity ?? 0);
@@ -1188,14 +1463,15 @@ function GrnPageWorkflow() {
         const draft = await api.createGrnHeader({
           receipt_type: "ASN_RECEIPT",
           asn_number: asnNum,
+          gate_entry_id: selectedArrival?.id || undefined,
           gate_entry_number: resolvedGateEntryNumber || undefined,
           dock_number: prefilledDock,
           supplier_name: supplierName,
           supplier_company_name: supplierComp,
           warehouse_id: resolvedContext.warehouse_id || resolvedContext.warehouseId || undefined,
           warehouse_name: warehouseName,
-          vehicle_number: vehicleNum,
-          driver_name: driverName,
+          vehicle_number: selectedVehicleNum,
+          driver_name: selectedDriverName,
         });
         if (requestId !== contextRequest.current) return;
         const draftId = draft.grn_id || draft.grnId;
@@ -1206,6 +1482,12 @@ function GrnPageWorkflow() {
         localStorage.setItem("active_grn_id", String(draftId));
         setHeader((previous) => ({ ...previous, grn_number: draft.grn_number || draft.grnNumber }));
         setSaveStatus("saved");
+      }
+      if (resolvedGrnId) {
+        // A context lookup can return the GRN already attached to this gate
+        // arrival. Restore its saved QC, batches, quantities, and evidence
+        // instead of leaving the ASN's initial manifest in the form.
+        await loadExistingGrnSession(String(resolvedGrnId), selectedArrival);
       }
       toast.success(`${asnNum} details fetched successfully`);
     } catch (err: any) {
@@ -1362,7 +1644,7 @@ function GrnPageWorkflow() {
     );
   }
 
-  async function loadExistingGrnSession(targetGrnId: string) {
+  async function loadExistingGrnSession(targetGrnId: string, selectedArrival?: any) {
     if (
       !targetGrnId ||
       targetGrnId === "undefined" ||
@@ -1371,10 +1653,16 @@ function GrnPageWorkflow() {
     )
       return;
     const cleanId = targetGrnId.trim();
+    const restoreRequestId = ++sessionRestoreRequest.current;
     setLoadingContext(true);
     setSaveStatus("saving");
     try {
       const detail = await api.getGrnDetail(cleanId);
+      if (
+        restoreRequestId !== sessionRestoreRequest.current ||
+        routeTabRef.current !== "wizard"
+      )
+        return;
       if (!detail) throw new Error("GRN record not found in database.");
 
       // The route parameter is already the persisted GRN UUID. Some older
@@ -1400,6 +1688,7 @@ function GrnPageWorkflow() {
           detail.asn?.asnNumber ||
           "",
         gate_entry_number: detail.gate_entry_number || "",
+        gate_entry_id: detail.gate_entry_id || "",
         warehouse_id: detail.warehouse_id || "",
         warehouse_name: detail.warehouse_name || "",
         grn_number: detail.grn_number || "",
@@ -1410,7 +1699,110 @@ function GrnPageWorkflow() {
         received_by: detail.received_by || loggedInUserName,
       });
 
+      let resolvedArrival = selectedArrival;
+      let matchingVehicleArrivals: any[] = selectedArrival
+        ? asnVehicleArrivals.filter(
+            (arrival: any) =>
+              String(arrival.asn_number || "").trim().toUpperCase() ===
+              String(selectedArrival.asn_number || detail.asn_number || "").trim().toUpperCase(),
+          )
+        : [];
+      const detailAsnNumber = String(detail.asn_number || detail.asnNumber || "")
+        .trim()
+        .toUpperCase();
+      if (!resolvedArrival && detailAsnNumber) {
+        try {
+          const arrivalResponse = await api.getInboundArrivals(true);
+          if (
+            restoreRequestId !== sessionRestoreRequest.current ||
+            routeTabRef.current !== "wizard"
+          )
+            return;
+          const arrivals = Array.isArray(arrivalResponse)
+            ? arrivalResponse
+            : Array.isArray((arrivalResponse as any)?.items)
+              ? (arrivalResponse as any).items
+              : [];
+          const normalizeVehicle = (value: unknown) =>
+            String(value || "").replace(/[\s-]/g, "").toUpperCase();
+          const matchingAsnArrivals = arrivals.filter(
+            (arrival: any) =>
+              String(arrival.asn_number || "").trim().toUpperCase() === detailAsnNumber,
+          );
+          matchingVehicleArrivals = matchingAsnArrivals;
+          resolvedArrival =
+            matchingAsnArrivals.find(
+              (arrival: any) =>
+                detail.gate_entry_id && String(arrival.id) === String(detail.gate_entry_id),
+            ) ||
+            matchingAsnArrivals.find(
+              (arrival: any) =>
+                detail.gate_entry_number &&
+                String(arrival.gate_entry_number || "").trim().toUpperCase() ===
+                  String(detail.gate_entry_number).trim().toUpperCase(),
+            ) ||
+            matchingAsnArrivals.find(
+              (arrival: any) =>
+                normalizeVehicle(arrival.vehicle_number) ===
+                normalizeVehicle(detail.vehicle_number),
+            );
+          if (matchingAsnArrivals.length > 0) setAsnVehicleArrivals(matchingAsnArrivals);
+        } catch (arrivalError) {
+          console.warn("Unable to resolve the selected vehicle manifest:", arrivalError);
+        }
+      }
+
       let persistedLines = Array.isArray(detail.lines) ? detail.lines : [];
+      const vehicleManifest = Array.isArray(resolvedArrival?.expected_materials)
+        ? resolvedArrival.expected_materials
+        : null;
+      if (vehicleManifest && vehicleManifest.length > 0) {
+        const normalizeCode = (value: unknown) => String(value || "").trim().toUpperCase();
+        const persistedByCode = new Map(
+          persistedLines.map((line: any) => [
+            normalizeCode(line.item_code || line.material_code || line.code),
+            line,
+          ]),
+        );
+        // Keep the receiving table scoped to the selected arrival's manifest.
+        // Reuse persisted rows for QC/batch state, while material lines absent
+        // from a legacy draft are still shown from the authoritative manifest.
+        persistedLines = vehicleManifest.map((manifestLine: any) => {
+          const code = normalizeCode(
+            manifestLine.item_code || manifestLine.material_code || manifestLine.code,
+          );
+          return persistedByCode.get(code) || {
+            ...manifestLine,
+            item_code: code,
+            ordered_quantity: Number(
+              manifestLine.quantity ?? manifestLine.shipped_quantity ?? manifestLine.po_quantity ?? 0,
+            ),
+            received_quantity: 0,
+            good_quantity: 0,
+            damaged_quantity: 0,
+            quality_approved_quantity: 0,
+            quality_result: "PENDING",
+            batches: [],
+          };
+        });
+      } else if (
+        resolvedArrival &&
+        matchingVehicleArrivals.length > 1 &&
+        persistedLines.length > 0
+      ) {
+        // Older multi-vehicle ASNs did not persist a per-vehicle manifest.
+        // Keep their original vehicle and material ordering so each truck
+        // receives only its own line instead of the complete ASN shipment.
+        const selectedVehicleIndex = matchingVehicleArrivals.findIndex(
+          (arrival: any) => String(arrival.id) === String(resolvedArrival.id),
+        );
+        if (selectedVehicleIndex >= 0) {
+          persistedLines = persistedLines.filter(
+            (_line: any, lineIndex: number) =>
+              lineIndex % matchingVehicleArrivals.length === selectedVehicleIndex,
+          );
+        }
+      }
       if (persistedLines.length === 0 && detail.asn_number) {
         try {
           const asn = await api.getAsn(detail.asn_number);
@@ -1543,17 +1935,21 @@ function GrnPageWorkflow() {
 
       // Compute highest completed step
       let computedStep = 1;
-      if (detail.lines && detail.lines.length > 0) {
+      if (persistedLines.length > 0) {
         computedStep = 2;
-        const hasQty = detail.lines.some(
+        const hasQty = persistedLines.some(
           (l: any) => Number(l.good_quantity || 0) > 0 || Number(l.damaged_quantity || 0) > 0,
         );
         if (hasQty) computedStep = 3;
-        const hasQa = detail.lines.some(
-          (l: any) => l.quality_result || Number(l.quality_approved_quantity || 0) > 0,
-        );
+        const hasQa = persistedLines.some((l: any) => {
+          const result = String(l.quality_result || "").toUpperCase();
+          return (
+            (result && !["PENDING", "UNINSPECTED"].includes(result)) ||
+            Number(l.quality_approved_quantity || 0) > 0
+          );
+        });
         if (hasQa) computedStep = 4;
-        const hasBatches = detail.lines.some(
+        const hasBatches = persistedLines.some(
           (l: any) => Array.isArray(l.batches) && l.batches.length > 0,
         );
         if (hasBatches) computedStep = 5;
@@ -1568,8 +1964,18 @@ function GrnPageWorkflow() {
       setMaxCompletedStep(effectiveMaxStep);
       setCurrentPage(targetStep);
       setSaveStatus("saved");
-      navigate({ to: "/grn", search: { tab: "wizard", page: targetStep, grn_id: resolvedId } });
+      if (
+        restoreRequestId === sessionRestoreRequest.current &&
+        routeTabRef.current === "wizard"
+      ) {
+        navigate({ to: "/grn", search: { tab: "wizard", page: targetStep, grn_id: resolvedId } });
+      }
     } catch (err: any) {
+      if (
+        restoreRequestId !== sessionRestoreRequest.current ||
+        routeTabRef.current !== "wizard"
+      )
+        return;
       console.warn("Unable to restore GRN session:", err);
       setSaveStatus("error");
       // Do not keep retrying a deleted/stale GRN UUID from the URL or local
@@ -1584,7 +1990,7 @@ function GrnPageWorkflow() {
       });
       void navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
     } finally {
-      setLoadingContext(false);
+      if (restoreRequestId === sessionRestoreRequest.current) setLoadingContext(false);
     }
   }
 
@@ -1719,6 +2125,7 @@ function GrnPageWorkflow() {
       grn_id: grnId || undefined,
       receipt_type: "ASN_RECEIPT",
       asn_number: header.asn_number.trim(),
+      gate_entry_id: header.gate_entry_id || undefined,
       gate_entry_number: receivingGateEntryNumber || undefined,
       dock_number: receivingDock,
       invoice_number: header.invoice_number,
@@ -1979,7 +2386,7 @@ function GrnPageWorkflow() {
     }
 
     autosaveTimerRef.current = setTimeout(async () => {
-      if (saveLock.current || loadingContext || busyAction) return;
+      if (completedGrnConflictRef.current || saveLock.current || loadingContext || busyAction) return;
       if (
         !header.receipt_type ||
         (!header.receiving_dock.trim() && !allocatedDockInfo?.dock_number)
@@ -2025,6 +2432,7 @@ function GrnPageWorkflow() {
         }
         setSaveStatus("saved");
       } catch (err) {
+        if (await openExistingCompletedGrn(err)) return;
         console.warn("GRN autosave failed:", err);
         setSaveStatus("error");
         toast.error("Unable to save GRN changes", {
@@ -2541,6 +2949,172 @@ function GrnPageWorkflow() {
       }
     }
     setSelectedGrnDetail(norm);
+  }
+
+  // Live dock bay release status and transport lookup for selected GRN detail
+  useEffect(() => {
+    if (!selectedGrnDetail) {
+      setDetailDockInfo({ dock: null, allocation: null, isReleased: true, loading: false, releasing: false });
+      setDetailGateEntry(null);
+      return;
+    }
+
+    let isMounted = true;
+    setDetailGateEntry(null);
+    setDetailDockInfo({
+      dock: null,
+      allocation: null,
+      isReleased: true,
+      loading: true,
+      releasing: false,
+    });
+    async function resolveDockAndGate() {
+      try {
+        const [docksRes, gatesRes] = await Promise.all([
+          api.getDocks().catch(() => []),
+          api.getGateEntries().catch(() => []),
+        ]);
+
+        const normalizeLookupKey = (value: unknown) =>
+          String(value || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+        const rawDockNum = normalizeLookupKey(selectedGrnDetail.dock_number);
+        const rawVeh = normalizeLookupKey(selectedGrnDetail.vehicle_number);
+        const rawGateEntryNumber = normalizeLookupKey(selectedGrnDetail.gate_entry_number);
+        const rawGateEntryId = normalizeLookupKey(selectedGrnDetail.gate_entry_id);
+        const gateIdentifiers = [rawGateEntryNumber, rawGateEntryId].filter(Boolean);
+        const docks = Array.isArray(docksRes) ? docksRes : [];
+        const matchedDock =
+          docks.find((dock: any) => {
+            const dockNumber = normalizeLookupKey(dock.dock_number || dock.dock_code || dock.name);
+            return (
+              rawDockNum &&
+              dockNumber &&
+              (dockNumber === rawDockNum ||
+                dockNumber.includes(rawDockNum) ||
+                rawDockNum.includes(dockNumber))
+            );
+          }) ||
+          docks.find((dock: any) => {
+            const allocation = dock.current_allocation;
+            if (!allocation) return false;
+            const allocationGateIdentifiers = [
+              allocation.existing_gate_pass_id,
+              allocation.gate_entry_id,
+              allocation.gate_entry_number,
+              allocation.gate_pass_number,
+            ]
+              .map(normalizeLookupKey)
+              .filter(Boolean);
+            if (gateIdentifiers.length > 0) {
+              return gateIdentifiers.some((identifier) =>
+                allocationGateIdentifiers.includes(identifier),
+              );
+            }
+            return rawVeh && normalizeLookupKey(allocation.vehicle_number) === rawVeh;
+          });
+
+        const matchedGate = (Array.isArray(gatesRes) ? gatesRes : []).find((gate: any) => {
+          const gateNumber = normalizeLookupKey(gate.gate_entry_number || gate.gateEntryNumber);
+          const gateId = normalizeLookupKey(gate.id || gate.gate_entry_id || gate.gateEntryId);
+          if (gateIdentifiers.length > 0) {
+            return gateIdentifiers.includes(gateNumber) || gateIdentifiers.includes(gateId);
+          }
+          const gateVehicle = normalizeLookupKey(gate.vehicle_number || gate.vehicleNumber);
+          return rawVeh && gateVehicle === rawVeh;
+        });
+
+        if (isMounted) {
+          setDetailGateEntry(matchedGate || null);
+
+          const dockStatus = String(matchedDock?.status || "").toUpperCase();
+          const alloc = matchedDock?.current_allocation || null;
+          const allocStatus = String(alloc?.status || "").toUpperCase();
+
+          let isReleased = false;
+          if (!matchedDock && !selectedGrnDetail.dock_number) {
+            isReleased = true;
+          } else if (dockStatus === "AVAILABLE" && (!alloc || allocStatus === "RELEASED")) {
+            isReleased = true;
+          } else if (allocStatus === "RELEASED") {
+            isReleased = true;
+          } else if (dockStatus === "OCCUPIED" || dockStatus === "RESERVED" || dockStatus === "ALLOCATED" || alloc) {
+            isReleased = false;
+          } else {
+            isReleased = true;
+          }
+
+          setDetailDockInfo({
+            dock: matchedDock || null,
+            allocation: alloc,
+            isReleased,
+            loading: false,
+            releasing: false,
+          });
+        }
+      } catch (err) {
+        if (isMounted) {
+          setDetailDockInfo((prev) => ({ ...prev, loading: false }));
+        }
+      }
+    }
+
+    void resolveDockAndGate();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedGrnDetail]);
+
+  async function handleReleaseDockFromDetail() {
+    if (!selectedGrnDetail) return;
+    const targetId =
+      detailDockInfo.allocation?.id ||
+      detailDockInfo.dock?.id ||
+      detailDockInfo.dock?.current_allocation?.id ||
+      selectedGrnDetail.dock_id ||
+      selectedGrnDetail.dock_number ||
+      selectedGrnDetail.vehicle_number;
+
+    if (!targetId) {
+      toast.error("Could not find dock ID or allocation ID to release.");
+      return;
+    }
+
+    try {
+      setDetailDockInfo((prev) => ({ ...prev, releasing: true }));
+      try {
+        await api.completeDockReceiving(String(targetId));
+      } catch {}
+      await api.releaseDock(String(targetId));
+
+      const dockLabel =
+        selectedGrnDetail.dock_number
+          ? selectedGrnDetail.dock_number.startsWith("Dock")
+            ? selectedGrnDetail.dock_number
+            : `Dock ${selectedGrnDetail.dock_number}`
+          : detailDockInfo.dock?.dock_number || "Bay";
+
+      toast.success(`${dockLabel} released successfully!`, {
+        description: "The dock bay is now available for subsequent shipments.",
+      });
+
+      setDetailDockInfo((prev) => ({
+        ...prev,
+        isReleased: true,
+        releasing: false,
+        dock: prev.dock ? { ...prev.dock, status: "AVAILABLE" } : prev.dock,
+        allocation: prev.allocation ? { ...prev.allocation, status: "RELEASED" } : null,
+      }));
+
+      await loadWarehouseDocks();
+      window.dispatchEvent(new CustomEvent("notifications:refresh"));
+    } catch (err: any) {
+      toast.error("Failed to release dock", {
+        description: err?.message || "Please check permissions or try again.",
+      });
+      setDetailDockInfo((prev) => ({ ...prev, releasing: false }));
+    }
   }
 
   // Print Official Goods Receipt Note (GRN) Certificate / Document
@@ -3287,8 +3861,8 @@ function GrnPageWorkflow() {
             <div class="footer-signatures">
               <div class="sign-box">
                 <div class="sign-line"></div>
-                <div><b>Received By (Store)</b></div>
-                <div style="color: #64748b; font-size: 10px;">${loggedInUserName || "Store Operator"}</div>
+                <div><b>Received By (Warehouse)</b></div>
+                <div style="color: #64748b; font-size: 10px;">${loggedInUserName || "Warehouse Operator"}</div>
               </div>
               <div class="sign-box">
                 <div class="sign-line"></div>
@@ -3638,46 +4212,74 @@ function GrnPageWorkflow() {
     const lines = selectedGrnDetail?.lines?.length
       ? selectedGrnDetail.lines
       : selectedGrnDetail?.materials || [];
-    return lines.reduce(
-      (totals: { received: number; accounted: number }, line: any, index: number) => {
-        const current = materials[index];
-        const received = Number(
-          line.received_quantity ?? line.receivedQuantity ?? current?.received_quantity ?? 0,
-        );
+    return lines.filter((line: any) => {
+      const received = Number(line.received_quantity ?? line.receivedQuantity ?? 0);
+      const accounted = Number(
+        line.good_quantity ?? line.goodQuantity ?? line.accepted_quantity ??
+        line.acceptedQuantity ?? line.quality_approved_quantity ??
+        line.qualityApprovedQuantity ?? 0,
+      ) + Number(line.damaged_quantity ?? line.damagedQuantity ?? 0)
+        + Number(line.rejected_quantity ?? line.rejectedQuantity ?? 0)
+        + Number(line.held_quantity ?? line.heldQuantity ?? 0);
+      return received > 0 || accounted > 0;
+    }).reduce(
+      (
+        totals: {
+          received: number;
+          good: number;
+          damaged: number;
+          accounted: number;
+          itemCount: number;
+        },
+        line: any,
+      ) => {
+        const received = Number(line.received_quantity ?? line.receivedQuantity ?? 0);
         const accepted = Number(
-          line.good_quantity ?? line.goodQuantity ?? current?.good_quantity ?? 0,
+          line.good_quantity ??
+            line.goodQuantity ??
+            line.accepted_quantity ??
+            line.acceptedQuantity ??
+            line.quality_approved_quantity ??
+            line.qualityApprovedQuantity ??
+            0,
         );
-        const damaged = Number(
-          line.damaged_quantity ?? line.damagedQuantity ?? current?.damaged_quantity ?? 0,
-        );
-        const rejected = Number(
-          line.rejected_quantity ?? line.rejectedQuantity ?? current?.rejected_quantity ?? 0,
-        );
-        const held = Number(line.held_quantity ?? line.heldQuantity ?? current?.held_quantity ?? 0);
+        const damaged = Number(line.damaged_quantity ?? line.damagedQuantity ?? 0);
+        const rejected = Number(line.rejected_quantity ?? line.rejectedQuantity ?? 0);
+        const held = Number(line.held_quantity ?? line.heldQuantity ?? 0);
+        totals.itemCount += 1;
         totals.received += received;
+        totals.good += accepted;
+        totals.damaged += damaged;
         totals.accounted += accepted + damaged + rejected + held;
         return totals;
       },
-      { received: 0, accounted: 0 },
+      { received: 0, good: 0, damaged: 0, accounted: 0, itemCount: 0 },
     );
-  }, [selectedGrnDetail, materials]);
+  }, [selectedGrnDetail]);
 
   return (
     <AppShell
-      title="GRN / Quality Inspection"
+      title={<span className="inline-flex items-center gap-3"><ClipboardList className="size-6 shrink-0 text-primary" aria-hidden="true" />GRN / Quality Inspection</span>}
       subtitle="Manage goods receipts, quality checks, and GRN records"
       actions={
         <>
-          <Button variant="outline" className="rounded-xl"
-            disabled={busyAction || loadingRecords || loadingContext}
-            onClick={async () => {
-              await Promise.all([loadRecords(), loadWarehouseDocks()]);
-              if (activeTab === "wizard" && grnId) await loadExistingGrnSession(grnId);
-              else if (activeTab === "wizard" && header.asn_number.trim()) await fetchPoContext(header.asn_number);
-            }}>
-            <RefreshCw className={`size-4 ${loadingRecords || loadingContext ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          {activeTab !== "dashboard" && (
+            <Button data-refresh-control="true"
+              variant="outline"
+              size="icon"
+              className="size-11 rounded-xl bg-white text-primary hover:bg-white"
+              aria-label="Refresh GRN details"
+              title="Refresh GRN details"
+              disabled={busyAction || loadingRecords || loadingContext}
+              onClick={async () => {
+                await Promise.all([loadRecords(), loadWarehouseDocks()]);
+                if (activeTab === "wizard" && grnId) await loadExistingGrnSession(grnId);
+                else if (activeTab === "wizard" && header.asn_number.trim()) await fetchPoContext(header.asn_number);
+              }}
+            >
+              <RefreshCw className={`size-4 ${loadingRecords || loadingContext ? "animate-spin" : ""}`} />
+            </Button>
+          )}
           {activeTab === "dashboard" && (
             <>
               <Button
@@ -3753,12 +4355,36 @@ function GrnPageWorkflow() {
           const healthPercent =
             totalLines > 0 ? Number(((inspectedLines / totalLines) * 100).toFixed(1)) : 100;
 
+          const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+          const chartDays = Array.from({ length: 7 }, (_, index) => {
+            const date = new Date();
+            date.setDate(date.getDate() - 6 + index);
+            return { key: dayKey(date), label: date.toLocaleDateString([], { day: "numeric", month: "short" }) };
+          });
+          const chartFor = (weight: (record: any) => number) => chartDays.map((day) => ({
+            label: day.label,
+            value: grnRecords.reduce((count, record) => {
+              const date = new Date(record.receipt_date || record.created_at || "");
+              return !Number.isNaN(date.getTime()) && dayKey(date) === day.key ? count + weight(record) : count;
+            }, 0),
+          }));
+          const grnKpiCharts = {
+            total: chartFor(() => 1),
+            completed: chartFor((record) => isRecordMatchingStatus(record.status, "COMPLETED") ? 1 : 0),
+            partial: chartFor((record) => isRecordMatchingStatus(record.status, "PARTIAL") ? 1 : 0),
+            quarantine: chartFor((record) => {
+              const lots = record.damage_lots || record.damageLots || [];
+              return lots.length || (record.lines || record.materials || []).filter((line: any) => Number(line.damaged_quantity ?? line.damagedQuantity ?? 0) > 0).length;
+            }),
+          };
+
           return (
             <div className="space-y-6">
               {/* TOP STAT CARDS */}
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <StatCard
                   label="Total GRN receipts"
+                  sparkline={grnKpiCharts.total}
                   value={loadingRecords ? "..." : String(totalRecordCount || grnRecords.length)}
                   delta={grnRecords.length > 0 ? "All recorded entries" : "No receipts yet"}
                   icon={ClipboardList}
@@ -3766,6 +4392,7 @@ function GrnPageWorkflow() {
                 />
                 <StatCard
                   label="Fully completed"
+                  sparkline={grnKpiCharts.completed}
                   value={
                     loadingRecords
                       ? "..."
@@ -3780,6 +4407,7 @@ function GrnPageWorkflow() {
                 />
                 <StatCard
                   label="Partially completed"
+                  sparkline={grnKpiCharts.partial}
                   value={
                     loadingRecords
                       ? "..."
@@ -3794,6 +4422,7 @@ function GrnPageWorkflow() {
                 />
                 <StatCard
                   label="Quarantine lots"
+                  sparkline={grnKpiCharts.quarantine}
                   value={
                     loadingRecords
                       ? "..."
@@ -3876,13 +4505,7 @@ function GrnPageWorkflow() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/60">
-                            {grnRecords
-                              .filter(
-                                (r) =>
-                                  isRecordMatchingSearch(r, searchTerm) &&
-                                  isRecordMatchingStatus(r.status, dashboardStatusFilter),
-                              )
-                              .slice(0, 8)
+                            {visibleDashboardReceipts
                               .map((r, i) => (
                                 <tr
                                   key={r.id || r.grn_id || r.grn_number || `rec_row_${i}`}
@@ -3924,11 +4547,7 @@ function GrnPageWorkflow() {
                                   </td>
                                 </tr>
                               ))}
-                            {grnRecords.filter(
-                              (r) =>
-                                isRecordMatchingSearch(r, searchTerm) &&
-                                isRecordMatchingStatus(r.status, dashboardStatusFilter),
-                            ).length === 0 && (
+                            {dashboardReceipts.length === 0 && (
                               <tr>
                                 <td colSpan={5} className="text-center py-10 text-muted-foreground">
                                   <FileCheck2 className="mx-auto mb-2 size-6 text-muted-foreground/50" />
@@ -3951,6 +4570,14 @@ function GrnPageWorkflow() {
                             )}
                           </tbody>
                         </table>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm text-muted-foreground">
+                        <p aria-live="polite">Showing {dashboardReceipts.length ? (currentReceiptPage - 1) * receiptPageSize + 1 : 0}?{Math.min(currentReceiptPage * receiptPageSize, dashboardReceipts.length)} of {dashboardReceipts.length} receipts</p>
+                        <nav aria-label="Inbound goods receipts pagination" className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" disabled={currentReceiptPage === 1 || loadingRecords} onClick={() => setReceiptPage(currentReceiptPage - 1)}>Previous</Button>
+                          <span className="min-w-12 text-center text-xs" aria-current="page">{currentReceiptPage} / {receiptPageCount}</span>
+                          <Button variant="outline" size="sm" disabled={currentReceiptPage >= receiptPageCount || loadingRecords} onClick={() => setReceiptPage(currentReceiptPage + 1)}>Next</Button>
+                        </nav>
                       </div>
                     </div>
                   </SectionCard>
@@ -3990,7 +4617,7 @@ function GrnPageWorkflow() {
                     <Timeline
                       items={
                         grnRecords.length > 0
-                          ? grnRecords.slice(0, 4).map((r, idx) => ({
+                          ? grnRecords.slice(0, activityLimit).map((r, idx) => ({
                               time: r.receipt_date || "Today",
                               title: `${r.grn_number || `GRN-000${idx + 1}`} · ${r.supplier_name || r.supplier_company_name || "Supplier"}`,
                               detail: `PO ${r.po_number || "—"} · ${r.vehicle_number || "Dock arrival"}`,
@@ -4004,6 +4631,15 @@ function GrnPageWorkflow() {
                           : []
                       }
                     />
+                    {grnRecords.length > 5 && (
+                      <div className="mt-3 flex items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
+                        <span>Showing {Math.min(activityLimit, grnRecords.length)} of {grnRecords.length}</span>
+                        <div className="flex items-center gap-2">
+                          {activityLimit > 5 && <Button variant="ghost" size="sm" onClick={() => setActivityLimit(5)}>Show less</Button>}
+                          {activityLimit < grnRecords.length && <Button variant="outline" size="sm" onClick={() => setActivityLimit((limit) => limit + 5)}>More</Button>}
+                        </div>
+                      </div>
+                    )}
                   </SectionCard>
                 </div>
               </div>
@@ -4013,7 +4649,7 @@ function GrnPageWorkflow() {
 
       {/* 📋 RECORDS OVERVIEW TAB */}
       {activeTab === "records" && (
-        <div className="mx-auto w-full max-w-7xl space-y-4 px-1 sm:px-2">
+        <div className="grn-records-layout w-full space-y-4">
           <SectionCard
             title="All Goods Receipt Notes (GRN)"
             description="Complete register of all inbound material receipts, inspection outcomes, and certificates"
@@ -4050,14 +4686,6 @@ function GrnPageWorkflow() {
                   onClick={() => exportGrnRecordsCsv()}
                 >
                   <Download className="mr-1.5 size-3.5 text-primary" /> Export CSV
-                </Button><InformationTooltip help="reports" />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl text-xs h-8"
-                  onClick={() => void loadRecords()}
-                >
-                  <RefreshCw className="mr-1.5 size-3.5" /> Refresh
                 </Button>
               </div>
             }
@@ -4077,11 +4705,18 @@ function GrnPageWorkflow() {
                 <div className="grid h-64 place-items-center">
                   <Loader2 className="size-8 animate-spin text-primary" />
                 </div>
-              ) : grnRecords.filter(
-                  (r) =>
-                    isRecordMatchingSearch(r, searchTerm) &&
-                    isRecordMatchingStatus(r.status, recordsStatusFilter),
-                ).length === 0 ? (
+              ) : recordsLoadError ? (
+                <div className="grid min-h-64 place-items-center rounded-xl border border-rose-200 bg-rose-50/60 p-6 text-center">
+                  <div className="max-w-lg">
+                    <AlertTriangle className="mx-auto mb-3 size-9 text-rose-600" />
+                    <h3 className="text-base font-semibold text-foreground">GRN History could not be loaded</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">{recordsLoadError}</p>
+                    <Button type="button" className="mt-4 rounded-xl" onClick={() => void loadRecords()}>
+                      <RefreshCw className="mr-2 size-4" /> Try again
+                    </Button>
+                  </div>
+                </div>
+              ) : filteredGrnRecords.length === 0 ? (
                 <div className="grid h-64 place-items-center rounded-xl border border-dashed p-6 text-center text-muted-foreground">
                   <div>
                     <FileCheck2 className="mx-auto mb-3 size-10 text-muted-foreground/60" />
@@ -4103,13 +4738,7 @@ function GrnPageWorkflow() {
                 </div>
               ) : (
                 <div className="grid gap-4">
-                  {grnRecords
-                    .filter(
-                      (r) =>
-                        isRecordMatchingSearch(r, searchTerm) &&
-                        isRecordMatchingStatus(r.status, recordsStatusFilter),
-                    )
-                    .map((r, idx) => {
+                  {visibleGrnRecords.map((r, idx) => {
                       const grnKey = r.id || r.grn_id || r.grn_number || `grn_rec_${idx}`;
                       const grnNumber = r.grn_number || "—";
                       const supplierName = r.supplier_name || r.supplier_company_name || "—";
@@ -4129,15 +4758,10 @@ function GrnPageWorkflow() {
                       return (
                         <Card
                           key={grnKey}
-                          className="rounded-2xl p-5 border border-border/70 hover:shadow-soft transition-all space-y-4"
+                          className="grn-record-summary rounded-xl p-4 border border-border/70 shadow-none gap-3"
                         >
-                          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/60 pb-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                                  Goods Receipt Note
-                                </span>
-                              </div>
                               <h3 className="font-mono text-xl font-bold text-primary mt-0.5">
                                 {grnNumber}
                               </h3>
@@ -4148,41 +4772,18 @@ function GrnPageWorkflow() {
                             <StatusBadge status={status} />
                           </div>
 
-                          <div className="grid gap-3 rounded-xl border border-border/60 bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-3 font-mono">
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] uppercase font-sans">
-                                Receiving Dock
-                              </span>
-                              <span className="font-bold text-foreground">{dockNumber}</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] uppercase font-sans">
-                                Vehicle Reg / Driver
-                              </span>
-                              <span className="font-bold text-foreground">
-                                {vehicleNumber} {driverName}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] uppercase font-sans">
-                                Received Date / Officer
-                              </span>
-                              <span className="font-bold text-foreground">
-                                {receiptDate} {receivedBy}
-                              </span>
-                            </div>
-                          </div>
+                          <p className="text-xs text-muted-foreground">Received: <span className="font-medium text-foreground">{receiptDate}</span></p>
 
                           {/* REAL ACTION BUTTONS PER RECORD */}
-                          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                            <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+                            <div className="flex flex-wrap items-center gap-2">
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="rounded-xl text-xs font-semibold border-primary/40 text-primary hover:bg-primary-soft"
                                 onClick={() => void handleViewGrnDetail(r)}
                               >
-                                <FileText className="mr-1.5 size-3.5" /> View Details
+                                <FileText className="mr-1.5 size-3.5" /> View all details
                               </Button>
                               <Button
                                 size="sm"
@@ -4225,8 +4826,16 @@ function GrnPageWorkflow() {
                           </div>
                         </Card>
                       );
-                    })}
+                  })}
                 </div>
+              )}
+              {!loadingRecords && filteredGrnRecords.length > 0 && (
+                <AdminTablePagination
+                  page={currentRecordsPage}
+                  total={filteredGrnRecords.length}
+                  itemLabel="GRN records"
+                  onPageChange={setRecordsPage}
+                />
               )}
             </div>
           </SectionCard>
@@ -4235,7 +4844,7 @@ function GrnPageWorkflow() {
 
       {/* ✨ 6-PAGE WIZARD WORKFLOW */}
       {activeTab === "wizard" && (
-        <div className="mx-auto w-full max-w-7xl space-y-4 px-1 sm:px-2">
+        <div className="grn-wizard-layout w-full space-y-4">
           {/* STEP NAVIGATION HEADER */}
           <Card className="rounded-2xl p-4 overflow-x-auto shadow-sm border border-border/80">
             <div className="flex items-center justify-between min-w-[720px] gap-2">
@@ -4388,8 +4997,8 @@ function GrnPageWorkflow() {
               {/* B. INBOUND DETAILS */}
               <Card className="rounded-xl p-4 space-y-4 shadow-sm">
                 <div className="border-b pb-3">
-                  <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
-                    Inbound Details
+                  <h3 className="font-semibold text-foreground text-base tracking-tight">
+                    Inbound details
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Transport, gate entry, and delivery identification.
@@ -4398,21 +5007,21 @@ function GrnPageWorkflow() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* ASN Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      ASN Number
+                  <div className="flex min-h-[76px] min-w-0 flex-col justify-center rounded-xl border bg-muted/10 p-4">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      ASN number
                     </span>
-                    <p className="font-mono text-sm font-bold text-foreground">
+                    <p className="mt-1 truncate font-mono text-sm font-semibold text-foreground">
                       {header.asn_number}
                     </p>
                   </div>
 
                   {/* Gate Entry Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      Gate Entry Number
+                  <div className="flex min-h-[76px] min-w-0 flex-col justify-center rounded-xl border bg-muted/10 p-4">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Gate entry number
                     </span>
-                    <p className="font-mono text-sm font-bold text-foreground">
+                    <p className="mt-1 truncate font-mono text-sm font-semibold text-foreground">
                       {header.gate_entry_number}
                     </p>
                   </div>
@@ -4430,26 +5039,55 @@ function GrnPageWorkflow() {
                   )}
 
                   {/* Vehicle Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
-                      Vehicle Number
+                  <div className="min-w-0 rounded-xl border bg-muted/10 p-4">
+                    <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                      Vehicle number
                     </label>
-                    <Input
-                      value={header.vehicle_number}
-                      onChange={(e) => setHeader({ ...header, vehicle_number: e.target.value })}
-                      className="font-mono text-sm font-bold rounded-lg"
-                    />
+                    {header.asn_number.trim().toUpperCase().startsWith("ASN-") ? (
+                      <select
+                        value={header.gate_entry_id || header.gate_entry_number || ""}
+                        onChange={(event) => selectInboundVehicle(event.target.value)}
+                        className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 font-mono text-sm font-semibold"
+                        aria-label="Select arrived vehicle for this ASN"
+                        disabled={asnVehicleArrivals.length === 0}
+                      >
+                        {asnVehicleArrivals.length === 0 ? (
+                          <option value="">No arrived vehicles found for this ASN</option>
+                        ) : asnVehicleArrivals.map((arrival) => {
+                            const completedForArrival = grnRecords.some(
+                              (record) =>
+                                normalizeVehicleKey(record.vehicle_number) === normalizeVehicleKey(arrival.vehicle_number) &&
+                                String(record.asn_number || record.asnNumber || "").trim().toUpperCase() ===
+                                  String(header.asn_number || "").trim().toUpperCase() &&
+                                isCompletedGrnStatus(record.status),
+                            );
+                            return <option
+                              key={arrival.id || arrival.gate_entry_number}
+                              value={String(arrival.id || arrival.gate_entry_number)}
+                              disabled={completedForArrival}
+                            >
+                              {arrival.vehicle_number || "Vehicle"}{completedForArrival ? " · GRN completed" : ""}
+                            </option>;
+                          })}
+                      </select>
+                    ) : (
+                      <Input
+                        value={header.vehicle_number}
+                        onChange={(e) => setHeader({ ...header, vehicle_number: e.target.value })}
+                        className="h-10 rounded-lg font-mono text-sm font-semibold"
+                      />
+                    )}
                   </div>
 
                   {/* Driver Name */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
-                      Driver Name
+                  <div className="min-w-0 rounded-xl border bg-muted/10 p-4">
+                    <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                      Driver name
                     </label>
                     <Input
                       value={header.driver_name}
                       onChange={(e) => setHeader({ ...header, driver_name: e.target.value })}
-                      className="text-sm font-bold rounded-lg"
+                      className="h-10 rounded-lg text-sm font-semibold"
                     />
                   </div>
                 </div>
@@ -4763,11 +5401,11 @@ function GrnPageWorkflow() {
               ) : (
                 /* ASN MATERIAL TABLE */
                 <div className="overflow-x-auto rounded-xl border">
-                  <table className="w-full table-fixed text-sm text-left">
+                  <table className="grn-receiving-table w-full min-w-[720px] table-fixed text-sm text-left">
                     <colgroup>
-                      <col className="w-[40%]" />
-                      <col className="w-[20%]" />
-                      <col className="w-[25%]" />
+                      <col className="w-[46%]" />
+                      <col className="w-[16%]" />
+                      <col className="w-[23%]" />
                       <col className="w-[15%]" />
                     </colgroup>
                     <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
@@ -4790,14 +5428,14 @@ function GrnPageWorkflow() {
                         return (
                           <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
                             <td className="px-4 py-3 font-bold text-foreground">
-                              <div>
+                              <div className="text-base leading-relaxed">
                                 {m.item_code || m.material_code} —{" "}
                                 {m.material_name ||
                                   m.materialName ||
                                   m.material_description ||
                                   "Material"}
                               </div>
-                              <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
+                              <span className="text-xs leading-relaxed text-emerald-600 font-medium block mt-1">
                                 Category: {m.material_category || "General"}
                               </span>
                             </td>
@@ -4810,7 +5448,7 @@ function GrnPageWorkflow() {
                               </div>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <div className="flex flex-col items-end gap-1">
+                              <div className="flex flex-col items-center gap-2">
                                 <Input
                                   type="number"
                                   min={0}
@@ -4844,7 +5482,7 @@ function GrnPageWorkflow() {
                                       ),
                                     );
                                   }}
-                                  className="w-32 text-right font-bold text-foreground rounded-xl"
+                                  className="h-10 w-32 text-center font-semibold tabular-nums text-foreground rounded-lg"
                                 />
                                 <button
                                   type="button"
@@ -5803,45 +6441,6 @@ function GrnPageWorkflow() {
                                 >
                                   <Camera className="mr-1 size-3" /> Open Camera *
                                 </Button>
-                                <Dialog
-                                  open={asnCameraOpen}
-                                  onOpenChange={(open) => {
-                                    if (!open) closeAsnDocumentCamera();
-                                  }}
-                                >
-                                  <DialogContent className="max-w-xl rounded-2xl p-5">
-                                    <DialogHeader>
-                                      <DialogTitle className="font-black text-primary">
-                                        Capture ASN Document
-                                      </DialogTitle>
-                                    </DialogHeader>
-                                    <div className="space-y-3">
-                                      <video
-                                        ref={asnCameraVideoRef}
-                                        autoPlay
-                                        playsInline
-                                        className="w-full rounded-xl border bg-black"
-                                      />
-                                      <div className="flex gap-2">
-                                        <Button
-                                          type="button"
-                                          className="flex-1 rounded-xl"
-                                          onClick={captureAsnDocument}
-                                        >
-                                          Capture & Save
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          className="rounded-xl"
-                                          onClick={closeAsnDocumentCamera}
-                                        >
-                                          Close
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  </DialogContent>
-                                </Dialog>
                               </div>
                             )}
                           </td>
@@ -6050,24 +6649,24 @@ function GrnPageWorkflow() {
                               return (
                                 <Card
                                   key={b.batch_number}
-                                  className="rounded-2xl p-5 border text-center space-y-3 bg-white text-black shadow-md relative overflow-hidden group"
+                                  className="grn-batch-label rounded-xl p-5 border text-center gap-4 bg-white text-foreground shadow-sm relative overflow-hidden group"
                                 >
                                   <div className="border-b pb-2 text-left">
                                     <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
                                       GRN Batch Label
                                     </span>
-                                    <h4 className="font-mono text-base font-bold text-gray-900">
+                                    <h4 className="mt-1 break-words font-mono text-sm font-semibold leading-relaxed text-foreground">
                                       {b.batch_number}
                                     </h4>
                                   </div>
 
-                                  <div className="relative my-2">
+                                  <div className="relative flex justify-center py-1">
                                     {qrInfo.data_url ? (
                                       <div className="relative inline-block rounded-2xl border border-gray-200 bg-white p-2 shadow-sm">
                                         <img
                                           src={qrInfo.data_url}
                                           alt="Material QR Code"
-                                          className="size-48 mx-auto"
+                                          className="size-48 max-w-full object-contain mx-auto"
                                         />
                                       </div>
                                     ) : (
@@ -6080,23 +6679,14 @@ function GrnPageWorkflow() {
                                     )}
                                   </div>
 
-                                  <div className="text-xs text-left space-y-1 font-mono text-gray-800 border-t pt-2">
-                                    <p></p>
-                                    <p>
-                                      <b>GRN Number:</b> {header.grn_number || "Assigning GRN number..."}
-                                    </p>
-                                    <p>
-                                      <b>Material:</b> {mat.item_code} ({mat.material_name})
-                                    </p>
-                                    <p>
-                                      <b>Category:</b> {mat.material_category || "General"}
-                                    </p>
-                                    <p>
-                                      <b>Batch Qty:</b> {b.batch_quantity} {mat.uom}
-                                    </p>
-                                  </div>
+                                  <dl className="grid grid-cols-[100px_minmax(0,1fr)] gap-x-3 gap-y-2 border-t pt-3 text-left text-xs leading-relaxed">
+                                    <dt className="text-muted-foreground">GRN number</dt><dd className="break-words font-mono font-semibold">{header.grn_number || "Assigning GRN number..."}</dd>
+                                    <dt className="text-muted-foreground">Material</dt><dd className="break-words font-medium">{mat.item_code} ({mat.material_name})</dd>
+                                    <dt className="text-muted-foreground">Category</dt><dd className="break-words">{mat.material_category || "General"}</dd>
+                                    <dt className="text-muted-foreground">Batch quantity</dt><dd className="font-semibold tabular-nums">{b.batch_quantity} {mat.uom}</dd>
+                                  </dl>
 
-                                  <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
+                                  <div className="grid grid-cols-1 gap-2 border-t pt-3">
                                     {qrInfo.data_url ? (
                                       <a
                                         href={qrInfo.data_url}
@@ -6431,8 +7021,8 @@ function GrnPageWorkflow() {
 
       {historyQrLabels && (
         <Dialog open={!!historyQrLabels} onOpenChange={() => setHistoryQrLabels(null)}>
-          <DialogContent className="w-[min(96vw,1100px)] max-w-none rounded-2xl p-0 overflow-hidden">
-            <DialogHeader className="border-b px-5 py-4 text-left">
+          <DialogContent className={`w-[calc(100vw-2rem)] ${historyQrLabels.length === 1 ? "sm:max-w-md" : "sm:max-w-4xl"} max-h-[90dvh] gap-0 rounded-2xl p-0 overflow-hidden`}>
+            <DialogHeader className="border-b px-5 py-4 pr-12 text-left">
               <DialogTitle className="flex items-center gap-2 text-lg font-bold">
                 <QrCode className="size-5 text-primary" /> Batch QR Labels ({historyQrLabels.length}
                 )
@@ -6442,12 +7032,12 @@ function GrnPageWorkflow() {
                 generated for this GRN. Download any label when needed.
               </DialogDescription>
             </DialogHeader>
-            <div className="max-h-[75vh] overflow-y-auto p-5">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="min-h-0 overflow-y-auto p-5">
+              <div className={`grid gap-4 ${historyQrLabels.length > 1 ? "sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-1"}`}>
                 {historyQrLabels.map((label) => (
-                  <Card key={label.qrId} className="rounded-2xl border p-4 text-center">
-                    <div className="mb-3 text-left">
-                      <p className="break-all text-sm font-bold text-foreground">{label.title}</p>
+                  <Card key={label.qrId} className="rounded-xl border p-4 gap-4 text-center shadow-none">
+                    <div className="border-b pb-3 text-left">
+                      <p className="break-words text-sm font-semibold leading-relaxed text-foreground">{label.title}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {label.materialCode} · {label.materialName}
                       </p>
@@ -6470,7 +7060,7 @@ function GrnPageWorkflow() {
                       <a
                         href={label.dataUrl}
                         download={`${label.title}-QR.png`}
-                        className="mt-3 inline-flex h-9 items-center justify-center rounded-xl border border-primary/30 px-4 text-sm font-semibold text-primary hover:bg-primary/5"
+                        className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-primary/30 px-4 text-sm font-semibold text-primary hover:bg-primary/5"
                       >
                         Download QR
                       </a>
@@ -7047,90 +7637,247 @@ function GrnPageWorkflow() {
       {/* 📄 GRN RECORD QUICK DETAIL MODAL DRAWER */}
       {selectedGrnDetail && (
         <Dialog open={!!selectedGrnDetail} onOpenChange={() => setSelectedGrnDetail(null)}>
-          <DialogContent className="max-w-3xl rounded-2xl p-6 space-y-5">
+          <DialogContent id="grn-record-details-dialog" className="w-[calc(100vw-2rem)] sm:max-w-5xl max-h-[92dvh] overflow-y-auto rounded-2xl p-6 gap-4">
             <DialogHeader className="border-b pb-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-bold text-primary px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
-                  {selectedGrnDetail.grn_number || "—"}
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-3 pr-7">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-mono font-bold text-primary px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
+                    {selectedGrnDetail.grn_number || "—"}
+                  </span>
+                  <span className="text-xs font-semibold text-muted-foreground px-2.5 py-0.5 rounded-full bg-muted border">
+                    {selectedGrnDetail.receipt_type === "ASN_RECEIPT" ? "ASN Delivery" : "PO Receipt"}
+                  </span>
+                  {selectedGrnDetail.warehouse_name && (
+                    <span className="text-xs font-medium text-muted-foreground px-2.5 py-0.5 rounded-full bg-muted/60 border hidden sm:inline-flex items-center gap-1">
+                      <Warehouse className="size-3" />
+                      {selectedGrnDetail.warehouse_name}
+                    </span>
+                  )}
+                </div>
                 <StatusBadge status={selectedGrnDetail.status || "COMPLETED"} />
               </div>
               <DialogTitle className="text-lg font-bold text-foreground mt-2">
-                Goods Receipt Note Breakdown & Reconciliation
+                Goods receipt details
               </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Supplier:{" "}
-                <b>
-                  {selectedGrnDetail.supplier_name ||
-                    selectedGrnDetail.supplier_company_name ||
-                    "—"}
-                </b>
+              <DialogDescription className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span>
+                  Supplier:{" "}
+                  <b className="text-foreground">
+                    {selectedGrnDetail.supplier_name ||
+                      selectedGrnDetail.supplier_company_name ||
+                      "—"}
+                  </b>
+                </span>
+                {selectedGrnDetail.receipt_date && (
+                  <span>
+                    Receipt Date:{" "}
+                    <b className="text-foreground">
+                      {new Date(selectedGrnDetail.receipt_date).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </b>
+                  </span>
+                )}
               </DialogDescription>
             </DialogHeader>
 
-            {/* STATUS RECONCILIATION RULE BANNER */}
-            <div
-              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between ${
-                selectedReconciliation.received > 0 &&
-                selectedReconciliation.accounted === selectedReconciliation.received
-                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-800"
-                  : "bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
-                <span>
-                  {selectedReconciliation.received > 0 &&
-                  selectedReconciliation.accounted === selectedReconciliation.received
-                    ? `✓ RECEIVED QUANTITY RECONCILED: ${selectedReconciliation.accounted} ${materials.find((m) => Number(m.received_quantity ?? m.receivedQuantity ?? 0) === selectedReconciliation.received)?.uom || materials[0]?.uom || "PCS"} accounted across accepted, rejected, damaged, and held quantities.`
-                    : `⚠ RECONCILIATION PENDING: ${Math.max(0, selectedReconciliation.received - selectedReconciliation.accounted)} ${materials.find((m) => Number(m.received_quantity ?? m.receivedQuantity ?? 0) === selectedReconciliation.received)?.uom || materials[0]?.uom || "PCS"} unaccounted.`}
-                </span>
+            {/* QUANTITY RECONCILIATION SUMMARY ALERT & METRIC CHIPS */}
+            <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border p-3.5 text-sm ${
+              selectedReconciliation.received > 0 && selectedReconciliation.accounted === selectedReconciliation.received
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-amber-200 bg-amber-50 text-amber-800"
+            }`}>
+              <div className="flex items-start gap-3">
+                <Info className="mt-0.5 size-4 shrink-0" />
+                <div>
+                  <p className="font-semibold text-xs sm:text-sm">Quantity reconciliation</p>
+                  <p className="mt-0.5 text-xs leading-relaxed">
+                    {selectedReconciliation.received > 0 && selectedReconciliation.accounted === selectedReconciliation.received
+                      ? "Received quantities match the recorded quality breakdown."
+                      : "Review the received and accounted quantities in the breakdown below."}
+                  </p>
+                </div>
               </div>
-              <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-background border shadow-xs">
-                Rule Verified
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 bg-muted/20 rounded-xl border text-xs font-mono">
-              <div>
-                <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold">
-                  Dock Number
-                </span>
-                <b className="text-foreground">
-                  {selectedGrnDetail.dock_number
-                    ? selectedGrnDetail.dock_number.startsWith("Dock")
-                      ? selectedGrnDetail.dock_number
-                      : `Dock ${selectedGrnDetail.dock_number}`
-                    : "—"}
-                </b>
-              </div>
-              <div>
-                <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold">
-                  Vehicle Reg
-                </span>
-                <b className="text-foreground">{selectedGrnDetail.vehicle_number || "—"}</b>
-              </div>
-              <div>
-                <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold">
-                  Driver Name
-                </span>
-                <b className="text-foreground">{selectedGrnDetail.driver_name || "—"}</b>
-              </div>
-              <div>
-                <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold">
-                  Received By
-                </span>
-                <b className="text-foreground">{selectedGrnDetail.received_by || "—"}</b>
+              <div className="flex items-center gap-3 shrink-0 text-xs font-mono font-bold bg-white/80 dark:bg-black/30 px-3 py-1.5 rounded-lg border border-inherit">
+                <span>Received: <b className="text-foreground font-sans">{selectedReconciliation.received}</b></span>
+                <span className="text-emerald-700">Good: <b className="font-sans">{selectedReconciliation.good}</b></span>
+                <span className="text-rose-600">Damaged: <b className="font-sans">{selectedReconciliation.damaged}</b></span>
               </div>
             </div>
 
-            {/* MATERIAL LINE ITEMS RECONCILIATION BREAKDOWN TABLE */}
+            {/* 🚚 STRUCTURED SECTION 1: VEHICLE & TRANSPORT LOGISTICS */}
+            <div className="rounded-xl border bg-card p-4 space-y-3 shadow-2xs">
+              <div className="flex items-center gap-2 border-b pb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                <Truck className="size-4 text-primary" />
+                <span>Vehicle & Transport Details</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold mb-1">
+                    Vehicle Registration
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 font-mono font-black text-xs sm:text-sm bg-amber-300/80 text-amber-950 px-2.5 py-1 rounded-md border border-amber-400 shadow-2xs tracking-wider">
+                    <Truck className="size-3.5 shrink-0" />
+                    {selectedGrnDetail.vehicle_number || "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold mb-1">
+                    Driver Details
+                  </span>
+                  <div className="space-y-0.5">
+                    <b className="text-foreground text-xs flex items-center gap-1">
+                      <User className="size-3 text-muted-foreground" />
+                      {selectedGrnDetail.driver_name || detailGateEntry?.driver_name || "—"}
+                    </b>
+                    {(detailGateEntry?.driver_phone || selectedGrnDetail.driver_phone) && (
+                      <span className="text-muted-foreground font-mono text-[11px] flex items-center gap-1">
+                        <Phone className="size-3" />
+                        {detailGateEntry?.driver_phone || selectedGrnDetail.driver_phone}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold mb-1">
+                    Gate Entry / Pass
+                  </span>
+                  <div className="space-y-0.5">
+                    <b className="text-foreground text-xs font-mono flex items-center gap-1">
+                      <ShieldCheck className="size-3 text-primary" />
+                      {selectedGrnDetail.gate_entry_number || selectedGrnDetail.gate_entry_id || detailGateEntry?.gate_entry_number || "—"}
+                    </b>
+                    {selectedGrnDetail.asn_number && (
+                      <span className="text-muted-foreground font-mono text-[11px] block">
+                        ASN: {selectedGrnDetail.asn_number}
+                      </span>
+                    )}
+                    {selectedGrnDetail.po_number && (
+                      <span className="text-muted-foreground font-mono text-[11px] block">
+                        PO: {selectedGrnDetail.po_number}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold mb-1">
+                    Received By
+                  </span>
+                  <b className="text-foreground text-xs block">
+                    {selectedGrnDetail.received_by || "—"}
+                  </b>
+                  <span className="text-muted-foreground text-[11px] block">
+                    {selectedGrnDetail.warehouse_name || "Plant Receiving"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 🚪 STRUCTURED SECTION 2: DOCK BAY ASSIGNMENT & LIVE RELEASE STATUS */}
+            <div className={`rounded-xl border p-4 shadow-2xs transition-colors ${
+              !detailDockInfo.isReleased
+                ? "bg-amber-50/50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-900"
+                : "bg-emerald-50/40 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900"
+            }`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <DoorOpen className={`size-4 ${!detailDockInfo.isReleased ? "text-amber-700" : "text-emerald-700"}`} />
+                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      Dock Bay Assignment & Release Status
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 pt-0.5">
+                    <span className="text-base font-extrabold text-foreground">
+                      {selectedGrnDetail.dock_number
+                        ? selectedGrnDetail.dock_number.startsWith("Dock")
+                          ? selectedGrnDetail.dock_number
+                          : `Dock ${selectedGrnDetail.dock_number}`
+                        : detailDockInfo.dock?.dock_number || "—"}
+                    </span>
+                    {detailDockInfo.loading ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-muted text-muted-foreground border">
+                        <Loader2 className="size-3.5 animate-spin" />
+                        CHECKING DOCK STATUS
+                      </span>
+                    ) : !detailDockInfo.isReleased ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+                        DOCK OCCUPIED / NOT RELEASED
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <CheckCircle2 className="size-3.5 text-emerald-600" />
+                        DOCK RELEASED & AVAILABLE
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {detailDockInfo.loading
+                      ? "Checking dock availability for this receipt."
+                      : !detailDockInfo.isReleased
+                        ? `Vehicle ${selectedGrnDetail.vehicle_number || ""} is currently occupying this dock bay. Release once vehicle unloading is completed.`
+                        : "Dock bay is released and available for subsequent vehicles."}
+                  </p>
+                </div>
+
+                {/* DOCK RELEASE ACTION BUTTON */}
+                <div className="shrink-0 flex items-center">
+                  {detailDockInfo.loading ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground bg-muted/70 border px-3 py-1.5 rounded-xl">
+                      <Loader2 className="size-4 animate-spin" />
+                      Checking dock status
+                    </span>
+                  ) : !detailDockInfo.isReleased ? (
+                    <Button
+                      id="btn-release-dock-card"
+                      type="button"
+                      disabled={detailDockInfo.releasing}
+                      onClick={handleReleaseDockFromDetail}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs rounded-xl px-4 py-2.5 flex items-center gap-2"
+                    >
+                      {detailDockInfo.releasing ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <DoorOpen className="size-4" />
+                      )}
+                      Release Dock Bay Now
+                    </Button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-100/70 border border-emerald-300/80 px-3 py-1.5 rounded-xl">
+                      <CheckCircle2 className="size-4 text-emerald-600" />
+                      Bay Turnaround Clear
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 📦 MATERIAL LINE ITEMS RECONCILIATION BREAKDOWN TABLE */}
             <div className="space-y-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Line Item Quantity Reconciliation
-              </h4>
-              <div className="rounded-xl border overflow-x-auto text-xs">
-                <table className="w-full text-left">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <PackageCheck className="size-4 text-primary" />
+                  Material Line Items & Quantity Reconciliation
+                </h4>
+                <span className="text-xs text-muted-foreground">
+                  {selectedReconciliation.itemCount} material item{selectedReconciliation.itemCount === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="rounded-xl border overflow-x-auto text-xs bg-card shadow-2xs">
+                <table className="grn-reconciliation-table w-full min-w-[800px] table-fixed text-left">
+                  <colgroup>
+                    <col className="w-[28%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[18%]" />
+                  </colgroup>
                   <thead className="bg-muted/60 font-bold text-muted-foreground text-[11px] uppercase border-b">
                     <tr>
                       <th className="p-2.5">Material Details</th>
@@ -7148,11 +7895,20 @@ function GrnPageWorkflow() {
                           ? selectedGrnDetail.lines
                           : selectedGrnDetail.materials && selectedGrnDetail.materials.length > 0
                             ? selectedGrnDetail.materials
-                            : materials.length > 0
-                              ? materials
-                              : [];
+                            : [];
+                      const receivedLines = detailLines.filter((line: any) => {
+                        const received = Number(line.received_quantity ?? line.receivedQuantity ?? 0);
+                        const accounted = Number(
+                          line.good_quantity ?? line.goodQuantity ?? line.accepted_quantity ??
+                          line.acceptedQuantity ?? line.quality_approved_quantity ??
+                          line.qualityApprovedQuantity ?? 0,
+                        ) + Number(line.damaged_quantity ?? line.damagedQuantity ?? 0)
+                          + Number(line.rejected_quantity ?? line.rejectedQuantity ?? 0)
+                          + Number(line.held_quantity ?? line.heldQuantity ?? 0);
+                        return received > 0 || accounted > 0;
+                      });
 
-                      if (detailLines.length === 0) {
+                      if (receivedLines.length === 0) {
                         return (
                           <tr>
                             <td
@@ -7165,42 +7921,37 @@ function GrnPageWorkflow() {
                         );
                       }
 
-                      return detailLines.map((m: any, i: number) => {
+                      return receivedLines.map((m: any, i: number) => {
                         const itemCode = m.item_code || m.itemCode || `MAT-00${i + 1}`;
                         const materialName = m.material_name || m.materialName || itemCode;
+                        const materialCategory = m.material_category || m.materialCategory || "";
                         const uom = m.uom || "PCS";
                         const receivedQty = Number(m.received_quantity ?? m.receivedQuantity ?? 0);
-                        const currentMaterial = materials[i];
-                        const currentRowKey = currentMaterial
-                          ? grnMaterialKey(currentMaterial, i)
-                          : "";
-                        const rawGoodQty = Number(m.good_quantity ?? m.goodQuantity ?? 0);
-                        const currentGoodQty = Number(
-                          (currentRowKey ? qualityApproved[currentRowKey] : undefined) ??
-                            currentMaterial?.good_quantity ??
+                        const goodQty = Number(
+                          m.good_quantity ??
+                            m.goodQuantity ??
+                            m.accepted_quantity ??
+                            m.acceptedQuantity ??
+                            m.quality_approved_quantity ??
+                            m.qualityApprovedQuantity ??
                             0,
                         );
-                        const rawDamQty = Number(m.damaged_quantity ?? m.damagedQuantity ?? 0);
-                        const currentDamQty = Number(currentMaterial?.damaged_quantity ?? 0);
-                        const goodQty = rawGoodQty > 0 ? rawGoodQty : currentGoodQty;
-                        const damQty = rawDamQty > 0 ? rawDamQty : currentDamQty;
-                        const rejectedQty = Number(
-                          m.rejected_quantity ??
-                            m.rejectedQuantity ??
-                            currentMaterial?.rejected_quantity ??
-                            0,
-                        );
-                        const heldQty = Number(
-                          m.held_quantity ?? m.heldQuantity ?? currentMaterial?.held_quantity ?? 0,
-                        );
+                        const damQty = Number(m.damaged_quantity ?? m.damagedQuantity ?? 0);
+                        const rejectedQty = Number(m.rejected_quantity ?? m.rejectedQuantity ?? 0);
+                        const heldQty = Number(m.held_quantity ?? m.heldQuantity ?? 0);
                         const accounted = goodQty + damQty + rejectedQty + heldQty;
                         const isComplete = receivedQty > 0 && accounted === receivedQty;
 
                         return (
                           <tr key={itemCode || `mat_detail_${i}`} className="hover:bg-muted/20">
                             <td className="p-2.5 font-sans font-bold">
-                              <span className="text-primary font-mono block">{itemCode}</span>
-                              <span className="text-foreground text-xs">{materialName}</span>
+                              <span className="text-primary font-mono block text-xs">{itemCode}</span>
+                              <span className="text-foreground text-xs block">{materialName}</span>
+                              {materialCategory && (
+                                <span className="text-muted-foreground text-[10px] font-normal block">
+                                  {materialCategory}
+                                </span>
+                              )}
                             </td>
                             <td className="p-2.5 text-right font-bold text-foreground">
                               {receivedQty} {uom}
@@ -7216,7 +7967,7 @@ function GrnPageWorkflow() {
                             </td>
                             <td className="p-2.5 text-center">
                               <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                className={`inline-flex items-center justify-center whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-semibold ${
                                   isComplete
                                     ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
                                     : "bg-amber-100 text-amber-800 border border-amber-300"
@@ -7232,16 +7983,84 @@ function GrnPageWorkflow() {
                   </tbody>
                 </table>
               </div>
+              {(() => {
+                const allLines = selectedGrnDetail.lines?.length
+                  ? selectedGrnDetail.lines
+                  : selectedGrnDetail.materials || [];
+                const unreceived = allLines.filter((line: any) =>
+                  Number(line.received_quantity ?? line.receivedQuantity ?? 0) <= 0 &&
+                  Number(line.good_quantity ?? line.goodQuantity ?? line.accepted_quantity ??
+                    line.acceptedQuantity ?? line.quality_approved_quantity ??
+                    line.qualityApprovedQuantity ?? 0) <= 0 &&
+                  Number(line.damaged_quantity ?? line.damagedQuantity ?? 0) <= 0 &&
+                  Number(line.rejected_quantity ?? line.rejectedQuantity ?? 0) <= 0 &&
+                  Number(line.held_quantity ?? line.heldQuantity ?? 0) <= 0,
+                );
+                if (!unreceived.length) return null;
+                return (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <span className="font-semibold">Not received in this GRN:</span>{" "}
+                    {unreceived.map((line: any) =>
+                      `${line.item_code || line.itemCode} ${line.material_name || line.materialName || ""}`.trim(),
+                    ).join(", ")}. These ASN balance lines do not create inventory or putaway tasks.
+                  </div>
+                );
+              })()}
             </div>
 
-            <div className="flex justify-end items-center pt-3 border-t">
-              <Button
-                variant="outline"
-                className="rounded-xl text-xs font-bold"
-                onClick={() => setSelectedGrnDetail(null)}
-              >
-                Close
-              </Button>
+            {/* MODAL FOOTER WITH DOCK RELEASE BUTTON & ACTIONS */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t">
+              <div className="flex items-center gap-2 text-xs">
+                {detailDockInfo.loading ? (
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground font-semibold bg-muted/70 border px-3 py-1.5 rounded-lg">
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Checking dock status
+                  </span>
+                ) : !detailDockInfo.isReleased ? (
+                  <span className="inline-flex items-center gap-1.5 text-amber-800 font-semibold bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg">
+                    <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+                    Dock {selectedGrnDetail.dock_number || "bay"} release required
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-emerald-800 font-semibold bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg">
+                    <CheckCircle2 className="size-3.5 text-emerald-600" />
+                    Dock {selectedGrnDetail.dock_number || "bay"} released & available
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {!detailDockInfo.isReleased && (
+                  <Button
+                    id="btn-footer-release-dock"
+                    type="button"
+                    disabled={detailDockInfo.releasing}
+                    onClick={handleReleaseDockFromDetail}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5"
+                  >
+                    {detailDockInfo.releasing ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <DoorOpen className="size-3.5" />
+                    )}
+                    Release Dock
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  className="rounded-xl text-xs font-bold"
+                  onClick={() => printGrnCertificate(selectedGrnDetail)}
+                >
+                  <Printer className="mr-1.5 size-3.5" />
+                  Print GRN
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="rounded-xl text-xs font-bold"
+                  onClick={() => setSelectedGrnDetail(null)}
+                >
+                  Close
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -7336,6 +8155,53 @@ function GrnPageWorkflow() {
       )}
 
       {/* 👁️ INTERACTIVE DOCUMENT VIEWER MODAL / PAGE */}
+      <Dialog
+        open={asnCameraOpen}
+        onOpenChange={(open) => {
+          if (!open) closeAsnDocumentCamera();
+        }}
+      >
+        <DialogContent className="max-w-xl rounded-2xl p-5">
+          <DialogHeader>
+            <DialogTitle className="font-black text-primary">
+              {uploadedDocuments.some((document) =>
+                document.category.toLowerCase().includes("asn"),
+              )
+                ? "Retake ASN Document"
+                : "Capture ASN Document"}
+            </DialogTitle>
+            <DialogDescription>
+              Capture a clear image. Saving a retake replaces the current ASN copy.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <video
+              ref={asnCameraVideoRef}
+              autoPlay
+              playsInline
+              className="w-full rounded-xl border bg-black"
+            />
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                className="flex-1 rounded-xl"
+                onClick={captureAsnDocument}
+              >
+                <Camera className="mr-1.5 size-4" /> Capture & Save
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={closeAsnDocumentCamera}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {viewingDocumentModal &&
         (() => {
           const isImg =
@@ -7546,6 +8412,18 @@ function GrnPageWorkflow() {
                   >
                     Close Viewer
                   </Button>
+                  {viewingDocumentModal.category.toLowerCase().includes("asn") && (
+                    <Button
+                      type="button"
+                      className="rounded-xl text-xs font-bold"
+                      onClick={() => {
+                        setViewingDocumentModal(null);
+                        void openAsnDocumentCamera();
+                      }}
+                    >
+                      <Camera className="mr-1.5 size-4" /> Retake ASN
+                    </Button>
+                  )}
                 </div>
               </DialogContent>
             </Dialog>
@@ -7573,14 +8451,19 @@ function GrnPageWorkflow() {
                 Later
               </Button>
               <Button
-                className="rounded-xl"
+                className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
                 onClick={async () => {
                   try {
                     setBusyAction(true);
-                    await api.completeDockReceiving(dockReleasePrompt);
+                    try {
+                      await api.completeDockReceiving(dockReleasePrompt);
+                    } catch (e) {
+                      console.warn("completeDockReceiving status:", e);
+                    }
                     await api.releaseDock(dockReleasePrompt);
                     setDockReleasePrompt(null);
                     setDockReleasedAlert(true);
+                    await loadWarehouseDocks();
                     window.dispatchEvent(new CustomEvent("notifications:refresh"));
                   } catch (error: any) {
                     toast.error("Unable to release dock", {

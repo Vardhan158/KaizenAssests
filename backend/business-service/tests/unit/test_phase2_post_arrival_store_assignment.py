@@ -21,66 +21,66 @@ from app.common.persistence.models import (
     PurchaseOrderItemModel,
     SupplierModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreManagerUserModel,
-    StoreModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    UserAccountModel,
+    WarehouseModel,
 )
 
 
 @pytest.mark.asyncio
-async def test_phase2_post_arrival_store_assignment_flow():
+async def test_phase2_post_arrival_warehouse_assignment_flow():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         wh_manager_headers = {"Authorization": "Bearer mock-jwt-warehouse-token"}
-        store_a_headers = {"Authorization": "Bearer mock-jwt-store-mgr-elec-token"}
-        store_b_headers = {"Authorization": "Bearer mock-jwt-store-mgr-mech-token"}
+        warehouse_a_headers = {"Authorization": "Bearer mock-jwt-warehouse-mgr-elec-token"}
+        warehouse_b_headers = {"Authorization": "Bearer mock-jwt-warehouse-mgr-mech-token"}
 
         async with session_scope() as session:
             now_utc = datetime.datetime.now()
             today = datetime.date.today()
 
-            # 1. Setup Active Stores in WH-01
-            s_elec = (await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-PH2-ELEC"))).scalar_one_or_none()
+            # 1. Setup Active Warehouses in WH-01
+            s_elec = (await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-PH2-ELEC"))).scalar_one_or_none()
             if not s_elec:
-                s_elec = StoreModel(
+                s_elec = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-PH2-ELEC",
-                    store_name="Phase 2 Electrical Store",
+                    warehouse_code="STR-PH2-ELEC",
+                    warehouse_name="Phase 2 Electrical Warehouse",
                     warehouse_id="WH-01",
                     status="ACTIVE",
                 )
                 session.add(s_elec)
 
-            s_mech = (await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-PH2-MECH"))).scalar_one_or_none()
+            s_mech = (await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-PH2-MECH"))).scalar_one_or_none()
             if not s_mech:
-                s_mech = StoreModel(
+                s_mech = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-PH2-MECH",
-                    store_name="Phase 2 Mechanical Store",
+                    warehouse_code="STR-PH2-MECH",
+                    warehouse_name="Phase 2 Mechanical Warehouse",
                     warehouse_id="WH-01",
                     status="ACTIVE",
                 )
                 session.add(s_mech)
 
-            # Inactive Store
-            s_inactive = (await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-PH2-INACT"))).scalar_one_or_none()
+            # Inactive Warehouse
+            s_inactive = (await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-PH2-INACT"))).scalar_one_or_none()
             if not s_inactive:
-                s_inactive = StoreModel(
+                s_inactive = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-PH2-INACT",
-                    store_name="Inactive Store",
+                    warehouse_code="STR-PH2-INACT",
+                    warehouse_name="Inactive Warehouse",
                     warehouse_id="WH-01",
                     status="INACTIVE",
                 )
                 session.add(s_inactive)
 
-            # Store in another Warehouse (WH-NORTH)
-            s_other_wh = (await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-PH2-NORTH"))).scalar_one_or_none()
+            # Warehouse in another Warehouse (WH-NORTH)
+            s_other_wh = (await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-PH2-NORTH"))).scalar_one_or_none()
             if not s_other_wh:
-                s_other_wh = StoreModel(
+                s_other_wh = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-PH2-NORTH",
-                    store_name="North Warehouse Store",
+                    warehouse_code="STR-PH2-NORTH",
+                    warehouse_name="North Warehouse Warehouse",
                     warehouse_id="WH-NORTH",
                     status="ACTIVE",
                 )
@@ -211,15 +211,15 @@ async def test_phase2_post_arrival_store_assignment_flow():
 
             await session.commit()
             entry_id = str(ge.id)
-            elec_store_id = str(s_elec.id)
-            mech_store_id = str(s_mech.id)
-            inactive_store_id = str(s_inactive.id)
-            north_store_id = str(s_other_wh.id)
+            elec_warehouse_ref_id = str(s_elec.id)
+            mech_warehouse_ref_id = str(s_mech.id)
+            inactive_warehouse_ref_id = str(s_inactive.id)
+            north_warehouse_ref_id = str(s_other_wh.id)
 
         # -------------------------------------------------------------
         # TEST 1: Validation Failures
         # -------------------------------------------------------------
-        # 1a. Missing store_id
+        # 1a. Missing warehouse_ref_id
         res_fail_missing = await client.post(
             f"/api/gate-entries/{entry_id}/assign-dock",
             headers=wh_manager_headers,
@@ -227,48 +227,48 @@ async def test_phase2_post_arrival_store_assignment_flow():
         )
         assert res_fail_missing.status_code == 422
 
-        # 1b. Unknown store
+        # 1b. Unknown warehouse
         res_fail_unknown = await client.post(
             f"/api/gate-entries/{entry_id}/assign-dock",
             headers=wh_manager_headers,
-            json={"dock_id": "DOCK-PH2-01", "store_id": str(uuid.uuid4())},
+            json={"dock_id": "DOCK-PH2-01", "warehouse_ref_id": str(uuid.uuid4())},
         )
         assert res_fail_unknown.status_code == 422
         assert "does not exist" in res_fail_unknown.json()["detail"]
 
-        # 1c. Inactive store
+        # 1c. Inactive warehouse
         res_fail_inactive = await client.post(
             f"/api/gate-entries/{entry_id}/assign-dock",
             headers=wh_manager_headers,
-            json={"dock_id": "DOCK-PH2-01", "store_id": inactive_store_id},
+            json={"dock_id": "DOCK-PH2-01", "warehouse_ref_id": inactive_warehouse_ref_id},
         )
         assert res_fail_inactive.status_code == 422
         assert "is inactive" in res_fail_inactive.json()["detail"]
 
-        # 1d. Store belonging to a different warehouse (WH-NORTH vs WH-01)
+        # 1d. Warehouse belonging to a different warehouse (WH-NORTH vs WH-01)
         res_fail_wh = await client.post(
             f"/api/gate-entries/{entry_id}/assign-dock",
             headers=wh_manager_headers,
-            json={"dock_id": "DOCK-PH2-01", "store_id": north_store_id},
+            json={"dock_id": "DOCK-PH2-01", "warehouse_ref_id": north_warehouse_ref_id},
         )
         assert res_fail_wh.status_code == 422
         assert "does not match dock warehouse" in res_fail_wh.json()["detail"]
 
         # -------------------------------------------------------------
-        # TEST 2: Successful Post-Arrival Dock & Store Assignment
+        # TEST 2: Successful Post-Arrival Dock & Warehouse Assignment
         # -------------------------------------------------------------
         res_assign = await client.post(
             f"/api/gate-entries/{entry_id}/assign-dock",
             headers=wh_manager_headers,
-            json={"dock_id": "DOCK-PH2-01", "store_id": elec_store_id},
+            json={"dock_id": "DOCK-PH2-01", "warehouse_ref_id": elec_warehouse_ref_id},
         )
         assert res_assign.status_code == 200, res_assign.text
         data = res_assign.json()
         assert data["status"] == "DOCK_ASSIGNED"
         assert data["dock_number"] == "DOCK-PH2-01"
-        assert data["assigned_store_id"] == elec_store_id
-        assert data["assigned_store_code"] == "STR-PH2-ELEC"
-        assert data["assigned_store_name"] == "Phase 2 Electrical Store"
+        assert data["assigned_warehouse_ref_id"] == elec_warehouse_ref_id
+        assert data["assigned_warehouse_code"] == "STR-PH2-ELEC"
+        assert data["assigned_warehouse_name"] == "Phase 2 Electrical Warehouse"
 
         # -------------------------------------------------------------
         # TEST 3: Verify Database Persistence
@@ -281,28 +281,28 @@ async def test_phase2_post_arrival_store_assignment_flow():
             ).scalar_one_or_none()
             assert assign_row is not None
             assert assign_row.dock_number == "DOCK-PH2-01"
-            assert str(assign_row.assigned_store_id) == elec_store_id
-            assert assign_row.assigned_store_code == "STR-PH2-ELEC"
-            assert assign_row.assigned_store_name == "Phase 2 Electrical Store"
+            assert str(assign_row.assigned_warehouse_ref_id) == elec_warehouse_ref_id
+            assert assign_row.assigned_warehouse_code == "STR-PH2-ELEC"
+            assert assign_row.assigned_warehouse_name == "Phase 2 Electrical Warehouse"
 
             # Verify targeted notification in database
             notif_elec = (
                 await session.execute(
                     select(NotificationModel).where(
-                        NotificationModel.user_role == "STR:STR-PH2-ELEC"
+                        NotificationModel.user_role == "WH:STR-PH2-ELEC"
                     )
                 )
             ).scalars().all()
             assert len(notif_elec) >= 1
-            assert "Phase 2 Electrical Store" in notif_elec[0].message
+            assert "Phase 2 Electrical Warehouse" in notif_elec[0].message
             assert "DOCK-PH2-01" in notif_elec[0].message
             assert "KA-01-PH2-1234" in notif_elec[0].message
 
-            # Verify unrelated store (Mechanical Store) did NOT receive this notification
+            # Verify unrelated warehouse (Mechanical Warehouse) did NOT receive this notification
             notif_mech = (
                 await session.execute(
                     select(NotificationModel).where(
-                        NotificationModel.user_role == "STR:STR-PH2-MECH",
+                        NotificationModel.user_role == "WH:STR-PH2-MECH",
                         NotificationModel.message.like("%GE-PH2-001%"),
                     )
                 )
@@ -310,7 +310,7 @@ async def test_phase2_post_arrival_store_assignment_flow():
             assert len(notif_mech) == 0
 
         # -------------------------------------------------------------
-        # TEST 4: Verify Store-Level Arrival Scoping
+        # TEST 4: Verify Warehouse-Level Arrival Scoping
         # -------------------------------------------------------------
         # Warehouse Manager / Admin sees the arrival
         res_arrivals_wm = await client.get("/api/gate-entries/inbound-arrivals", headers=wh_manager_headers)
@@ -318,12 +318,12 @@ async def test_phase2_post_arrival_store_assignment_flow():
         wm_arrival_ids = [a["id"] for a in res_arrivals_wm.json()]
         assert entry_id in wm_arrival_ids
 
-        # Assigned arrival contains store details
+        # Assigned arrival contains warehouse details
         assigned_arrival = next(a for a in res_arrivals_wm.json() if a["id"] == entry_id)
         assert assigned_arrival["assigned_dock_id"] == "DOCK-PH2-01"
-        assert assigned_arrival["assigned_store_id"] == elec_store_id
-        assert assigned_arrival["assigned_store_code"] == "STR-PH2-ELEC"
-        assert assigned_arrival["assigned_store_name"] == "Phase 2 Electrical Store"
+        assert assigned_arrival["assigned_warehouse_ref_id"] == elec_warehouse_ref_id
+        assert assigned_arrival["assigned_warehouse_code"] == "STR-PH2-ELEC"
+        assert assigned_arrival["assigned_warehouse_name"] == "Phase 2 Electrical Warehouse"
 
         # -------------------------------------------------------------
         # TEST 5: Re-assignment Rejection (Already DOCK_ASSIGNED)
@@ -331,25 +331,25 @@ async def test_phase2_post_arrival_store_assignment_flow():
         res_reassign = await client.post(
             f"/api/gate-entries/{entry_id}/assign-dock",
             headers=wh_manager_headers,
-            json={"dock_id": "DOCK-PH2-02", "store_id": mech_store_id},
+            json={"dock_id": "DOCK-PH2-02", "warehouse_ref_id": mech_warehouse_ref_id},
         )
         assert res_reassign.status_code == 409
 
         # -------------------------------------------------------------
-        # TEST 6: Store-Specific Notification API Isolation
+        # TEST 6: Warehouse-Specific Notification API Isolation
         # -------------------------------------------------------------
-        # Electrical Store Manager querying notifications
+        # Electrical Warehouse Operator querying notifications
         res_notif_elec = await client.get(
-            "/api/v1/procurement/notifications?role=STORE_MANAGER&store_code=STR-PH2-ELEC",
+            "/api/v1/procurement/notifications?role=WAREHOUSE_OPERATOR&warehouse_code=STR-PH2-ELEC",
             headers=wh_manager_headers,
         )
         assert res_notif_elec.status_code == 200
         elec_notifs = res_notif_elec.json()
-        assert any("Phase 2 Electrical Store" in n["message"] for n in elec_notifs)
+        assert any("Phase 2 Electrical Warehouse" in n["message"] for n in elec_notifs)
 
-        # Mechanical Store Manager querying notifications (must NOT see Electrical Store's arrival notification)
+        # Mechanical Warehouse Operator querying notifications (must NOT see Electrical Warehouse's arrival notification)
         res_notif_mech = await client.get(
-            "/api/v1/procurement/notifications?role=STORE_MANAGER&store_code=STR-PH2-MECH",
+            "/api/v1/procurement/notifications?role=WAREHOUSE_OPERATOR&warehouse_code=STR-PH2-MECH",
             headers=wh_manager_headers,
         )
         assert res_notif_mech.status_code == 200

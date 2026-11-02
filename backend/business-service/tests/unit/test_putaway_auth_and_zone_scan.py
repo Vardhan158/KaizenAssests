@@ -14,7 +14,7 @@ from app.security.dependencies import get_current_user
 from app.common.persistence.models import MaterialModel, MaterialStockModel
 from app.modules.receiving.infrastructure.persistence.models import GrnLineModel, GrnModel
 from app.modules.storage.infrastructure.persistence.models import PutawayTaskModel
-from app.modules.store.infrastructure.persistence.models import StoreModel, StoreZoneModel, StoreManagerUserModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel, WarehouseZoneModel, UserAccountModel
 
 
 @pytest.mark.asyncio
@@ -88,8 +88,8 @@ async def test_invalid_bearer_does_not_trust_x_user_roles_in_prod(monkeypatch):
 @pytest.mark.asyncio
 async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
     test_uid = uuid.uuid4().hex[:6].upper()
-    store_id = uuid.uuid4()
-    other_store_id = uuid.uuid4()
+    warehouse_ref_id = uuid.uuid4()
+    other_warehouse_ref_id = uuid.uuid4()
     zone_id = uuid.uuid4()
     grn_id = uuid.uuid4()
     task_id = uuid.uuid4()
@@ -97,30 +97,30 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
     emp_id = f"EMP-{test_uid}"
 
     async with session_scope() as session:
-        # 1. Stores
-        store = StoreModel(
-            id=store_id,
-            store_code=f"STR-{test_uid}",
-            store_name=f"Store {test_uid}",
+        # 1. Warehouses
+        warehouse = WarehouseModel(
+            id=warehouse_ref_id,
+            warehouse_code=f"STR-{test_uid}",
+            warehouse_name=f"Warehouse {test_uid}",
             warehouse_id="WH-001",
             status="ACTIVE",
         )
-        session.add(store)
+        session.add(warehouse)
 
-        other_store = StoreModel(
-            id=other_store_id,
-            store_code=f"STR-OTH-{test_uid}",
-            store_name=f"Other Store {test_uid}",
+        other_warehouse = WarehouseModel(
+            id=other_warehouse_ref_id,
+            warehouse_code=f"STR-OTH-{test_uid}",
+            warehouse_name=f"Other Warehouse {test_uid}",
             warehouse_id="WH-001",
             status="ACTIVE",
         )
-        session.add(other_store)
+        session.add(other_warehouse)
         await session.flush()
 
-        # 2. Store Manager User
-        mgr = StoreManagerUserModel(
+        # 2. Warehouse Operator User
+        mgr = UserAccountModel(
             id=uuid.uuid4(),
-            store_id=store.id,
+            warehouse_ref_id=warehouse.id,
             employee_id=emp_id,
             username=f"mgr_{test_uid.lower()}",
             full_name=f"Manager {test_uid}",
@@ -131,9 +131,9 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
         session.add(mgr)
 
         # 3. Zone
-        zone = StoreZoneModel(
+        zone = WarehouseZoneModel(
             id=zone_id,
-            store_id=store.id,
+            warehouse_ref_id=warehouse.id,
             zone_code=f"ZON-{test_uid}",
             zone_name=f"Zone {test_uid}",
             status="ACTIVE",
@@ -180,18 +180,7 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
         session.add(grn)
         await session.flush()
 
-        session.add(GrnLineModel(
-            grn_id=grn.id,
-            item_code=mat_code,
-            material_name=f"Test Material {test_uid}",
-            uom="NOS",
-            received_quantity=Decimal("10.0"),
-            accepted_quantity=Decimal("10.0"),
-            good_quantity=Decimal("10.0"),
-        ))
-        await session.flush()
-
-        # 6. Putaway Task assigned to store
+        # 6. Putaway Task assigned to warehouse
         task = PutawayTaskModel(
             id=task_id,
             task_number=f"PUT-{test_uid}",
@@ -203,9 +192,9 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
             uom="NOS",
             warehouse_id="WH-001",
             source_location="RECEIVING-DOCK",
-            destination_store_id=store.id,
+            destination_warehouse_ref_id=warehouse.id,
             destination_zone_id=zone.id,
-            status="ASSIGNED_TO_STORE",
+            status="ASSIGNED_TO_WAREHOUSE",
             created_by="warehouse_clerk",
             created_at=datetime.datetime.now(datetime.timezone.utc),
         )
@@ -213,7 +202,7 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        # 1. Login as the newly created Store Manager with DB credentials
+        # 1. Login as the newly created Warehouse Operator with DB credentials
         login_res = await client.post(
             "/api/v1/auth/dev-login",
             json={"username": f"mgr_{test_uid.lower()}", "password": "store123"},
@@ -222,7 +211,7 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
         mgr_token = login_res.json()["token"]
         mgr_headers = {"Authorization": f"Bearer {mgr_token}"}
 
-        # 2. Store Manager completes Putaway using raw Zone UUID (Resolving 422 issue)
+        # 2. Warehouse Operator completes Putaway using raw Zone UUID (Resolving 422 issue)
         complete_res = await client.post(
             f"/api/storage/putaway-tasks/{task_id}/complete",
             json={
@@ -236,7 +225,7 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
         assert complete_res.json()["status"] == "COMPLETED"
         assert complete_res.json()["destination_zone"] == f"ZON-{test_uid}"
 
-        # 3. Cross-Store Rejection Test: create second task assigned to other_store_id
+        # 3. Cross-Warehouse Rejection Test: create second task assigned to other_warehouse_ref_id
         task2_id = uuid.uuid4()
         grn2_id = uuid.uuid4()
         async with session_scope() as session:
@@ -263,16 +252,16 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
                 uom="NOS",
                 warehouse_id="WH-001",
                 source_location="RECEIVING-DOCK",
-                destination_store_id=other_store_id,
+                destination_warehouse_ref_id=other_warehouse_ref_id,
                 destination_zone_id=None,
-                status="ASSIGNED_TO_STORE",
+                status="ASSIGNED_TO_WAREHOUSE",
                 created_by="warehouse_clerk",
                 created_at=datetime.datetime.now(datetime.timezone.utc),
             )
             session.add(task2)
             await session.commit()
 
-        # Attempt to complete task2 (which belongs to other_store_id) as Manager of store_id -> Expect 403 Forbidden
+        # Attempt to complete task2 (which belongs to other_warehouse_ref_id) as Manager of warehouse_ref_id -> Expect 403 Forbidden
         cross_res = await client.post(
             f"/api/storage/putaway-tasks/{task2_id}/complete",
             json={
@@ -283,4 +272,4 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
             headers=mgr_headers,
         )
         assert cross_res.status_code == 403, cross_res.text
-        assert "assigned to your Store" in cross_res.json()["detail"] or "Cannot complete Putaway" in cross_res.json()["detail"]
+        assert "assigned to your Warehouse" in cross_res.json()["detail"] or "Cannot complete Putaway" in cross_res.json()["detail"]

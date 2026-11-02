@@ -368,9 +368,8 @@ function DispatchPickingPackingPage() {
       title="Picking & Packing"
       subtitle="Integrated warehouse execution screen for product picking, barcode scan verification, and cartonization"
       actions={
-        <Button variant="outline" className="rounded-xl" onClick={() => void loadData()}>
-          <RefreshCw className="size-4 mr-2" /> Refresh
-        </Button>
+        <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" className="rounded-xl" onClick={() => void loadData()}>
+          <RefreshCw className="size-4" /></Button>
       }
     >
       {loading ? (

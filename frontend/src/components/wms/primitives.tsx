@@ -14,6 +14,7 @@ export function StatCard({
   to,
   showArrow = false,
   compact = false,
+  sparkline,
   infoTooltip,
 }: {
   label: string;
@@ -24,6 +25,7 @@ export function StatCard({
   to?: string;
   showArrow?: boolean;
   compact?: boolean;
+  sparkline?: { label: string; value: number }[];
   infoTooltip?: string;
 }) {
   const tones: Record<string, string> = {
@@ -36,7 +38,8 @@ export function StatCard({
   const cardContent = (
     <Card
       className={cn(
-        "flex h-full flex-col gap-0 rounded-2xl border-border/70 shadow-soft transition-all duration-300 group-hover:-translate-y-0.5 group-hover:shadow-lift",
+        "relative flex h-full flex-col gap-0 rounded-2xl border-border/70 shadow-soft transition-all duration-300 group-hover:-translate-y-0.5 group-hover:shadow-lift",
+        sparkline && "pr-24",
         compact ? "min-h-24 justify-center p-4" : "min-h-36 p-4",
       )}
     >
@@ -91,6 +94,19 @@ export function StatCard({
         >
           {delta || "No additional detail"}
         </p>
+      )}
+      {sparkline && (
+        <div role="img" aria-label={`${label}: ${sparkline.map((bar) => `${bar.label}: ${bar.value}`).join(", ")}`}
+          className={cn("absolute right-4 top-1/2 flex h-14 w-16 -translate-y-1/2 items-end gap-1", {
+            "text-primary": tone === "primary" || tone === "teal",
+            "text-success": tone === "success",
+            "text-warning-foreground": tone === "warning",
+            "text-destructive": tone === "danger",
+          })}>
+          {sparkline.map((bar, index) => <span key={bar.label} title={`${bar.label}: ${bar.value}`}
+            className="block flex-1 rounded-t bg-current"
+            style={{ height: `${bar.value > 0 ? Math.max(12, bar.value / Math.max(1, ...sparkline.map((item) => item.value)) * 100) : 3}%`, opacity: bar.value > 0 ? 0.35 + index * 0.09 : 0.12 }} />)}
+        </div>
       )}
     </Card>
   );

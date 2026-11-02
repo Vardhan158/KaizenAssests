@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from sqlalchemy import select, text
 from app.database.session import session_scope
 
-# Import all model modules so that all referenced tables (like store, material_request, etc.)
+# Import all model modules so that all referenced tables (like warehouse, material_request, etc.)
 # are registered in SQLAlchemy Base.metadata for foreign key resolution.
 import app.common.persistence.models
 import app.modules.assembly.infrastructure.persistence.models
@@ -33,7 +33,7 @@ import app.modules.quarantine.infrastructure.persistence.models
 import app.modules.receiving.infrastructure.persistence.models
 import app.modules.returns.infrastructure.persistence.models
 import app.modules.storage.infrastructure.persistence.models
-import app.modules.store.infrastructure.persistence.models
+import app.modules.warehouse.infrastructure.persistence.models
 
 from app.common.persistence.models import (
     SupplierModel,

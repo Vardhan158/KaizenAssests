@@ -21,7 +21,7 @@ async def test_e2e_prompt12_dispatch_picking_packing_loading_ready_for_gate_exit
         }
         warehouse_headers = {
             "Authorization": "Bearer mock-wh-token",
-            "X-User-Roles": "WAREHOUSE_MANAGER,STORE_MANAGER",
+            "X-User-Roles": "WAREHOUSE_MANAGER,WAREHOUSE_OPERATOR",
             "X-User-Name": "warehouse_manager",
         }
         gate_headers = {
@@ -37,12 +37,12 @@ async def test_e2e_prompt12_dispatch_picking_packing_loading_ready_for_gate_exit
         assert res_fg.status_code == 200, f"List finished goods failed: {res_fg.text}"
         fg_list = res_fg.json()
         fg_pump = next((f for f in fg_list if f.get("product_code") == "PUMP-100"), None)
-        assert fg_pump is not None, "Finished Good PUMP-100 must exist in FG Store"
+        assert fg_pump is not None, "Finished Good PUMP-100 must exist in FG Warehouse"
         assert float(fg_pump["quantity"]) >= 10.0, f"Expected 10.0 PCS, got {fg_pump['quantity']}"
         assert fg_pump["status"] == "AVAILABLE"
-        assert fg_pump["store_code"] == "STR-FG-01"
+        assert fg_pump["warehouse_code"] == "STR-FG-01"
         fg_serial = fg_pump.get("serial_number") or "SN-AO-2026-0001-2E9BE0"
-        print(f"[OK] FG Verified: ID={fg_pump['id']}, Serial={fg_serial}, Qty={fg_pump['quantity']}, Store={fg_pump['store_code']}")
+        print(f"[OK] FG Verified: ID={fg_pump['id']}, Serial={fg_serial}, Qty={fg_pump['quantity']}, Warehouse={fg_pump['warehouse_code']}")
 
         # -------------------------------------------------------------
         # STEP 2: Create Dispatch Order

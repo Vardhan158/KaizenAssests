@@ -7,7 +7,7 @@ See .env.example at the service root for the full list.
 from functools import lru_cache
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     jwt_audience: str = Field(default="ams-business-service")
     jwt_algorithm: str = Field(default="RS256")
     jwks_cache_ttl_seconds: int = Field(default=300)
+    local_session_lifetime_minutes: int = Field(default=60, ge=5, le=1440)
+    login_max_failures: int = Field(default=5, ge=3, le=20)
+    login_lockout_minutes: int = Field(default=15, ge=1, le=1440)
 
     # --- Kafka ---------------------------------------------------------------
     kafka_bootstrap_servers: str = Field(default="localhost:9092")
@@ -66,6 +69,9 @@ class Settings(BaseSettings):
 
     # --- CORS ------------------------------------------------------------------
     cors_allow_origins: List[str] = Field(default_factory=lambda: ["http://localhost:8080", "http://127.0.0.1:8080"])
+    trusted_hosts: List[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
+    force_https: bool = Field(default=False)
+    enable_api_docs: bool = Field(default=True, description="Enable OpenAPI docs and Swagger UI. Should be disabled in production.")
 
     # --- Observability -----------------------------------------------------------
     otel_exporter_otlp_endpoint: str = Field(default="http://otel-collector:4317")
@@ -96,6 +102,30 @@ class Settings(BaseSettings):
     email_host_user: str = Field(default="")
     email_host_password: str = Field(default="")
     email_from_name: str = Field(default="KaizenAssests")
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        if self.environment.lower() not in {"prod", "production"}:
+            return self
+        unsafe_origins = {
+            origin
+            for origin in self.cors_allow_origins
+            if "localhost" in origin or "127.0.0.1" in origin or origin == "*"
+        }
+        if not self.cors_allow_origins or unsafe_origins:
+            raise ValueError("Production CORS origins must be explicit non-local HTTPS origins")
+        if any(host in {"*", "localhost", "127.0.0.1"} for host in self.trusted_hosts):
+            raise ValueError("Production trusted hosts must contain only deployed hostnames")
+        if not self.force_https:
+            raise ValueError("FORCE_HTTPS must be enabled in production")
+        if self.enable_api_docs:
+            raise ValueError("API documentation must be disabled in production")
+        if self.startup_schema_compatibility:
+            raise ValueError("Runtime schema compatibility must be disabled in production")
+        database_url = self.database_url.lower()
+        if "sslmode=verify-full" not in database_url and "ssl=verify-full" not in database_url:
+            raise ValueError("Production database connections must enforce certificate verification")
+        return self
 
 
 @lru_cache

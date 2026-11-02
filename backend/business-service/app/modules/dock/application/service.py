@@ -256,10 +256,10 @@ class DockAllocationService:
         allocation_request_id: uuid.UUID,
         dock_id: uuid.UUID,
         allocated_by: str,
-        assigned_store_id: Optional[uuid.UUID] = None,
-        store_manager_id: Optional[str] = None,
-        store_manager_username: Optional[str] = None,
-        store_manager_name: Optional[str] = None,
+        assigned_warehouse_ref_id: Optional[uuid.UUID] = None,
+        warehouse_operator_id: Optional[str] = None,
+        warehouse_operator_username: Optional[str] = None,
+        warehouse_operator_name: Optional[str] = None,
     ) -> DockAllocationRequestModel:
         """Allocate dock with strict backend pessimistic concurrency lock (AVAILABLE -> RESERVED / DOCK_ASSIGNED)."""
         # 1. Lock Dock with pessimistic FOR UPDATE
@@ -282,16 +282,17 @@ class DockAllocationService:
                 detail="This dock is no longer available.\n\nAnother user has already allocated this dock.\n\nPlease select another available dock.",
             )
 
-        from app.modules.store.infrastructure.persistence.models import StoreModel
-        # Store assignment is optional. If the dock is already tied to a
-        # warehouse store, use that relationship; otherwise allocate the dock
-        # without requiring a store or store manager from the UI.
-        effective_store_id = assigned_store_id or dock.store_id
-        assigned_store = await session.get(StoreModel, effective_store_id) if effective_store_id else None
-        if assigned_store and (assigned_store.status or "").upper() != "ACTIVE":
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected store is not active or available")
-        if dock.store_id and assigned_store and dock.store_id != assigned_store.id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Selected dock is permanently assigned to another store")
+        from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel
+        # Warehouse assignment is optional. If the dock is already tied to a
+        # warehouse, use that relationship; otherwise allocate the dock
+        # without requiring a warehouse or warehouse operator from the UI.
+        assigned_warehouse = await session.scalar(select(WarehouseModel).where(WarehouseModel.status == "ACTIVE"))
+        if assigned_warehouse_ref_id and (not assigned_warehouse or assigned_warehouse_ref_id != assigned_warehouse.id):
+            raise HTTPException(status_code=422, detail="The allocation must use the configured warehouse")
+        if assigned_warehouse and (assigned_warehouse.status or "").upper() != "ACTIVE":
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected warehouse is not active or available")
+        if dock.warehouse_ref_id and assigned_warehouse and dock.warehouse_ref_id != assigned_warehouse.id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Selected dock is permanently assigned to another warehouse")
 
         # 2. Lock Allocation Request
         req_query = await session.execute(
@@ -318,54 +319,54 @@ class DockAllocationService:
         req.assigned_at = datetime.now(timezone.utc)
         req.status = "DOCK_ASSIGNED"
 
-        req.assigned_store_id = assigned_store.id if assigned_store else None
-        req.assigned_store_code = assigned_store.store_code if assigned_store else None
-        req.assigned_store_name = assigned_store.store_name if assigned_store else None
+        req.assigned_warehouse_ref_id = assigned_warehouse.id if assigned_warehouse else None
+        req.assigned_warehouse_code = assigned_warehouse.warehouse_code if assigned_warehouse else None
+        req.assigned_warehouse_name = assigned_warehouse.warehouse_name if assigned_warehouse else None
 
-        # Resolve and assign Store Manager
-        if store_manager_id or store_manager_username or store_manager_name:
-            req.assigned_store_manager_id = str(store_manager_id) if store_manager_id else None
-            req.assigned_store_manager_username = str(store_manager_username) if store_manager_username else None
-            req.assigned_store_manager_name = str(store_manager_name) if store_manager_name else str(store_manager_username or store_manager_id)
+        # Resolve and assign Warehouse Operator
+        if warehouse_operator_id or warehouse_operator_username or warehouse_operator_name:
+            req.assigned_warehouse_operator_id = str(warehouse_operator_id) if warehouse_operator_id else None
+            req.assigned_warehouse_operator_username = str(warehouse_operator_username) if warehouse_operator_username else None
+            req.assigned_warehouse_operator_name = str(warehouse_operator_name) if warehouse_operator_name else str(warehouse_operator_username or warehouse_operator_id)
             try:
-                from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel, StoreModel
+                from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, WarehouseModel
                 filter_conds = []
-                if store_manager_id:
-                    filter_conds.append(StoreManagerUserModel.employee_id == str(store_manager_id))
-                if store_manager_username:
-                    filter_conds.append(StoreManagerUserModel.username == str(store_manager_username))
-                if store_manager_name:
-                    filter_conds.append(func.lower(StoreManagerUserModel.full_name) == str(store_manager_name).lower())
+                if warehouse_operator_id:
+                    filter_conds.append(UserAccountModel.employee_id == str(warehouse_operator_id))
+                if warehouse_operator_username:
+                    filter_conds.append(UserAccountModel.username == str(warehouse_operator_username))
+                if warehouse_operator_name:
+                    filter_conds.append(func.lower(UserAccountModel.full_name) == str(warehouse_operator_name).lower())
 
                 if filter_conds:
-                    sm_stmt = select(StoreManagerUserModel).where(or_(*filter_conds))
+                    sm_stmt = select(UserAccountModel).where(or_(*filter_conds))
                     sm_res = await session.execute(sm_stmt)
                     sm_user = sm_res.scalars().first()
                     if sm_user:
-                        req.assigned_store_manager_id = sm_user.employee_id
-                        req.assigned_store_manager_username = sm_user.username
-                        req.assigned_store_manager_name = sm_user.full_name
-                        if sm_user.store_id and not req.assigned_store_id:
-                            req.assigned_store_id = sm_user.store_id
-                            st_obj = await session.get(StoreModel, sm_user.store_id)
+                        req.assigned_warehouse_operator_id = sm_user.employee_id
+                        req.assigned_warehouse_operator_username = sm_user.username
+                        req.assigned_warehouse_operator_name = sm_user.full_name
+                        if sm_user.warehouse_ref_id and not req.assigned_warehouse_ref_id:
+                            req.assigned_warehouse_ref_id = sm_user.warehouse_ref_id
+                            st_obj = await session.get(WarehouseModel, sm_user.warehouse_ref_id)
                             if st_obj:
-                                req.assigned_store_code = st_obj.store_code
-                                req.assigned_store_name = st_obj.store_name
+                                req.assigned_warehouse_code = st_obj.warehouse_code
+                                req.assigned_warehouse_name = st_obj.warehouse_name
             except Exception:
                 pass
-        elif not req.assigned_store_manager_id and req.assigned_store_id:
+        elif not req.assigned_warehouse_operator_id and req.assigned_warehouse_ref_id:
             try:
-                from app.modules.store.infrastructure.persistence.models import StoreModel, StoreManagerUserModel
-                st_obj = await session.get(StoreModel, req.assigned_store_id)
-                if st_obj and st_obj.store_manager_id:
-                    req.assigned_store_manager_id = st_obj.store_manager_id
-                    req.assigned_store_manager_name = st_obj.store_manager_name
+                from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel, UserAccountModel
+                st_obj = await session.get(WarehouseModel, req.assigned_warehouse_ref_id)
+                if st_obj and st_obj.warehouse_operator_id:
+                    req.assigned_warehouse_operator_id = st_obj.warehouse_operator_id
+                    req.assigned_warehouse_operator_name = st_obj.warehouse_operator_name
                     sm_res = await session.execute(
-                        select(StoreManagerUserModel.username).where(StoreManagerUserModel.employee_id == st_obj.store_manager_id)
+                        select(UserAccountModel.username).where(UserAccountModel.employee_id == st_obj.warehouse_operator_id)
                     )
                     sm_u = sm_res.scalar_one_or_none()
                     if sm_u:
-                        req.assigned_store_manager_username = sm_u
+                        req.assigned_warehouse_operator_username = sm_u
             except Exception:
                 pass
 
@@ -401,11 +402,11 @@ class DockAllocationService:
             select(DockModel).where(DockModel.dock_number == dock.dock_code).with_for_update()
         )).scalar_one_or_none()
         if gate_dock is None:
-            # Older store rows may not have a warehouse value, and some docks
-            # are intentionally not tied to a store. Keep gate receiving
+            # Older warehouse rows may not have a warehouse value, and some docks
+            # are intentionally not tied to a warehouse. Keep gate receiving
             # functional by using the application's default warehouse.
             warehouse_id = (
-                getattr(assigned_store, "warehouse_id", None)
+                getattr(assigned_warehouse, "warehouse_id", None)
                 or getattr(dock, "warehouse_id", None)
                 or "Main Warehouse"
             )
@@ -450,12 +451,12 @@ class DockAllocationService:
             po_id=gate_entry.po_id,
             vehicle_number=gate_entry.vehicle_number,
             dock_number=dock.dock_code,
-            assigned_store_id=assigned_store.id if assigned_store else None,
-            assigned_store_code=assigned_store.store_code if assigned_store else None,
-            assigned_store_name=assigned_store.store_name if assigned_store else None,
-            assigned_store_manager_id=req.assigned_store_manager_id,
-            assigned_store_manager_username=req.assigned_store_manager_username,
-            assigned_store_manager_name=req.assigned_store_manager_name,
+            assigned_warehouse_ref_id=assigned_warehouse.id if assigned_warehouse else None,
+            assigned_warehouse_code=assigned_warehouse.warehouse_code if assigned_warehouse else None,
+            assigned_warehouse_name=assigned_warehouse.warehouse_name if assigned_warehouse else None,
+            assigned_warehouse_operator_id=req.assigned_warehouse_operator_id,
+            assigned_warehouse_operator_username=req.assigned_warehouse_operator_username,
+            assigned_warehouse_operator_name=req.assigned_warehouse_operator_name,
             assigned_by=allocated_by,
             assigned_at=req.assigned_at,
         ))
@@ -525,10 +526,10 @@ class DockAllocationService:
                         select(DockAssignmentModel).where(DockAssignmentModel.gate_entry_id == ge.id)
                     )
                     da = da_res.scalar_one_or_none()
-                    if da and da.assigned_store_id:
-                        req.assigned_store_id = da.assigned_store_id
-                        req.assigned_store_code = da.assigned_store_code
-                        req.assigned_store_name = da.assigned_store_name
+                    if da and da.assigned_warehouse_ref_id:
+                        req.assigned_warehouse_ref_id = da.assigned_warehouse_ref_id
+                        req.assigned_warehouse_code = da.assigned_warehouse_code
+                        req.assigned_warehouse_name = da.assigned_warehouse_name
                 except Exception:
                     pass
         except Exception:
@@ -599,7 +600,7 @@ class DockAllocationService:
         alloc_time = req.assigned_at or datetime.now(timezone.utc)
         alloc_time_str = alloc_time.strftime("%d-%b-%Y %I:%M %p")
         location_str = dock.location
-        warehouse_str = req.assigned_store_name
+        warehouse_str = req.assigned_warehouse_name
 
         details = [
             f"Gate Pass: {req.existing_gate_pass_id}", f"Vehicle: {req.vehicle_number}",
@@ -608,12 +609,12 @@ class DockAllocationService:
         ]
         details.extend(f"{label}: {value}" for label, value in (
             ("Driver", driver_name), ("Driver Phone", driver_phone), ("ASN", asn_number),
-            ("PO", po_number), ("Location", location_str), ("Assigned Store", warehouse_str),
+            ("PO", po_number), ("Location", location_str), ("Assigned Warehouse", warehouse_str),
         ) if value)
         notif_msg = "DOCK ALLOCATION CONFIRMED\n" + "\n".join(details) + f"\nProceed to Dock {dock.dock_code}."
 
         try:
-            for role in ["WAREHOUSE", "STORE_MANAGER", "QUALITY_INSPECTOR"]:
+            for role in ["WAREHOUSE", "WAREHOUSE_OPERATOR", "QUALITY_INSPECTOR"]:
                 session.add(
                     NotificationModel(
                         user_role=role,
@@ -716,7 +717,7 @@ class DockAllocationService:
         session.add(hist)
 
         # Notify QI & SM
-        for role in ["QUALITY_INSPECTOR", "STORE_MANAGER"]:
+        for role in ["QUALITY_INSPECTOR", "WAREHOUSE_OPERATOR"]:
             session.add(
                 NotificationModel(
                     user_role=role,
@@ -803,7 +804,7 @@ class DockAllocationService:
 
         # Persist the same check-in timestamp on the gate assignment consumed by
         # the inbound-arrivals details view. The allocation request remains the
-        # source of the transition, while DockAssignment stores the warehouse
+        # source of the transition, while DockAssignment warehouses the warehouse
         # workflow timestamps.
         try:
             from app.modules.gate.infrastructure.persistence.models import GateEntryModel, DockAssignmentModel
@@ -862,7 +863,7 @@ class DockAllocationService:
 
         session.add(
             NotificationModel(
-                user_role="STORE_MANAGER",
+                user_role="WAREHOUSE_OPERATOR",
                 title="VEHICLE ARRIVED AT DOCK",
                 message=f"Vehicle {req.vehicle_number} has arrived at Dock {dock_code} for Gate Pass {req.existing_gate_pass_id}.",
                 link=f"/dock-management?requestId={req.id}",
@@ -921,12 +922,14 @@ class DockAllocationService:
             # allocation. Reconcile only with completion evidence for this
             # exact gate entry, vehicle and dock.
             from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel, GateEntryModel
+            from app.modules.receiving.infrastructure.persistence.models import GrnModel
 
             gate_refs = [GateEntryModel.gate_entry_number == req.existing_gate_pass_id]
             try:
                 gate_refs.append(GateEntryModel.id == uuid.UUID(req.existing_gate_pass_id))
             except (ValueError, TypeError, AttributeError):
                 pass
+            normalized_vehicle = req.vehicle_number.replace("-", "").replace(" ", "").upper()
             completed_assignment = (await session.execute(
                 select(DockAssignmentModel)
                 .join(GateEntryModel, GateEntryModel.id == DockAssignmentModel.gate_entry_id)
@@ -935,13 +938,79 @@ class DockAllocationService:
                     or_(*gate_refs),
                     DockMasterModel.id == req.assigned_dock_id,
                     DockMasterModel.status == DockStatus.OCCUPIED.value,
-                    DockAssignmentModel.vehicle_number == req.vehicle_number,
+                    func.upper(
+                        func.replace(func.replace(DockAssignmentModel.vehicle_number, "-", ""), " ", "")
+                    ) == normalized_vehicle,
                     DockAssignmentModel.prepared_grn_id.is_not(None),
                     DockAssignmentModel.receiving_completed_at.is_not(None),
                     DockAssignmentModel.dock_released_at.is_(None),
                 ).with_for_update()
             )).scalar_one_or_none()
-        if req.status not in {"OCCUPIED", "AT_DOCK"} and completed_assignment is None:
+
+            if completed_assignment is None:
+                # A formerly broad ASN match may have attached the GRN to a
+                # sibling vehicle.  The completed GRN itself is authoritative
+                # evidence, so repair the exact gate/vehicle/dock assignment
+                # before advancing the allocation.
+                exact_assignment = (await session.execute(
+                    select(DockAssignmentModel)
+                    .join(GateEntryModel, GateEntryModel.id == DockAssignmentModel.gate_entry_id)
+                    .join(DockMasterModel, DockMasterModel.dock_code == DockAssignmentModel.dock_number)
+                    .where(
+                        or_(*gate_refs),
+                        DockMasterModel.id == req.assigned_dock_id,
+                        DockMasterModel.status == DockStatus.OCCUPIED.value,
+                        func.upper(
+                            func.replace(func.replace(DockAssignmentModel.vehicle_number, "-", ""), " ", "")
+                        ) == normalized_vehicle,
+                        DockAssignmentModel.dock_released_at.is_(None),
+                    )
+                    .with_for_update()
+                )).scalar_one_or_none()
+                completed_grn = None
+                if exact_assignment is not None:
+                    completed_grn = (await session.execute(
+                        select(GrnModel).where(
+                            GrnModel.status.in_(["COMPLETED", "POSTED", "RECEIVING_COMPLETE"]),
+                            or_(
+                                GrnModel.gate_entry_id == exact_assignment.gate_entry_id,
+                                func.upper(GrnModel.gate_entry_number)
+                                == req.existing_gate_pass_id.strip().upper(),
+                            ),
+                            func.upper(
+                                func.replace(func.replace(GrnModel.vehicle_number, "-", ""), " ", "")
+                            ) == normalized_vehicle,
+                            func.upper(GrnModel.dock_number)
+                            == exact_assignment.dock_number.strip().upper(),
+                        ).with_for_update()
+                    )).scalar_one_or_none()
+                if exact_assignment is not None and completed_grn is not None:
+                    conflicting_assignment = (await session.execute(
+                        select(DockAssignmentModel).where(
+                            DockAssignmentModel.prepared_grn_id == completed_grn.id,
+                            DockAssignmentModel.id != exact_assignment.id,
+                        ).with_for_update()
+                    )).scalar_one_or_none()
+                    if conflicting_assignment is not None:
+                        conflicting_assignment.prepared_grn_id = None
+                    exact_assignment.prepared_grn_id = completed_grn.id
+                    exact_assignment.receiving_completed_at = completed_grn.posted_at or datetime.now(timezone.utc)
+                    exact_assignment.receiving_completed_by = completed_grn.posted_by or performed_by
+                    completed_assignment = exact_assignment
+        if req.status == AllocationStatus.COMPLETED.value:
+            return req
+
+        valid_complete_statuses = {
+            "OCCUPIED",
+            "AT_DOCK",
+            "DOCK_ASSIGNED",
+            "DOCK_ALLOCATED",
+            "ASSIGNED",
+            "IN_PROGRESS",
+            "IN_RECEIVING",
+            "RECEIVING",
+        }
+        if req.status not in valid_complete_statuses and completed_assignment is None:
             raise HTTPException(status_code=409, detail=f"Receiving cannot complete while allocation is {req.status}")
 
         previous_status = req.status
@@ -984,7 +1053,20 @@ class DockAllocationService:
             raise HTTPException(status_code=404, detail="Allocation request or dock not found")
 
         if req.status != AllocationStatus.COMPLETED.value:
-            raise HTTPException(status_code=409, detail="Receiving must be completed before the dock can be released")
+            if req.status in {
+                "OCCUPIED",
+                "AT_DOCK",
+                "DOCK_ASSIGNED",
+                "DOCK_ALLOCATED",
+                "ASSIGNED",
+                "IN_PROGRESS",
+                "IN_RECEIVING",
+                "RECEIVING",
+            }:
+                req.status = AllocationStatus.COMPLETED.value
+                req.completed_at = datetime.now(timezone.utc)
+            else:
+                raise HTTPException(status_code=409, detail="Receiving must be completed before the dock can be released")
 
         if not req.assigned_dock_id:
             raise HTTPException(status_code=409, detail="Allocation has no dock to release")

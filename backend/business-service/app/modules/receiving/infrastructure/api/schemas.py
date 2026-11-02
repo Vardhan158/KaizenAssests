@@ -752,6 +752,10 @@ class GrnSummaryResponse(ApiModel):
     grn_id: str
     grn_number: str | None = None
 
+    asn_number: str | None = None
+    gate_entry_id: str | None = None
+    gate_entry_number: str | None = None
+
     po_number: str | None = None
     supplier_name: str | None = None
     supplier_company_name: str | None = None

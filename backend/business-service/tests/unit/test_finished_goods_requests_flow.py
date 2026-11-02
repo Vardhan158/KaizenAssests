@@ -1,6 +1,6 @@
 """
 Unit and API integration tests for Finished Goods Request flow:
-Procurement -> Finished Goods Request -> Send to Assembly -> Assembly inspects FG Store -> Warehouse tracks request.
+Procurement -> Finished Goods Request -> Send to Assembly -> Assembly inspects FG Warehouse -> Warehouse tracks request.
 """
 from datetime import date, datetime
 from decimal import Decimal
@@ -87,7 +87,7 @@ async def test_procurement_to_assembly_and_warehouse_flow():
     """
     Test complete flow:
     Procurement creates Finished Goods Request -> Send to Assembly -> Status is SENT_TO_ASSEMBLY ->
-    Assembly inspects FG Store -> Warehouse tracks request.
+    Assembly inspects FG Warehouse -> Warehouse tracks request.
     """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -144,7 +144,7 @@ async def test_procurement_to_assembly_and_warehouse_flow():
         assembly_items = res_assembly_list.json()
         assert any(item["request_number"] == req_number for item in assembly_items)
 
-        # 4. Assembly opens the specific request and checks Finished Goods Store
+        # 4. Assembly opens the specific request and checks Finished Goods Warehouse
         res_assembly_detail = await client.get(
             f"/api/v1/assembly/finished-goods-requests/{req_id}",
             headers=assembly_headers,
@@ -155,7 +155,7 @@ async def test_procurement_to_assembly_and_warehouse_flow():
         assert detail_data["product_name"] == "Product A"
         assert detail_data["requested_quantity"] == 100.0
         assert detail_data["bom_attachment_url"] == "/media/bom_attachments/sample_bom.pdf"
-        assert "fg_store_available" in detail_data
+        assert "fg_warehouse_available" in detail_data
         assert "shortage" in detail_data
 
         # 5. Warehouse tracks the exact same request
@@ -203,10 +203,10 @@ async def test_manual_input_pump_100_quantity_10():
 
 
 @pytest.mark.asyncio
-async def test_fg_store_availability_and_shortage_calculation():
+async def test_fg_warehouse_availability_and_shortage_calculation():
     """
-    Test Finished Goods Store availability check and shortage calculation against database inventory.
-    Requested: 100, FG Store Available: 70 -> Shortage: 30
+    Test Finished Goods Warehouse availability check and shortage calculation against database inventory.
+    Requested: 100, FG Warehouse Available: 70 -> Shortage: 30
     """
     from app.common.persistence.models import (
         MaterialRequestModel,
@@ -321,7 +321,7 @@ async def test_fg_store_availability_and_shortage_calculation():
         assert res.status_code == 201
         data = res.json()
         assert data["requested_quantity"] == 100.0
-        assert data["fg_store_available"] == 70.0
+        assert data["fg_warehouse_available"] == 70.0
         assert data["shortage"] == 30.0
 
     # Clean up seeded records

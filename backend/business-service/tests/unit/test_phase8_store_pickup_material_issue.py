@@ -1,18 +1,18 @@
 """
 Comprehensive Test Suite for Phase 8:
-Store Keeper Pickup -> Material QR & Zone QR Verification -> Atomic Inventory Issue -> Assembly Handover.
+Warehouse Operator Pickup -> Material QR & Zone QR Verification -> Atomic Inventory Issue -> Assembly Handover.
 
 Validates:
-1. Store Keeper Authorization & Store-scoped access (Mechanical Store vs Electrical Store).
-2. IDOR Protection (403 Forbidden for cross-store task access or store_id tampering).
+1. Warehouse Operator Authorization & Warehouse-scoped access (Mechanical Warehouse vs Electrical Warehouse).
+2. IDOR Protection (403 Forbidden for cross-warehouse task access or warehouse_ref_id tampering).
 3. Material QR Verification (Multi-format JSON, multi-line, and raw item code; rejection on mismatch).
-4. Store + Zone Verification (Rejection on cross-store zone scanning).
+4. Warehouse + Zone Verification (Rejection on cross-warehouse zone scanning).
 5. Available Stock Validation & Negative Inventory Prevention (Rejection if stock insufficient).
 6. Quarantine Stock Blocking (Rejection if stock is quarantined/damaged).
 7. Exact Inventory Issue Transaction (Atomic deduction, immutable ledger recording).
 8. Partial Fulfillment Flow (Preserves remaining quantity across multiple picks).
 9. Double Submission / Concurrency Protection (409 Conflict on re-completion).
-10. Targeted Notifications (Store assignment and handover notifications).
+10. Targeted Notifications (Warehouse assignment and handover notifications).
 11. Regression Verification (Procurement Material Request -> RFQ -> PO remains untouched).
 """
 import datetime
@@ -44,55 +44,55 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreModel,
-    StoreZoneModel,
-    StoreManagerUserModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseModel,
+    WarehouseZoneModel,
+    UserAccountModel,
 )
 
 
 @pytest.mark.asyncio
-async def test_phase8_store_keeper_pickup_material_issue_and_security():
+async def test_phase8_warehouse_keeper_pickup_material_issue_and_security():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Seed test data
         async with session_scope() as session:
             now_utc = datetime.datetime.now(datetime.timezone.utc)
 
-            # 1. Stores: Mechanical Store (STR-002) and Electrical Store (STR-001)
-            s_mech_res = await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-002"))
+            # 1. Warehouses: Mechanical Warehouse (STR-002) and Electrical Warehouse (STR-001)
+            s_mech_res = await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-002"))
             s_mech = s_mech_res.scalar_one_or_none()
             if not s_mech:
-                s_mech = StoreModel(
+                s_mech = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-002",
-                    store_name="Mechanical Store",
+                    warehouse_code="STR-002",
+                    warehouse_name="Mechanical Warehouse",
                     warehouse_id="WH-001",
                     status="ACTIVE",
                 )
                 session.add(s_mech)
                 await session.flush()
 
-            s_elec_res = await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-001"))
+            s_elec_res = await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-001"))
             s_elec = s_elec_res.scalar_one_or_none()
             if not s_elec:
-                s_elec = StoreModel(
+                s_elec = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-001",
-                    store_name="Electrical Store",
+                    warehouse_code="STR-001",
+                    warehouse_name="Electrical Warehouse",
                     warehouse_id="WH-001",
                     status="ACTIVE",
                 )
                 session.add(s_elec)
                 await session.flush()
 
-            # 2. Zones for Mechanical and Electrical stores
-            z_mech_res = await session.execute(select(StoreZoneModel).where(StoreZoneModel.zone_code == "MECH-Z01"))
+            # 2. Zones for Mechanical and Electrical warehouses
+            z_mech_res = await session.execute(select(WarehouseZoneModel).where(WarehouseZoneModel.zone_code == "MECH-Z01"))
             z_mech = z_mech_res.scalar_one_or_none()
             if not z_mech:
-                z_mech = StoreZoneModel(
+                z_mech = WarehouseZoneModel(
                     id=uuid.uuid4(),
-                    store_id=s_mech.id,
+                    warehouse_ref_id=s_mech.id,
                     zone_code="MECH-Z01",
                     zone_name="Mechanical Zone 1",
                     status="ACTIVE",
@@ -100,12 +100,12 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
                 session.add(z_mech)
                 await session.flush()
 
-            z_elec_res = await session.execute(select(StoreZoneModel).where(StoreZoneModel.zone_code == "ELECT-Z01"))
+            z_elec_res = await session.execute(select(WarehouseZoneModel).where(WarehouseZoneModel.zone_code == "ELECT-Z01"))
             z_elec = z_elec_res.scalar_one_or_none()
             if not z_elec:
-                z_elec = StoreZoneModel(
+                z_elec = WarehouseZoneModel(
                     id=uuid.uuid4(),
-                    store_id=s_elec.id,
+                    warehouse_ref_id=s_elec.id,
                     zone_code="ELECT-Z01",
                     zone_name="Electrical Zone 1",
                     status="ACTIVE",
@@ -239,16 +239,16 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
                 )
                 session.add(q_rec)
 
-            store_mech_id = s_mech.id
-            store_elec_id = s_elec.id
+            warehouse_mech_id = s_mech.id
+            warehouse_elec_id = s_elec.id
             zone_mech_id = z_mech.id
             zone_elec_id = z_elec.id
 
-        # Headers for different roles and stores
+        # Headers for different roles and warehouses
         assembly_headers = {"Authorization": "Bearer mock-jwt-assembly-token"}
         warehouse_headers = {"Authorization": "Bearer mock-jwt-warehouse-token"}
-        mech_keeper_headers = {"Authorization": "Bearer mock-jwt-store-keeper-token"} # Scoped to Mechanical Store (STR-002)
-        elec_manager_headers = {"Authorization": "Bearer mock-jwt-store-manager-token"} # Scoped to Electrical Store (STR-001)
+        mech_keeper_headers = {"Authorization": "Bearer mock-jwt-warehouse-operator-token"} # Scoped to Mechanical Warehouse (STR-002)
+        elec_manager_headers = {"Authorization": "Bearer mock-jwt-warehouse-operator-token"} # Scoped to Electrical Warehouse (STR-001)
 
         # =========================================================================
         # 1. Assembly Creates Requisitions
@@ -276,29 +276,29 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
         req_1_no = req_1_data.get("requisition_number") or req_1_data.get("requisitionNumber")
 
         # =========================================================================
-        # 2. Warehouse Assigns Mechanical Store
+        # 2. Warehouse Assigns Mechanical Warehouse
         # =========================================================================
         res_assign = await client.post(
-            f"/api/v1/assembly-requisitions/{req_1_id}/assign-store",
-            json={"store_id": str(store_mech_id)},
+            f"/api/v1/assembly-requisitions/{req_1_id}/assign-warehouse",
+            json={"warehouse_ref_id": str(warehouse_mech_id)},
             headers=warehouse_headers,
         )
         assert res_assign.status_code == 200, res_assign.text
         assign_data = res_assign.json()
-        assert assign_data["assigned_store"]["store_code"] == "STR-002"
+        assert assign_data["assigned_warehouse"]["warehouse_code"] == "STR-002"
         task_1_id = assign_data["tasks"][0]["id"]
         task_1_number = assign_data["tasks"][0]["task_number"]
 
         # =========================================================================
-        # 3. Security & Store Scoping Verification
+        # 3. Security & Warehouse Scoping Verification
         # =========================================================================
-        # 3a. Mechanical Store Keeper can see task
+        # 3a. Mechanical Warehouse Operator can see task
         res_mech_list = await client.get("/api/storage/pickup-tasks", headers=mech_keeper_headers)
         assert res_mech_list.status_code == 200
         mech_tasks = res_mech_list.json()
         assert any(t["id"] == task_1_id for t in mech_tasks)
 
-        # 3b. Electrical Store User CANNOT see Mechanical task
+        # 3b. Electrical Warehouse User CANNOT see Mechanical task
         res_elec_list = await client.get("/api/storage/pickup-tasks", headers=elec_manager_headers)
         assert res_elec_list.status_code == 200
         elec_tasks = res_elec_list.json()
@@ -320,12 +320,12 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
         )
         assert res_idor_comp.status_code == 403
 
-        # 3f. Parameter tampering: Passing store_id of Electrical store returns 403 for Mechanical Keeper
-        res_tamper_store = await client.get(
-            f"/api/storage/pickup-tasks?store_id={store_elec_id}",
+        # 3f. Parameter tampering: Passing warehouse_ref_id of Electrical warehouse returns 403 for Mechanical Keeper
+        res_tamper_warehouse = await client.get(
+            f"/api/storage/pickup-tasks?warehouse_ref_id={warehouse_elec_id}",
             headers=mech_keeper_headers,
         )
-        assert res_tamper_store.status_code == 403
+        assert res_tamper_warehouse.status_code == 403
 
         # =========================================================================
         # 4. QR Verification Tests
@@ -339,7 +339,7 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
         assert res_wrong_mat.status_code == 422
         assert "material" in res_wrong_mat.json()["detail"].lower()
 
-        # 4b. Cross-Store Zone QR rejection -> 422 (ELECT-Z01 belongs to STR-001, not STR-002)
+        # 4b. Cross-Warehouse Zone QR rejection -> 422 (ELECT-Z01 belongs to STR-001, not STR-002)
         res_wrong_zone = await client.post(
             f"/api/storage/pickup-tasks/{task_1_id}/complete",
             json={"material_scan": "TEST-MOTOR-001", "zone_scan": "ELECT-Z01", "quantity": 10.0},
@@ -371,8 +371,8 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
         req_2_id = res_create_2.json()["id"]
 
         res_assign_2 = await client.post(
-            f"/api/v1/assembly-requisitions/{req_2_id}/assign-store",
-            json={"store_id": str(store_mech_id)},
+            f"/api/v1/assembly-requisitions/{req_2_id}/assign-warehouse",
+            json={"warehouse_ref_id": str(warehouse_mech_id)},
             headers=warehouse_headers,
         )
         task_2_id = res_assign_2.json()["tasks"][0]["id"]
@@ -416,8 +416,8 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
         req_3_id = res_create_3.json()["id"]
 
         res_assign_3 = await client.post(
-            f"/api/v1/assembly-requisitions/{req_3_id}/assign-store",
-            json={"store_id": str(store_mech_id)},
+            f"/api/v1/assembly-requisitions/{req_3_id}/assign-warehouse",
+            json={"warehouse_ref_id": str(warehouse_mech_id)},
             headers=warehouse_headers,
         )
         task_3_id = res_assign_3.json()["tasks"][0]["id"]
@@ -516,8 +516,8 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
         req_part_id = res_create_part.json()["id"]
 
         res_assign_part = await client.post(
-            f"/api/v1/assembly-requisitions/{req_part_id}/assign-store",
-            json={"store_id": str(store_mech_id)},
+            f"/api/v1/assembly-requisitions/{req_part_id}/assign-warehouse",
+            json={"warehouse_ref_id": str(warehouse_mech_id)},
             headers=warehouse_headers,
         )
         task_part_id = res_assign_part.json()["tasks"][0]["id"]
@@ -590,12 +590,12 @@ async def test_phase8_store_keeper_pickup_material_issue_and_security():
         # 10. Targeted Notifications Verification
         # =========================================================================
         async with session_scope() as session:
-            # Store notification
-            notif_store_res = await session.execute(
-                select(NotificationModel).where(NotificationModel.user_role == "STR:STR-002")
+            # Warehouse notification
+            notif_warehouse_res = await session.execute(
+                select(NotificationModel).where(NotificationModel.user_role == "WH:STR-002")
             )
-            store_notifs = notif_store_res.scalars().all()
-            assert len(store_notifs) >= 1
+            warehouse_notifs = notif_warehouse_res.scalars().all()
+            assert len(warehouse_notifs) >= 1
 
             # Assembly handover notification
             notif_asm_res = await session.execute(

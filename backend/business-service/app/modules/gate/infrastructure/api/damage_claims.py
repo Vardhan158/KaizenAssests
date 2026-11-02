@@ -210,7 +210,7 @@ async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOf
             returned = (await uow.session.execute(select(SupplierReturnModel).where(SupplierReturnModel.claim_id == claim.id))).scalar_one_or_none()
             result.append({"id": str(claim.id), "claim_number": claim.claim_number, "status": "PENDING_RESPONSE" if not claim.supplier_response else claim.supplier_response,
               "claim_source": "GRN",
-              "response": claim.supplier_response, "resolution": claim.resolution, "supplier_remarks": claim.supplier_remarks,
+              "response": claim.supplier_response, "resolution": claim.resolution, "responded_at": claim.responded_at.isoformat() if claim.responded_at else None, "supplier_remarks": claim.supplier_remarks,
               "return_required": claim.return_required, "po_number": source_grn.po_number if source_grn else None,
               "grn_number": source_grn.grn_number if source_grn else None, "grn_id": str(source_grn.id) if source_grn else None,
               "material": source_line.material_name or source_line.item_code, "item_code": source_line.item_code,
@@ -235,7 +235,7 @@ async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOf
         if claim.status == "CLOSED": display_status = "RESOLVED"
         result.append({"id":str(claim.id),"claim_number":claim.claim_number,"status":display_status,"response":claim.supplier_response,"resolution":claim.resolution,
           "claim_source": "LEGACY_DAMAGE_REPORT",
-          "supplier_remarks":claim.supplier_remarks,"return_required":claim.return_required,"po_number":report.po_number,"grn_number":report.grn_number,
+          "responded_at":claim.responded_at.isoformat() if claim.responded_at else None,"supplier_remarks":claim.supplier_remarks,"return_required":claim.return_required,"po_number":report.po_number,"grn_number":report.grn_number,
           "grn_id": str(grn_id) if grn_id else None,
           "material":report.material_name or report.material_code,"item_code":report.material_code,"batch_number":None,
           "received_quantity":float(report.received_quantity),"accepted_quantity":float(line.good_quantity or 0),

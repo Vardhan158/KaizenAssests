@@ -263,9 +263,8 @@ function DispatchLoadingPage() {
       title="Dispatch Loading Bay & Package Scanning"
       subtitle="Verify the supplier vehicle, loading bay, and package scanning before gate exit"
       actions={
-        <Button variant="outline" className="rounded-xl" onClick={() => void loadData()}>
-          <RefreshCw className="size-4 mr-2" /> Refresh
-        </Button>
+        <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" className="rounded-xl" onClick={() => void loadData()}>
+          <RefreshCw className="size-4" /></Button>
       }
     >
       {loading ? (

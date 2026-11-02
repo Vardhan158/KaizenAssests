@@ -53,7 +53,7 @@ export const Route = createFileRoute("/assembly/requests")({
       {
         name: "description",
         content:
-          "Create and track internal material requisitions from Assembly to Stores and Warehouse.",
+          "Create and track internal material requisitions from Assembly to Warehouses and Warehouse.",
       },
     ],
   }),
@@ -345,7 +345,7 @@ function AssemblyRequestsPage() {
   return (
     <AppShell
       title="Assembly Material Requisitions"
-      subtitle="Request components and production materials from Warehouse & Stores"
+      subtitle="Request components and production materials from Warehouse & Warehouses"
       actions={
         <Button
           className="rounded-xl shadow-glow bg-blue-600 hover:bg-blue-700 text-white font-bold"
@@ -376,21 +376,19 @@ function AssemblyRequestsPage() {
               <SelectContent>
                 <SelectItem value="ALL">All Status</SelectItem>
                 <SelectItem value="PENDING">Pending Warehouse</SelectItem>
-                <SelectItem value="ASSIGNED_TO_STORE">Assigned to Store</SelectItem>
+                <SelectItem value="ASSIGNED_TO_WAREHOUSE">Assigned to Warehouse</SelectItem>
                 <SelectItem value="PICKING">Picking In Progress</SelectItem>
                 <SelectItem value="COMPLETED">Completed / Handed Over</SelectItem>
                 <SelectItem value="ASSEMBLY_RECEIVED">Assembly Receipt Confirmed</SelectItem>
               </SelectContent>
             </Select>
 
-            <Button
+            <Button aria-label="Refresh" title="Refresh"
               variant="outline"
               size="sm"
               onClick={fetchData}
               className="h-9 rounded-xl text-xs"
-            >
-              Refresh
-            </Button>
+            ></Button>
           </div>
         </div>
 
@@ -405,7 +403,7 @@ function AssemblyRequestsPage() {
             <h3 className="text-sm font-bold text-foreground">No Material Requests Found</h3>
             <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
               Create a new request to notify Warehouse and have your required items picked from the
-              appropriate Store.
+              appropriate Warehouse.
             </p>
             <Button
               size="sm"
@@ -464,15 +462,15 @@ function AssemblyRequestsPage() {
                             {new Date(req.requiredDate || req.required_date).toLocaleDateString()}
                           </strong>
                         </span>
-                        {req.assignedStoreName || req.assigned_store_name ? (
+                        {req.assignedWarehouseName || req.assigned_warehouse_name ? (
                           <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 text-[11px]">
-                            <Building2 className="size-3" /> Fulfilling Store:{" "}
-                            {req.assignedStoreName || req.assigned_store_name} (
-                            {req.assignedStoreCode || req.assigned_store_code})
+                            <Building2 className="size-3" /> Fulfilling Warehouse:{" "}
+                            {req.assignedWarehouseName || req.assigned_warehouse_name} (
+                            {req.assignedWarehouseCode || req.assigned_warehouse_code})
                           </span>
                         ) : (
                           <span className="text-amber-600 text-[11px] font-medium italic">
-                            Awaiting Warehouse Store Assignment
+                            Awaiting Warehouse Warehouse Assignment
                           </span>
                         )}
                       </div>
@@ -552,7 +550,7 @@ function AssemblyRequestsPage() {
                         <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs dark:border-blue-900 dark:bg-blue-950/30">
                           <div className="flex flex-wrap items-center gap-2 font-bold text-blue-800 dark:text-blue-200">
                             <PackageCheck className="size-3.5" />
-                            Store pickup:{" "}
+                            Warehouse pickup:{" "}
                             {req.pickup_progress.status
                               ? String(req.pickup_progress.status).replaceAll("_", " ")
                               : "—"}
@@ -963,10 +961,10 @@ function AssemblyRequestsPage() {
                   </strong>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Fulfilling Store:</span>{" "}
+                  <span className="text-muted-foreground">Fulfilling Warehouse:</span>{" "}
                   <strong className="text-emerald-600 dark:text-emerald-400">
-                    {selectedRequest.assignedStoreName ||
-                      selectedRequest.assigned_store_name ||
+                    {selectedRequest.assignedWarehouseName ||
+                      selectedRequest.assigned_warehouse_name ||
                       "Pending Assignment"}
                   </strong>
                 </div>

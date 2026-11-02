@@ -326,7 +326,7 @@ class GrnModel(Base):
 
 class GrnLineModel(Base):
     """
-    Stores each material received against a GRN.
+    Warehouses each material received against a GRN.
 
     Example:
 
@@ -545,7 +545,7 @@ class GrnLineModel(Base):
 
 class GrnDamageEvidenceModel(Base):
     """
-    Stores evidence for damaged materials.
+    Warehouses evidence for damaged materials.
 
     Damaged quantity is obtained from the GRN line.
     The user should not manually re-enter damaged quantity
@@ -637,7 +637,7 @@ class GrnDamageEvidenceModel(Base):
 
 
 class GrnBatchModel(Base):
-    """Stores batches created from quality-approved quantity."""
+    """Warehouses batches created from quality-approved quantity."""
 
     __tablename__ = "grn_batch"
 
@@ -721,7 +721,7 @@ class GrnBatchModel(Base):
 
 class GrnDocumentModel(Base):
     """
-    Stores receiving-related documents.
+    Warehouses receiving-related documents.
 
     Examples:
     INVOICE
@@ -803,7 +803,7 @@ class GrnDocumentModel(Base):
 
 
 class GrnBatchQrModel(Base):
-    """Stores the material-wise QR code shared by batches of the same item."""
+    """Warehouses the material-wise QR code shared by batches of the same item."""
 
     __tablename__ = "grn_batch_qr"
 
@@ -867,7 +867,7 @@ class GrnBatchQrModel(Base):
 
 
 class GrnDamageLotModel(Base):
-    """Stores damage lots created for damaged or rejected material lines."""
+    """Warehouses damage lots created for damaged or rejected material lines."""
 
     __tablename__ = "grn_damage_lot"
 
@@ -953,7 +953,7 @@ class GrnDamageLotModel(Base):
 
 class GrnDamageQrModel(Base):
     """
-    Stores unique QR code for a Damage Lot.
+    Warehouses unique QR code for a Damage Lot.
     """
 
     __tablename__ = "grn_damage_qr"
@@ -1033,7 +1033,7 @@ class InventoryReceiptPostingModel(Base):
     """
     Existing inventory posting model.
 
-    Stores inventory quantity movement created after
+    Warehouses inventory quantity movement created after
     GRN receiving / posting.
     """
 

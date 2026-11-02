@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/api-client", () => ({ api: mocks }));
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
+  useSearch: () => ({ search: "" }),
 }));
 vi.mock("@/components/wms/app-shell", () => ({
   AppShell: ({ children, actions }: any) => <main>{actions}{children}</main>,

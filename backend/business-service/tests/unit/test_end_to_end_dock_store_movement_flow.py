@@ -24,11 +24,11 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreManagerUserModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    UserAccountModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 
 
@@ -44,7 +44,7 @@ async def cleanup_movement_flow():
         sm_user_id = created.get("sm_user_id")
         bin_id = created.get("bin_id")
         zone_id = created.get("zone_id")
-        store_id = created.get("store_id")
+        warehouse_ref_id = created.get("warehouse_ref_id")
         grn_id = created.get("grn_id")
         putaway_id = created.get("putaway_id")
 
@@ -69,26 +69,26 @@ async def cleanup_movement_flow():
             await session.execute(text("DELETE FROM grn WHERE id = :gid;"), {"gid": grn_id})
 
         if sm_user_id:
-            await session.execute(text("DELETE FROM store_manager_user WHERE id = :smu;"), {"smu": sm_user_id})
+            await session.execute(text("DELETE FROM user_account WHERE id = :smu;"), {"smu": sm_user_id})
 
         if bin_id:
-            await session.execute(text("DELETE FROM store_bin WHERE id = :bid;"), {"bid": bin_id})
+            await session.execute(text("DELETE FROM warehouse_bin WHERE id = :bid;"), {"bid": bin_id})
 
         if zone_id:
-            await session.execute(text("DELETE FROM store_zone WHERE id = :zid;"), {"zid": zone_id})
+            await session.execute(text("DELETE FROM warehouse_zone WHERE id = :zid;"), {"zid": zone_id})
 
-        if store_id:
-            await session.execute(text("DELETE FROM store WHERE id = :sid;"), {"sid": store_id})
+        if warehouse_ref_id:
+            await session.execute(text("DELETE FROM warehouse WHERE id = :sid;"), {"sid": warehouse_ref_id})
 
         await session.commit()
 
 
 @pytest.mark.asyncio
-async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movement_flow):
+async def test_end_to_end_dock_warehouse_operator_takeaway_history_flow(cleanup_movement_flow):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # 1. Setup Store, Zones, Bins, Store Manager, and Dock
-        store_id = uuid.uuid4()
+        # 1. Setup Warehouse, Zones, Bins, Warehouse Operator, and Dock
+        warehouse_ref_id = uuid.uuid4()
         zone_id = uuid.uuid4()
         bin_id = uuid.uuid4()
         dock_id = uuid.uuid4()
@@ -98,7 +98,7 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
         grn_id = uuid.uuid4()
 
         unique_suffix = uuid.uuid4().hex[:6].upper()
-        store_code = f"TEST_FLOW_STR_{unique_suffix}"
+        warehouse_code = f"TEST_FLOW_STR_{unique_suffix}"
         zone_code = f"TEST_FLOW_ZON_{unique_suffix}"
         bin_code = f"BIN-FLW-{unique_suffix}"
         dock_code = f"TEST_FLOW_DK_{unique_suffix}"
@@ -116,29 +116,29 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
             "sm_user_id": sm_user_id,
             "bin_id": bin_id,
             "zone_id": zone_id,
-            "store_id": store_id,
+            "warehouse_ref_id": warehouse_ref_id,
             "grn_id": grn_id,
             "putaway_id": putaway_id,
         })
 
         async with AsyncSessionFactory() as session:
-            # Create Store
-            store = StoreModel(
-                id=store_id,
-                store_code=store_code,
-                store_name=f"Main Store {unique_suffix}",
+            # Create Warehouse
+            warehouse = WarehouseModel(
+                id=warehouse_ref_id,
+                warehouse_code=warehouse_code,
+                warehouse_name=f"Main Warehouse {unique_suffix}",
                 warehouse_id="MAIN",
-                store_manager_id=sm_empid,
-                store_manager_name="Alice Store Manager",
+                warehouse_operator_id=sm_empid,
+                warehouse_operator_name="Alice Warehouse Operator",
                 status="ACTIVE",
             )
-            session.add(store)
+            session.add(warehouse)
             await session.flush()
 
             # Create Zone
-            zone = StoreZoneModel(
+            zone = WarehouseZoneModel(
                 id=zone_id,
-                store_id=store_id,
+                warehouse_ref_id=warehouse_ref_id,
                 zone_code=zone_code,
                 zone_name=f"Zone {zone_code}",
                 status="ACTIVE",
@@ -147,9 +147,9 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
             await session.flush()
 
             # Create Bin
-            bin_obj = StoreBinModel(
+            bin_obj = WarehouseBinModel(
                 id=bin_id,
-                store_id=store_id,
+                warehouse_ref_id=warehouse_ref_id,
                 zone_id=zone_id,
                 bin_code=bin_code,
                 bin_name=f"Bin {bin_code}",
@@ -168,7 +168,7 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
                 id=uuid.uuid4(),
                 location_code=loc_code,
                 warehouse_id="MAIN",
-                store_id=store_id,
+                warehouse_ref_id=warehouse_ref_id,
                 zone_id=zone_id,
                 bin_id=bin_id,
                 zone=zone_code,
@@ -180,13 +180,13 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
             )
             session.add(storage_loc)
 
-            # Create Store Manager User
-            sm_user = StoreManagerUserModel(
+            # Create Warehouse Operator User
+            sm_user = UserAccountModel(
                 id=sm_user_id,
-                store_id=store_id,
+                warehouse_ref_id=warehouse_ref_id,
                 employee_id=sm_empid,
                 username=sm_username,
-                full_name="Alice Store Manager",
+                full_name="Alice Warehouse Operator",
                 email=f"{sm_username}@warehouse.local",
                 password_hash="hashed_pw",
                 status="ACTIVE",
@@ -199,7 +199,7 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
                 dock_code=dock_code,
                 dock_name=f"Inbound Dock {dock_code}",
                 dock_type="RAW_MATERIAL",
-                store_id=store_id,
+                warehouse_ref_id=warehouse_ref_id,
                 status="AVAILABLE",
                 is_active=True,
             )
@@ -253,30 +253,30 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
         }
         sm_headers = {
             "Authorization": "Bearer mock-jwt-token",
-            "X-User-Roles": "STORE_MANAGER",
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
             "X-User-Subject": sm_empid,
             "X-User-Username": sm_username,
-            "X-User-Store-Id": str(store_id),
-            "X-User-Store-Code": store_code,
+            "X-User-Warehouse-Id": str(warehouse_ref_id),
+            "X-User-Warehouse-Code": warehouse_code,
         }
         other_sm_headers = {
             "Authorization": "Bearer mock-jwt-token",
-            "X-User-Roles": "STORE_MANAGER",
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
             "X-User-Subject": "OTHER_EMP_999",
             "X-User-Username": "other_sm",
-            "X-User-Store-Id": str(uuid.uuid4()),
-            "X-User-Store-Code": "STR-999",
+            "X-User-Warehouse-Id": str(uuid.uuid4()),
+            "X-User-Warehouse-Code": "STR-999",
         }
 
         # -------------------------------------------------------------
-        # STEP 1: Warehouse Manager allocates dock and assigns Store Manager
+        # STEP 1: Warehouse Manager allocates dock and assigns Warehouse Operator
         # -------------------------------------------------------------
         alloc_payload = {
             "allocation_request_id": str(alloc_req_id),
             "dock_id": str(dock_id),
-            "store_manager_id": sm_empid,
-            "store_manager_username": sm_username,
-            "store_manager_name": "Alice Store Manager",
+            "warehouse_operator_id": sm_empid,
+            "warehouse_operator_username": sm_username,
+            "warehouse_operator_name": "Alice Warehouse Operator",
         }
         res_alloc = await client.post(
             "/api/v1/warehouse/dock-allocations",
@@ -286,8 +286,8 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
         assert res_alloc.status_code == 200, res_alloc.text
         alloc_data = res_alloc.json()
         assert alloc_data["assigned_dock_id"] == str(dock_id)
-        assert alloc_data["assigned_store_manager_id"] == sm_empid
-        assert alloc_data["assigned_store_manager_username"] == sm_username
+        assert alloc_data["assigned_warehouse_operator_id"] == sm_empid
+        assert alloc_data["assigned_warehouse_operator_username"] == sm_username
         assert alloc_data["status"] in ["DOCK_ASSIGNED", "OCCUPIED"]
 
         # -------------------------------------------------------------
@@ -300,14 +300,14 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
         )
         assert res_wm_release.status_code == 403, "Warehouse Manager should be forbidden from releasing dock"
 
-        # 2b. Unassigned Store Manager from different store attempt -> MUST BE 403 FORBIDDEN
+        # 2b. Unassigned Warehouse Operator from different warehouse attempt -> MUST BE 403 FORBIDDEN
         res_other_sm_release = await client.post(
             f"/api/v1/warehouse/dock-allocations/{alloc_req_id}/release",
             headers=other_sm_headers,
         )
-        assert res_other_sm_release.status_code == 403, "Unassigned Store Manager should be forbidden"
+        assert res_other_sm_release.status_code == 403, "Unassigned Warehouse Operator should be forbidden"
 
-        # 2c. Assigned Store Manager attempt to release -> MUST SUCCEED 200
+        # 2c. Assigned Warehouse Operator attempt to release -> MUST SUCCEED 200
         res_sm_release = await client.post(
             f"/api/v1/warehouse/dock-allocations/{alloc_req_id}/release",
             headers=sm_headers,
@@ -341,7 +341,7 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
                 uom="PCS",
                 warehouse_id="MAIN",
                 source_location="RECEIVING_DOCK",
-                destination_store_id=store_id,
+                destination_warehouse_ref_id=warehouse_ref_id,
                 destination_zone_id=zone_id,
                 destination_bin_id=bin_id,
                 destination_bin_code=bin_code,
@@ -353,7 +353,7 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
             session.add(putaway)
             await session.commit()
 
-        # Store Manager completes putaway scanning Material QR & Bin QR
+        # Warehouse Operator completes putaway scanning Material QR & Bin QR
         putaway_complete_payload = {
             "material_scan": material_qr_code,
             "location_scan": bin_code,
@@ -398,7 +398,7 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
         assert mat_in_bin["material_qr"] == material_qr_code
 
         # -------------------------------------------------------------
-        # STEP 5: Store Manager Takeaway Execution
+        # STEP 5: Warehouse Operator Takeaway Execution
         # -------------------------------------------------------------
         takeaway_payload = {
             "bin_scan": bin_code,
@@ -446,4 +446,4 @@ async def test_end_to_end_dock_store_manager_takeaway_history_flow(cleanup_movem
         assert takeaway_record["quantity"] == 35.0
         assert takeaway_record["stock_before"] == 100.0
         assert takeaway_record["stock_after"] == 65.0
-        assert takeaway_record["store_code"] == store_code
+        assert takeaway_record["warehouse_code"] == warehouse_code

@@ -55,7 +55,7 @@ export function AssemblyWorkflowHelp() {
           title="View the Assembly workflow"
         >
           <CircleHelp className="size-4" aria-hidden="true" />
-          How to Work?
+          Assembly Guide
         </Button>
       </PopoverTrigger>
       <PopoverContent

@@ -3,16 +3,16 @@ Comprehensive End-to-End Putaway Verification Test Suite.
 
 Verifies all 16 requirements specified by the user:
 1. Complete Business Flow (Gate Entry -> Dock Alloc/SM -> Unload -> QC -> GRN & QR -> Putaway -> Takeaway)
-2. Putaway Task Monitoring & Read-only inherited Store Manager
+2. Putaway Task Monitoring & Read-only inherited Warehouse Operator
 3. GRN QR as sole material identity
 4. QR-to-GRN integrity (Valid, Invalid, Wrong, Fully put away, Partially put away)
 5. Quantity calculation (100 received -> 40 put away -> 30 put away -> 30 put away -> 0 available, COMPLETED)
-6. Bin QR validation (existence, active status, store matching, capacity)
+6. Bin QR validation (existence, active status, warehouse matching, capacity)
 7. Authoritative inventory, bin balance, and movement history transactions
 8. Transaction atomicity (rollback on failure)
 9. Duplicate submission idempotency / concurrency safety
-10. Store Manager RBAC & Store isolation
-11. Dock relationship integrity (Gate Entry -> Dock Assignment -> Dock -> Store Manager)
+10. Warehouse Operator RBAC & Warehouse isolation
+11. Dock relationship integrity (Gate Entry -> Dock Assignment -> Dock -> Warehouse Operator)
 12. Putaway Status transitions (PENDING / READY -> IN_PROGRESS -> COMPLETED)
 13. Takeaway execution after Putaway with GRN Material QR
 14. Frontend/Backend API contract consistency
@@ -59,11 +59,11 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreManagerUserModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    UserAccountModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 
 
@@ -87,8 +87,8 @@ async def cleanup_e2e():
         bin_code_a = created.get("bin_code_a")
         bin_code_b = created.get("bin_code_b")
         zone_code_a = created.get("zone_code_a")
-        store_code_a = created.get("store_code_a")
-        store_code_b = created.get("store_code_b")
+        warehouse_code_a = created.get("warehouse_code_a")
+        warehouse_code_b = created.get("warehouse_code_b")
         dock_code_a = created.get("dock_code_a")
         dock_code_b = created.get("dock_code_b")
 
@@ -119,13 +119,13 @@ async def cleanup_e2e():
             await session.execute(text("DELETE FROM storage_location WHERE location_code LIKE :pat;"), {"pat": f"%{uid_suffix}%"})
 
         if bin_code_a and bin_code_b:
-            await session.execute(text("DELETE FROM store_bin WHERE bin_code IN (:ba, :bb);"), {"ba": bin_code_a, "bb": bin_code_b})
+            await session.execute(text("DELETE FROM warehouse_bin WHERE bin_code IN (:ba, :bb);"), {"ba": bin_code_a, "bb": bin_code_b})
 
         if zone_code_a:
-            await session.execute(text("DELETE FROM store_zone WHERE zone_code = :za;"), {"za": zone_code_a})
+            await session.execute(text("DELETE FROM warehouse_zone WHERE zone_code = :za;"), {"za": zone_code_a})
 
-        if store_code_a and store_code_b:
-            await session.execute(text("DELETE FROM store WHERE store_code IN (:sa, :sb);"), {"sa": store_code_a, "sb": store_code_b})
+        if warehouse_code_a and warehouse_code_b:
+            await session.execute(text("DELETE FROM warehouse WHERE warehouse_code IN (:sa, :sb);"), {"sa": warehouse_code_a, "sb": warehouse_code_b})
 
         if dock_code_a and dock_code_b:
             await session.execute(text("DELETE FROM warehouse_dock WHERE dock_number IN (:da, :db);"), {"da": dock_code_a, "db": dock_code_b})
@@ -150,8 +150,8 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
         mat_name = f"Precision Steel Wire {uid_suffix}"
         dock_code_a = f"DK-E2E-A-{uid_suffix}"
         dock_code_b = f"DK-E2E-B-{uid_suffix}"
-        store_code_a = f"STR-E2E-A-{uid_suffix}"
-        store_code_b = f"STR-E2E-B-{uid_suffix}"
+        warehouse_code_a = f"STR-E2E-A-{uid_suffix}"
+        warehouse_code_b = f"STR-E2E-B-{uid_suffix}"
         zone_code_a = f"ZON-E2E-A-{uid_suffix}"
         bin_code_a = f"BIN-A1-{uid_suffix}"
         bin_code_b = f"BIN-B1-{uid_suffix}"
@@ -170,8 +170,8 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
             "mat_code": mat_code,
             "dock_code_a": dock_code_a,
             "dock_code_b": dock_code_b,
-            "store_code_a": store_code_a,
-            "store_code_b": store_code_b,
+            "warehouse_code_a": warehouse_code_a,
+            "warehouse_code_b": warehouse_code_b,
             "zone_code_a": zone_code_a,
             "bin_code_a": bin_code_a,
             "bin_code_b": bin_code_b,
@@ -202,29 +202,29 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
             )
             uow.session.add(mat_stock)
 
-            # 2. Stores
-            store_a = StoreModel(
-                store_code=store_code_a,
-                store_name=f"Store Alpha {uid_suffix}",
+            # 2. Warehouses
+            warehouse_a = WarehouseModel(
+                warehouse_code=warehouse_code_a,
+                warehouse_name=f"Warehouse Alpha {uid_suffix}",
                 warehouse_id="MAIN",
                 status="ACTIVE",
-                store_manager_id=sm_user_a,
-                store_manager_name="Alice Store Manager",
+                warehouse_operator_id=sm_user_a,
+                warehouse_operator_name="Alice Warehouse Operator",
             )
-            store_b = StoreModel(
-                store_code=store_code_b,
-                store_name=f"Store Beta {uid_suffix}",
+            warehouse_b = WarehouseModel(
+                warehouse_code=warehouse_code_b,
+                warehouse_name=f"Warehouse Beta {uid_suffix}",
                 warehouse_id="MAIN",
                 status="ACTIVE",
-                store_manager_id=sm_user_b,
-                store_manager_name="Bob Store Manager",
+                warehouse_operator_id=sm_user_b,
+                warehouse_operator_name="Bob Warehouse Operator",
             )
-            uow.session.add_all([store_a, store_b])
+            uow.session.add_all([warehouse_a, warehouse_b])
             await uow.session.flush()
 
             # 3. Zones & Bins
-            zone_a = StoreZoneModel(
-                store_id=store_a.id,
+            zone_a = WarehouseZoneModel(
+                warehouse_ref_id=warehouse_a.id,
                 zone_code=zone_code_a,
                 zone_name="Zone A",
                 status="ACTIVE",
@@ -232,8 +232,8 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
             uow.session.add(zone_a)
             await uow.session.flush()
 
-            bin_a = StoreBinModel(
-                store_id=store_a.id,
+            bin_a = WarehouseBinModel(
+                warehouse_ref_id=warehouse_a.id,
                 zone_id=zone_a.id,
                 bin_code=bin_code_a,
                 bin_name=f"Bin A1 {uid_suffix}",
@@ -243,8 +243,8 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
                 occupied_quantity=Decimal("0.0"),
                 status="ACTIVE",
             )
-            bin_b = StoreBinModel(
-                store_id=store_b.id,
+            bin_b = WarehouseBinModel(
+                warehouse_ref_id=warehouse_b.id,
                 zone_id=zone_a.id,
                 bin_code=bin_code_b,
                 bin_name=f"Bin B1 {uid_suffix}",
@@ -261,7 +261,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
             loc_a = StorageLocationModel(
                 location_code=f"LOC-E2E-{uid_suffix}",
                 warehouse_id="MAIN",
-                store_id=store_a.id,
+                warehouse_ref_id=warehouse_a.id,
                 zone_id=zone_a.id,
                 bin_id=bin_a.id,
                 zone=zone_code_a,
@@ -291,7 +291,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
                 dock_code=dock_code_a,
                 dock_name=f"Dock {dock_code_a}",
                 dock_type="RAW_MATERIAL",
-                store_id=store_a.id,
+                warehouse_ref_id=warehouse_a.id,
                 status="AVAILABLE",
                 is_active=True,
             )
@@ -299,14 +299,14 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
                 dock_code=dock_code_b,
                 dock_name=f"Dock {dock_code_b}",
                 dock_type="RAW_MATERIAL",
-                store_id=store_b.id,
+                warehouse_ref_id=warehouse_b.id,
                 status="AVAILABLE",
                 is_active=True,
             )
             uow.session.add_all([dock_wh_a, dock_wh_b, dock_a, dock_b])
 
-            store_a_id = store_a.id
-            store_b_id = store_b.id
+            warehouse_a_id = warehouse_a.id
+            warehouse_b_id = warehouse_b.id
             bin_a_id = bin_a.id
             bin_b_id = bin_b.id
 
@@ -317,18 +317,18 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
             "X-User-Subject": wh_user,
         }
         headers_sm_a = {
-            "X-User-Roles": "STORE_MANAGER",
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
             "X-User-Name": sm_user_a,
             "X-User-Subject": sm_user_a,
-            "X-User-Store-Id": str(store_a_id),
-            "X-User-Store-Code": store_code_a,
+            "X-User-Warehouse-Id": str(warehouse_a_id),
+            "X-User-Warehouse-Code": warehouse_code_a,
         }
         headers_sm_b = {
-            "X-User-Roles": "STORE_MANAGER",
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
             "X-User-Name": sm_user_b,
             "X-User-Subject": sm_user_b,
-            "X-User-Store-Id": str(store_b_id),
-            "X-User-Store-Code": store_code_b,
+            "X-User-Warehouse-Id": str(warehouse_b_id),
+            "X-User-Warehouse-Code": warehouse_code_b,
         }
         headers_unauth = {
             "X-User-Roles": "SECURITY_GUARD",
@@ -338,7 +338,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
 
         # -------------------------------------------------------------
         # STEP 1: Complete Business Inbound Flow
-        # Gate Entry -> Truck Arrival -> Dock Allocation & Store Manager Assign
+        # Gate Entry -> Truck Arrival -> Dock Allocation & Warehouse Operator Assign
         # -> Unload -> QC -> GRN & QR -> Putaway Task Created
         # -------------------------------------------------------------
         total_received = Decimal("100.00")
@@ -373,7 +373,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
                 existing_gate_pass_id=ge_num,
                 vehicle_number=veh_num,
                 assigned_dock_id=dock_a.id,
-                assigned_store_id=store_a_id,
+                assigned_warehouse_ref_id=warehouse_a_id,
                 status="ALLOCATED",
             )
             uow.session.add(alloc_req)
@@ -383,11 +383,11 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
                 asn_id=asn_id,
                 vehicle_number=veh_num,
                 dock_number=dock_code_a,
-                assigned_store_id=store_a_id,
-                assigned_store_code=store_code_a,
-                assigned_store_name="Store Alpha",
-                assigned_store_manager_id=sm_user_a,
-                assigned_store_manager_name="Alice Store Manager",
+                assigned_warehouse_ref_id=warehouse_a_id,
+                assigned_warehouse_code=warehouse_code_a,
+                assigned_warehouse_name="Warehouse Alpha",
+                assigned_warehouse_operator_id=sm_user_a,
+                assigned_warehouse_operator_name="Alice Warehouse Operator",
                 assigned_by=wh_user,
                 assigned_at=datetime.now(timezone.utc),
             )
@@ -450,7 +450,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
                 uom="MTR",
                 warehouse_id="MAIN",
                 source_location="RECEIVING_DOCK",
-                destination_store_id=store_a_id,
+                destination_warehouse_ref_id=warehouse_a_id,
                 status="PENDING",
                 created_by="system",
                 created_at=datetime.now(timezone.utc),
@@ -469,8 +469,8 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
         assert len(matching) >= 1, "Created Putaway Task not found in list"
         task_view = matching[0]
 
-        # Verify Store Manager is inherited read-only from Dock Allocation
-        assert task_view.get("assigned_store_manager_id") == sm_user_a or task_view.get("assigned_store_manager") == "Alice Store Manager" or task_view.get("assigned_store_manager_name") == "Alice Store Manager"
+        # Verify Warehouse Operator is inherited read-only from Dock Allocation
+        assert task_view.get("assigned_warehouse_operator_id") == sm_user_a or task_view.get("assigned_warehouse_operator") == "Alice Warehouse Operator" or task_view.get("assigned_warehouse_operator_name") == "Alice Warehouse Operator"
         task_status = task_view.get("putaway_status") or task_view.get("status")
         assert task_status in ["PENDING", "READY_FOR_PUTAWAY", "PUTAWAY_PENDING"]
         assert task_view.get("quantity") == 100.0 or task_view.get("ordered_quantity") == 100.0
@@ -520,18 +520,18 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
         assert bin_details["occupied_quantity"] == 0.0
         assert bin_details["available_capacity"] == 500.0
 
-        # 6b. Wrong Store / Inactive Bin Rejection
-        res_wrong_store_bin = await client.post(
+        # 6b. Wrong Warehouse / Inactive Bin Rejection
+        res_wrong_warehouse_bin = await client.post(
             "/api/storage/putaway-tasks/resolve-bin-qr",
             json={"bin_qr_code": bin_code_b},
-            headers=headers_sm_a,  # SM_A belongs to Store Alpha, bin_b belongs to Store Beta
+            headers=headers_sm_a,  # SM_A belongs to Warehouse Alpha, bin_b belongs to Warehouse Beta
         )
-        if res_wrong_store_bin.status_code == 200:
-            # If resolve succeeded, execute_putaway must reject cross-store placement
+        if res_wrong_warehouse_bin.status_code == 200:
+            # If resolve succeeded, execute_putaway must reject cross-warehouse placement
             pass
 
         # -------------------------------------------------------------
-        # STEP 10: Backend Store Manager Authorization & RBAC
+        # STEP 10: Backend Warehouse Operator Authorization & RBAC
         # -------------------------------------------------------------
         # 10a. Unauthorized Role Rejection
         res_unauth_exec = await client.post(
@@ -545,7 +545,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
         )
         assert res_unauth_exec.status_code == 403, f"Expected 403, got {res_unauth_exec.status_code}"
 
-        # 10b. Wrong Store Manager (SM_B trying to put away into Store A or execute SM_A's assigned task)
+        # 10b. Wrong Warehouse Operator (SM_B trying to put away into Warehouse A or execute SM_A's assigned task)
         res_wrong_sm_exec = await client.post(
             "/api/storage/putaway-tasks/execute-putaway",
             json={
@@ -555,7 +555,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
             },
             headers=headers_sm_b,
         )
-        assert res_wrong_sm_exec.status_code in [403, 422], f"Expected 403/422 for wrong store manager, got {res_wrong_sm_exec.status_code}"
+        assert res_wrong_sm_exec.status_code in [403, 422], f"Expected 403/422 for wrong warehouse operator, got {res_wrong_sm_exec.status_code}"
 
         # -------------------------------------------------------------
         # STEP 5 & 7 & 12: Quantity Calculations, Status Transitions, & Inventory Ledger Update
@@ -584,7 +584,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
 
         # Verify DB state after Stage 1
         async with UnitOfWork() as uow:
-            bin_db_1 = await uow.session.get(StoreBinModel, bin_a_id)
+            bin_db_1 = await uow.session.get(WarehouseBinModel, bin_a_id)
             assert bin_db_1.occupied_quantity == Decimal("40.0")
 
             stock_db_1 = await uow.session.scalar(
@@ -638,7 +638,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
 
         # Verify DB state after Final Stage
         async with UnitOfWork() as uow:
-            bin_db_final = await uow.session.get(StoreBinModel, bin_a_id)
+            bin_db_final = await uow.session.get(WarehouseBinModel, bin_a_id)
             assert bin_db_final.occupied_quantity == Decimal("100.0")
 
             stock_db_final = await uow.session.scalar(

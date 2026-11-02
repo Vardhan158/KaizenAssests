@@ -9,27 +9,27 @@ import math
 import uuid
 from fastapi import HTTPException
 from sqlalchemy import select, func, insert
-from app.modules.store.infrastructure.persistence.models import StoreBinModel, StoreRackModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseBinModel, WarehouseRackModel
 from app.modules.storage.infrastructure.persistence.models import StorageLocationModel, InventoryLocationBalanceModel
 
 
 def install_rack_capacity(connection):
     """Idempotent schema initialization, shared by Alembic and local startup."""
-    from app.modules.store.infrastructure.persistence.models import RackOccupancyEventModel
-    StoreRackModel.__table__.create(connection, checkfirst=True)
+    from app.modules.warehouse.infrastructure.persistence.models import RackOccupancyEventModel
+    WarehouseRackModel.__table__.create(connection, checkfirst=True)
     RackOccupancyEventModel.__table__.create(connection, checkfirst=True)
-    groups = connection.execute(select(StoreBinModel.zone_id, func.upper(StoreBinModel.rack).label("rack"),
-        func.sum(StoreBinModel.capacity).label("capacity")).where(StoreBinModel.rack.is_not(None))
-        .group_by(StoreBinModel.zone_id, func.upper(StoreBinModel.rack))).all()
+    groups = connection.execute(select(WarehouseBinModel.zone_id, func.upper(WarehouseBinModel.rack).label("rack"),
+        func.sum(WarehouseBinModel.capacity).label("capacity")).where(WarehouseBinModel.rack.is_not(None))
+        .group_by(WarehouseBinModel.zone_id, func.upper(WarehouseBinModel.rack))).all()
     for zone_id, rack, capacity in groups:
-        exists = connection.scalar(select(StoreRackModel.id).where(StoreRackModel.zone_id == zone_id, StoreRackModel.rack_code == rack))
+        exists = connection.scalar(select(WarehouseRackModel.id).where(WarehouseRackModel.zone_id == zone_id, WarehouseRackModel.rack_code == rack))
         if exists:
             continue
         occupied = connection.scalar(select(func.coalesce(func.sum(InventoryLocationBalanceModel.quantity), 0))
             .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
-            .join(StoreBinModel, StoreBinModel.id == StorageLocationModel.bin_id)
-            .where(StoreBinModel.zone_id == zone_id, func.upper(StoreBinModel.rack) == rack)) or 0
-        connection.execute(insert(StoreRackModel).values(id=uuid.uuid4(), zone_id=zone_id, rack_code=rack,
+            .join(WarehouseBinModel, WarehouseBinModel.id == StorageLocationModel.bin_id)
+            .where(WarehouseBinModel.zone_id == zone_id, func.upper(WarehouseBinModel.rack) == rack)) or 0
+        connection.execute(insert(WarehouseRackModel).values(id=uuid.uuid4(), zone_id=zone_id, rack_code=rack,
             maximum_capacity=math.ceil(max(capacity or 0, occupied, 1)), occupied_quantity=occupied))
     if connection.dialect.name == "sqlite":
         _install_sqlite(connection)
@@ -40,7 +40,7 @@ def install_rack_capacity(connection):
 
 
 def _rack(record):
-    return f"(SELECT r.id FROM store_rack r JOIN store_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=r.rack_code JOIN storage_location l ON l.bin_id=b.id WHERE l.id={record}.storage_location_id)"
+    return f"(SELECT r.id FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=r.rack_code JOIN storage_location l ON l.bin_id=b.id WHERE l.id={record}.storage_location_id)"
 
 
 def _install_sqlite(c):
@@ -54,12 +54,12 @@ def _install_sqlite(c):
             changed = "1" if operation == "INSERT" else "NEW.quantity > OLD.quantity OR NEW.storage_location_id <> OLD.storage_location_id"
             parts.append(f"SELECT CASE WHEN ({changed}) AND {_rack('NEW')} IS NOT NULL AND (upper(NEW.uom) <> 'PCS' OR NEW.quantity <> CAST(NEW.quantity AS INTEGER)) THEN RAISE(ABORT, 'Rack capacity requires whole PCS quantities') END;")
         if operation != "INSERT":
-            parts += [f"UPDATE store_rack SET occupied_quantity=occupied_quantity-OLD.quantity WHERE id={_rack('OLD')};",
-                f"INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) SELECT id,OLD.id,-OLD.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM store_rack WHERE id={_rack('OLD')} AND OLD.quantity <> 0;"]
+            parts += [f"UPDATE warehouse_rack SET occupied_quantity=occupied_quantity-OLD.quantity WHERE id={_rack('OLD')};",
+                f"INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) SELECT id,OLD.id,-OLD.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM warehouse_rack WHERE id={_rack('OLD')} AND OLD.quantity <> 0;"]
         if operation != "DELETE":
-            parts += [f"SELECT CASE WHEN EXISTS(SELECT 1 FROM store_rack WHERE id={_rack('NEW')} AND occupied_quantity+NEW.quantity>maximum_capacity) THEN RAISE(ABORT, 'Rack capacity exceeded. Refresh available capacity and reduce the quantity.') END;",
-                f"UPDATE store_rack SET occupied_quantity=occupied_quantity+NEW.quantity WHERE id={_rack('NEW')};",
-                f"INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) SELECT id,NEW.id,NEW.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM store_rack WHERE id={_rack('NEW')} AND NEW.quantity <> 0;"]
+            parts += [f"SELECT CASE WHEN EXISTS(SELECT 1 FROM warehouse_rack WHERE id={_rack('NEW')} AND occupied_quantity+NEW.quantity>maximum_capacity) THEN RAISE(ABORT, 'Rack capacity exceeded. Refresh available capacity and reduce the quantity.') END;",
+                f"UPDATE warehouse_rack SET occupied_quantity=occupied_quantity+NEW.quantity WHERE id={_rack('NEW')};",
+                f"INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) SELECT id,NEW.id,NEW.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM warehouse_rack WHERE id={_rack('NEW')} AND NEW.quantity <> 0;"]
         when = " WHEN NEW.quantity <> OLD.quantity OR NEW.storage_location_id <> OLD.storage_location_id" if operation == "UPDATE" else ""
         c.exec_driver_sql(f"CREATE TRIGGER {name} AFTER {operation} ON inventory_location_balance{when} BEGIN " + " ".join(parts) + " END")
 
@@ -70,22 +70,22 @@ def _install_postgres(c):
     BEGIN
       IF TG_OP='UPDATE' AND NEW.quantity=OLD.quantity AND NEW.storage_location_id=OLD.storage_location_id THEN RETURN NEW; END IF;
       IF TG_OP <> 'INSERT' THEN
-        SELECT r.id INTO old_rack FROM store_rack r JOIN store_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=r.rack_code JOIN storage_location l ON l.bin_id=b.id WHERE l.id=OLD.storage_location_id;
+        SELECT r.id INTO old_rack FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=r.rack_code JOIN storage_location l ON l.bin_id=b.id WHERE l.id=OLD.storage_location_id;
       END IF;
       IF TG_OP <> 'DELETE' THEN
-        SELECT r.id INTO new_rack FROM store_rack r JOIN store_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=r.rack_code JOIN storage_location l ON l.bin_id=b.id WHERE l.id=NEW.storage_location_id;
+        SELECT r.id INTO new_rack FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=r.rack_code JOIN storage_location l ON l.bin_id=b.id WHERE l.id=NEW.storage_location_id;
         IF NEW.quantity < 0 OR NEW.available_quantity < 0 OR NEW.available_quantity > NEW.quantity THEN RAISE EXCEPTION 'Rack inventory quantity cannot be negative or over-available'; END IF;
         IF new_rack IS NOT NULL AND (TG_OP='INSERT' OR NEW.quantity>OLD.quantity OR NEW.storage_location_id<>OLD.storage_location_id) AND (upper(NEW.uom)<>'PCS' OR NEW.quantity<>trunc(NEW.quantity)) THEN RAISE EXCEPTION 'Rack capacity requires whole PCS quantities'; END IF;
       END IF;
-      PERFORM id FROM store_rack WHERE id IN (old_rack,new_rack) ORDER BY id FOR UPDATE;
+      PERFORM id FROM warehouse_rack WHERE id IN (old_rack,new_rack) ORDER BY id FOR UPDATE;
       IF old_rack IS NOT NULL THEN
-        UPDATE store_rack SET occupied_quantity=occupied_quantity-OLD.quantity WHERE id=old_rack;
+        UPDATE warehouse_rack SET occupied_quantity=occupied_quantity-OLD.quantity WHERE id=old_rack;
         IF OLD.quantity<>0 THEN INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) VALUES(old_rack,OLD.id::text,-OLD.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),current_user)); END IF;
       END IF;
       IF new_rack IS NOT NULL THEN
-        SELECT maximum_capacity-occupied_quantity INTO remaining FROM store_rack WHERE id=new_rack;
+        SELECT maximum_capacity-occupied_quantity INTO remaining FROM warehouse_rack WHERE id=new_rack;
         IF NEW.quantity>remaining THEN RAISE EXCEPTION 'Rack capacity exceeded. Only % PCS can be stored.',remaining; END IF;
-        UPDATE store_rack SET occupied_quantity=occupied_quantity+NEW.quantity WHERE id=new_rack;
+        UPDATE warehouse_rack SET occupied_quantity=occupied_quantity+NEW.quantity WHERE id=new_rack;
         IF NEW.quantity<>0 THEN INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) VALUES(new_rack,NEW.id::text,NEW.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),current_user)); END IF;
       END IF;
       IF TG_OP='DELETE' THEN RETURN OLD; END IF;
@@ -96,8 +96,8 @@ def _install_postgres(c):
 
 
 async def get_rack_capacity(session, bin_model, *, lock=False):
-    query = select(StoreRackModel).where(StoreRackModel.zone_id == bin_model.zone_id,
-        StoreRackModel.rack_code == str(bin_model.rack or "").upper()).execution_options(populate_existing=True)
+    query = select(WarehouseRackModel).where(WarehouseRackModel.zone_id == bin_model.zone_id,
+        WarehouseRackModel.rack_code == str(bin_model.rack or "").upper()).execution_options(populate_existing=True)
     return await session.scalar(query.with_for_update() if lock else query)
 
 

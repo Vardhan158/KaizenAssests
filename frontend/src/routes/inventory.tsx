@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   PackageCheck,
   ClipboardList,
+  History,
   QrCode,
   ListOrdered,
   Plus,
@@ -25,6 +26,7 @@ import {
   Layers,
   Tag,
   Download,
+  Upload,
   Printer,
   Truck,
   ArrowRight,
@@ -57,20 +59,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
-import warehouseHero from "@/assets/login-warehouse.png";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import warehouseHero from "@/assets/warehouse-operations-hero.png";
 
 export const Route = createFileRoute("/inventory")({
   head: () => ({
@@ -87,6 +76,13 @@ export const Route = createFileRoute("/inventory")({
 });
 
 type TabType = "dashboard" | "putaway" | "inventory" | "requests" | "picking" | "locations";
+
+const formatApiDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}Z`).toLocaleString();
+};
 
 function SimpleWarehouseModule() {
   const navigate = useNavigate();
@@ -117,7 +113,7 @@ function SimpleWarehouseModule() {
     requests: {
       eyebrow: "Warehouse Requests",
       title: "Material Requests",
-      description: "Review and fulfill material requests from production and stores.",
+      description: "Review and fulfill material requests from production and warehouses.",
       icon: ClipboardList,
     },
     picking: {
@@ -141,21 +137,30 @@ function SimpleWarehouseModule() {
   const [inventorySummary, setInventorySummary] = useState<any[]>([]);
   const [materialRequests, setMaterialRequests] = useState<any[]>([]);
   const [pickupTasks, setPickupTasks] = useState<any[]>([]);
-  const [stores, setStores] = useState<any[]>([]);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
   const [zones, setZones] = useState<any[]>([]);
   const [bins, setBins] = useState<any[]>([]);
   const [docks, setDocks] = useState<any[]>([]);
   const [dockRequests, setDockRequests] = useState<any[]>([]);
   const [dockChoices, setDockChoices] = useState<Record<string, string>>({});
-  const [dockStoreChoices, setDockStoreChoices] = useState<Record<string, string>>({});
 
+  const [requisitionRefreshKey, setRequisitionRefreshKey] = useState(0);
+  const [putawaySearch, setPutawaySearch] = useState("");
+  const [putawayStatus, setPutawayStatus] = useState("ALL");
+  const [putawayBatchFilter, setPutawayBatchFilter] = useState("ALL");
   // Search & Filter States
   const [invSearch, setInvSearch] = useState("");
   const [invWarehouseFilter, setInvWarehouseFilter] = useState("ALL");
   const [invStatusFilter, setInvStatusFilter] = useState("ALL");
+  useEffect(() => {
+    if (typeof searchParams.search !== "string") return;
+    if (activeTab === "putaway") setPutawaySearch(searchParams.search);
+    else if (activeTab === "inventory") setInvSearch(searchParams.search);
+  }, [searchParams.search, activeTab]);
 
   // Selected Detail Modals
   const [selectedInventory, setSelectedInventory] = useState<any>(null);
+  const [selectedInventoryBatchCode, setSelectedInventoryBatchCode] = useState<string | null>(null);
   const [selectedPutawayGroup, setSelectedPutawayGroup] = useState<any>(null);
   const [putawayView, setPutawayView] = useState<PutawayView>("details");
   const openPutawayGroup = (group: any, view: PutawayView = "details") => { setPutawayView(view); setSelectedPutawayGroup(group); };
@@ -168,12 +173,13 @@ function SimpleWarehouseModule() {
   const [materialQrVerified, setMaterialQrVerified] = useState(false);
   const [binQrVerified, setBinQrVerified] = useState(false);
   const [qrScanError, setQrScanError] = useState("");
-  const [cameraField, setCameraField] = useState<"material" | "bin" | null>(null);
+  const [cameraField, setCameraField] = useState<"material" | "bin" | "pickup-material" | "pickup-bin" | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraCanvasRef = useRef<HTMLCanvasElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState("");
   const [pickupToConfirm, setPickupToConfirm] = useState<any>(null);
+  const [showPickupHistory, setShowPickupHistory] = useState(false);
   const [pickupFifoAlert, setPickupFifoAlert] = useState("");
   const [pickupConfirmation, setPickupConfirmation] = useState({
     material_scan: "",
@@ -181,8 +187,13 @@ function SimpleWarehouseModule() {
     quantity: "",
   });
   const [pickupQrImages, setPickupQrImages] = useState({ material: "", rack: "" });
+  const [pickupQrVerified, setPickupQrVerified] = useState({ material: false, rack: false });
+  const [pickupQrError, setPickupQrError] = useState("");
+  const [availablePickupBin, setAvailablePickupBin] = useState<any>(null);
+  const pickupMaterialFileInput = useRef<HTMLInputElement>(null);
+  const pickupRackFileInput = useRef<HTMLInputElement>(null);
   const [selectedLocationId, setSelectedLocationId] = useState("");
-  const [assignStoreId, setAssignStoreId] = useState("");
+  const [assignWarehouseRefId, setAssignWarehouseRefId] = useState("");
   const [assignZoneId, setAssignZoneId] = useState("");
   const [assignQuantity, setAssignQuantity] = useState("");
 
@@ -241,10 +252,19 @@ function SimpleWarehouseModule() {
       const image = context.getImageData(0, 0, canvas.width, canvas.height);
       const result = jsQR(image.data, image.width, image.height);
       if (result?.data) {
-        setPutawayScan((current) => ({
-          ...current,
-          [cameraField === "material" ? "materialQr" : "binQr"]: result.data,
-        }));
+        if (cameraField === "pickup-material" || cameraField === "pickup-bin") {
+          const pickupField = cameraField === "pickup-material" ? "material" : "rack";
+          setPickupConfirmation((current) => ({
+            ...current,
+            [pickupField === "material" ? "material_scan" : "zone_scan"]: result.data,
+          }));
+          void verifyPickupQr(pickupField, result.data);
+        } else {
+          setPutawayScan((current) => ({
+            ...current,
+            [cameraField === "material" ? "materialQr" : "binQr"]: result.data,
+          }));
+        }
         setCameraField(null);
       }
     }, 250);
@@ -277,14 +297,14 @@ function SimpleWarehouseModule() {
       const [
         putawaysRes,
         inventoryRes,
-        storesRes,
+        warehouseConfigurationRes,
         materialCatalogRes,
         assemblyRequestsRes,
         assemblyPickingTasksRes,
       ] = await Promise.all([
         api.getPutawayTasks(),
         api.getWarehouseInventorySummary(),
-        api.getStores(),
+        api.getWarehouses(),
         api.getMaterialComponents(),
         api.getAssemblyMaterialRequests(),
         api.getAssemblyPickingTasks(),
@@ -316,16 +336,32 @@ function SimpleWarehouseModule() {
       // historical records.
       const grnKeys = Array.from(
         new Set(
-          normalizedPutawayTasks.map((task: any) => task.grn_id).filter((value: any) => value),
+          normalizedPutawayTasks
+            .map((task: any) => task.grn_number || task.grnNumber || task.grn_id)
+            .filter((value: any) => value),
         ),
       );
       const canonicalByGrnMaterial = new Map<string, Set<string>>();
+      const canonicalMaterialsByGrn = new Map<string, Set<string>>();
       await Promise.all(
         grnKeys.map(async (grnKey) => {
           try {
             const detail = await api.getGrnDetail(String(grnKey));
+            if (!detail || !Array.isArray(detail.lines)) return;
+            const canonicalMaterials = new Set<string>();
+            const identityKeys = Array.from(new Set([
+              String(grnKey),
+              String(detail?.grn_id || ""),
+              String(detail?.grn_number || ""),
+            ].filter(Boolean)));
             for (const line of Array.isArray(detail?.lines) ? detail.lines : []) {
+              const itemCode = String(line.item_code || line.material_code || "")
+                .trim()
+                .toUpperCase();
+              if (!itemCode) continue;
               const approved = Number(line.quality_approved_quantity ?? line.good_quantity ?? 0);
+              if (!(approved > 0)) continue;
+              canonicalMaterials.add(itemCode);
               let remaining = approved;
               const allowed = new Set<string>();
               for (const batch of [...(Array.isArray(line.batches) ? line.batches : [])].sort(
@@ -342,11 +378,13 @@ function SimpleWarehouseModule() {
                 remaining -= Math.min(quantity, remaining);
               }
               if (allowed.size > 0) {
-                canonicalByGrnMaterial.set(
-                  `${grnKey}:${String(line.item_code || "").toUpperCase()}`,
-                  allowed,
-                );
+                for (const identityKey of identityKeys) {
+                  canonicalByGrnMaterial.set(`${identityKey}:${itemCode}`, allowed);
+                }
               }
+            }
+            for (const identityKey of identityKeys) {
+              canonicalMaterialsByGrn.set(identityKey, canonicalMaterials);
             }
           } catch {
             // The task endpoint remains the source if a legacy GRN cannot be read.
@@ -354,12 +392,18 @@ function SimpleWarehouseModule() {
         }),
       );
       normalizedPutawayTasks = normalizedPutawayTasks.filter((task: any) => {
+        const grnKey = String(task.grn_number || task.grnNumber || task.grn_id || "");
+        const itemCode = String(task.item_code || task.material_code || "")
+          .trim()
+          .toUpperCase();
+        const canonicalMaterials = canonicalMaterialsByGrn.get(grnKey);
+        if (canonicalMaterials && !canonicalMaterials.has(itemCode)) return false;
         const batch = String(task.batch_number || task.batchNumber || "")
           .trim()
           .toUpperCase();
         if (!batch || !task.grn_id) return true;
         const allowed = canonicalByGrnMaterial.get(
-          `${task.grn_id}:${String(task.item_code || task.material_code || "").toUpperCase()}`,
+          `${grnKey}:${itemCode}`,
         );
         return !allowed || allowed.has(batch);
       });
@@ -400,7 +444,19 @@ function SimpleWarehouseModule() {
           location: "-",
           is_catalog_item: true,
         }));
-      const rowsToRefresh = [...stockRows, ...catalogRows];
+      // The warehouse summary is location/batch based, so one material can be
+      // returned once for every stored balance. This screen is a material-level
+      // overview and its detail endpoint already supplies all locations and
+      // batches; keep one row per material code before enriching it.
+      const rowsByMaterialCode = new Map<string, any>();
+      for (const row of [...stockRows, ...catalogRows]) {
+        const materialKey = String(row.material_code || row.code || "")
+          .trim()
+          .toUpperCase();
+        const key = materialKey || `ROW:${row.id || rowsByMaterialCode.size}`;
+        if (!rowsByMaterialCode.has(key)) rowsByMaterialCode.set(key, row);
+      }
+      const rowsToRefresh = Array.from(rowsByMaterialCode.values());
       const refreshedStockRows = await Promise.all(
         rowsToRefresh.map(async (row: any) => {
           const code = row.material_code || row.code;
@@ -415,7 +471,9 @@ function SimpleWarehouseModule() {
                 batch_number: movement.batch_lot,
                 quantity: movement.quantity,
                 uom: movement.uom || summary.uom,
-              }));
+                received_at: movement.performed_at,
+              }))
+              .sort((a: any, b: any) => String(a.received_at || "").localeCompare(String(b.received_at || "")));
             return {
               ...row,
               available: summary.available_stock ?? row.available,
@@ -457,13 +515,13 @@ function SimpleWarehouseModule() {
             item.batch_number || item.batch_lot_number || task.confirmation?.batch_number,
           uom: item.uom,
           pick_location: item.pick_location || task.pick_location || task.destination,
-          confirmation: task.confirmation,
-          status: task.status,
+          confirmation: item.confirmation || task.confirmation,
+          status: item.status || task.status,
           assembly_pick_task_id: task.id,
         })),
       );
       setPickupTasks(assemblyPickingTasks);
-      setStores(Array.isArray(storesRes) ? storesRes : []);
+      setWarehouses(Array.isArray(warehouseConfigurationRes) ? warehouseConfigurationRes : []);
 
       const locationZones = await api.getLocationZones();
       const zoneRows = Array.isArray(locationZones) ? locationZones : [];
@@ -499,7 +557,7 @@ function SimpleWarehouseModule() {
       id: string;
       label: string;
       bin_code: string;
-      store_id: string;
+      warehouse_ref_id: string;
       zone_id: string;
       rack: string;
       rack_capacity?: any;
@@ -513,7 +571,7 @@ function SimpleWarehouseModule() {
           id: b.id,
           label: `${b.zone_code || b.zone_name || "—"} / ${b.rack || "—"} / ${b.bin_code}`,
           bin_code: b.bin_code,
-          store_id: b.store_id,
+          warehouse_ref_id: b.warehouse_ref_id,
           zone_id: b.zone_id,
           rack: b.rack,
           rack_capacity: b.rack_capacity,
@@ -525,13 +583,26 @@ function SimpleWarehouseModule() {
     }
     return list;
   }, [bins]);
+  const scanAssignedBin = scanPutawayTask
+    ? allFlattenedBins.find(
+        (bin) =>
+          bin.id === scanPutawayTask.destination_bin_id ||
+          bin.bin_code === scanPutawayTask.destination_bin_code,
+      )
+    : undefined;
+  const scanAvailableCapacity = Number(
+    scanAssignedBin?.rack_capacity?.available_capacity ?? Number.POSITIVE_INFINITY,
+  );
+  const scanMaximumQuantity = scanPutawayTask
+    ? Math.min(Number(scanPutawayTask.quantity || 0), scanAvailableCapacity)
+    : 0;
 
   // Action: Assign Storage Location to Putaway Task
   const handleConfirmAssignPutaway = async () => {
     if (!assignPutawayTask) return;
     const quantity = Number(assignQuantity);
     if (
-      !assignStoreId ||
+      !assignWarehouseRefId ||
       !assignZoneId ||
       !selectedLocationId ||
       !Number.isFinite(quantity) ||
@@ -549,7 +620,7 @@ function SimpleWarehouseModule() {
       await api.assignPutawayLocation(
         assignPutawayTask.id,
         selectedBinObj?.id,
-        selectedBinObj?.store_id,
+        selectedBinObj?.warehouse_ref_id,
         selectedBinObj?.zone_id,
         selectedBinObj?.id,
         quantity,
@@ -570,7 +641,7 @@ function SimpleWarehouseModule() {
     if (!canAssignPutaway(task)) return;
     setSelectedPutawayGroup(null);
     setAssignPutawayTask(task);
-    setAssignStoreId(task.destination_store_id || task.assigned_store_id || "");
+    setAssignWarehouseRefId(task.destination_warehouse_ref_id || task.assigned_warehouse_ref_id || warehouses[0]?.id || "");
     setAssignZoneId(task.destination_zone_id || "");
     setSelectedLocationId(task.destination_bin_id || "");
     setAssignQuantity(String(unassignedPutawayQuantity(task)));
@@ -579,7 +650,17 @@ function SimpleWarehouseModule() {
   const openPutawayScan = (task: any) => {
     setSelectedPutawayGroup(null);
     setScanPutawayTask(task);
-    setPutawayScan({ materialQr: "", binQr: "", quantity: String(task.quantity ?? "") });
+    const assignedBin = allFlattenedBins.find(
+      (bin) => bin.id === task.destination_bin_id || bin.bin_code === task.destination_bin_code,
+    );
+    const availableCapacity = Number(
+      assignedBin?.rack_capacity?.available_capacity ?? Number.POSITIVE_INFINITY,
+    );
+    setPutawayScan({
+      materialQr: "",
+      binQr: "",
+      quantity: String(Math.min(Number(task.quantity || 0), availableCapacity)),
+    });
     setPutawayScanValid(false);
     setMaterialQrVerified(false);
     setBinQrVerified(false);
@@ -597,6 +678,68 @@ function SimpleWarehouseModule() {
     pickupToConfirm?.confirmation?.rack_qr ||
     pickupToConfirm?.rack_qr ||
     "";
+
+  useEffect(() => {
+    let active = true;
+    setAvailablePickupBin(null);
+    if (!pickupToConfirm?.material_code || pickupToConfirm?.status === "COMPLETED") return;
+    void api.getInventoryLocationBalances(pickupToConfirm.material_code)
+      .then(async (rows: any[]) => {
+        const balance = (Array.isArray(rows) ? rows : [])
+          .filter((row: any) => Number(row.available_quantity || 0) > 0)
+          .sort((a: any, b: any) => Number(b.available_quantity || 0) - Number(a.available_quantity || 0))[0];
+        if (!balance) return;
+        const resolved = await api.resolveBinQr(balance.location_code);
+        if (active) setAvailablePickupBin({
+          ...balance,
+          ...resolved,
+          qr_value: resolved.qr_identifier || resolved.qr_code || balance.location_code,
+        });
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [pickupToConfirm?.id, pickupToConfirm?.material_code, pickupToConfirm?.picked_quantity, pickupToConfirm?.status]);
+
+  const verifyPickupQr = async (field: "material" | "rack", rawValue?: string) => {
+    const value = (rawValue ?? (field === "material" ? pickupConfirmation.material_scan : pickupConfirmation.zone_scan)).trim();
+    if (!pickupToConfirm || !value) {
+      setPickupQrError(`Scan or enter the ${field === "material" ? "material" : "BIN"} QR first.`);
+      return false;
+    }
+    try {
+      if (field === "material") {
+        const expectedCode = String(pickupToConfirm.material_code || "").trim().toUpperCase();
+        const expectedBatch = String(pickupToConfirm.batch_number || "").trim().toUpperCase();
+        const normalizedValue = value.toUpperCase();
+        if (!normalizedValue.includes(expectedCode) && (!expectedBatch || !normalizedValue.includes(expectedBatch))) {
+          throw new Error(`Material QR does not match ${expectedCode}.`);
+        }
+      } else {
+        const rack = await api.resolveBinQr(value);
+        const expectedLocation = String(pickupToConfirm.pick_location || "").trim().toUpperCase();
+        const actualLocation = String(rack.location_code || "").trim().toUpperCase();
+        const actualBin = String(rack.bin_code || "").trim().toUpperCase();
+        const balances = await api.getInventoryLocationBalances(pickupToConfirm.material_code);
+        const matchingBalance = balances.find((balance: any) => {
+          const balanceLocation = String(balance.location_code || "").trim().toUpperCase();
+          return balanceLocation === actualLocation || balanceLocation.includes(actualBin);
+        });
+        if (!matchingBalance || Number(matchingBalance.available_quantity || 0) <= 0)
+          throw new Error(`BIN QR does not contain available ${pickupToConfirm.material_code}.`);
+        if (expectedLocation && actualLocation !== expectedLocation && !expectedLocation.includes(actualBin)) {
+          toast.info(`Verified alternate BIN with ${matchingBalance.available_quantity} ${matchingBalance.uom || ""} available.`);
+        }
+      }
+      setPickupQrVerified((current) => ({ ...current, [field]: true }));
+      setPickupQrError("");
+      toast.success(`${field === "material" ? "Material" : "BIN"} QR verified.`);
+      return true;
+    } catch (error: any) {
+      setPickupQrVerified((current) => ({ ...current, [field]: false }));
+      setPickupQrError(error?.message || `${field === "material" ? "Material" : "BIN"} QR could not be verified.`);
+      return false;
+    }
+  };
 
   const decodeQrUpload = (file: File, field: "material" | "bin") => {
     if (!/image\/(png|jpeg|jpg)/i.test(file.type)) {
@@ -656,6 +799,7 @@ function SimpleWarehouseModule() {
           ...current,
           [field === "material" ? "material_scan" : "zone_scan"]: decoded.data,
         }));
+        void verifyPickupQr(field, decoded.data);
       };
       image.onerror = () => toast.error("Could not load the uploaded QR image.");
       image.src = String(reader.result);
@@ -731,12 +875,13 @@ function SimpleWarehouseModule() {
       !(putawayScan.binQr || "").trim() ||
       !Number.isFinite(quantity) ||
       quantity <= 0 ||
-      quantity > Number(scanPutawayTask.quantity || 0)
+      quantity > Number(scanPutawayTask.quantity || 0) ||
+      quantity > scanMaximumQuantity
     )
       return;
     void Promise.allSettled([
       api.resolveGrnQr(putawayScan.materialQr.trim()),
-      api.resolveBinQr((putawayScan.binQr || "").trim(), scanPutawayTask.destination_store_id),
+      api.resolveBinQr((putawayScan.binQr || "").trim(), scanPutawayTask.destination_warehouse_ref_id),
     ])
       .then(([materialResult, rackResult]) => {
         if (materialResult.status === "rejected") {
@@ -790,7 +935,7 @@ function SimpleWarehouseModule() {
     return () => {
       active = false;
     };
-  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.binQr, putawayScan.quantity]);
+  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.binQr, putawayScan.quantity, scanMaximumQuantity]);
 
   useEffect(() => {
     if (!scanPutawayTask) {
@@ -810,10 +955,10 @@ function SimpleWarehouseModule() {
       scanPutawayTask.barcode_value ||
       "";
     const previewRackQr =
-      (putawayScan.binQr || "").trim() ||
       assignedBin?.qr_identifier ||
       scanPutawayTask.destination_bin_code ||
       scanPutawayTask.destination_bin ||
+      (putawayScan.binQr || "").trim() ||
       "";
     void Promise.all([
       previewMaterialQr
@@ -846,6 +991,10 @@ function SimpleWarehouseModule() {
       toast.error("Scan the material QR and BIN QR, then enter a valid quantity.");
       return;
     }
+    if (quantity > scanMaximumQuantity) {
+      toast.error(`This rack can currently store only ${scanMaximumQuantity} ${scanPutawayTask.uom || "PCS"}.`);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const resolved = await api.resolveGrnQr(putawayScan.materialQr.trim());
@@ -860,7 +1009,7 @@ function SimpleWarehouseModule() {
       }
       const rack = await api.resolveBinQr(
         (putawayScan.binQr || "").trim(),
-        scanPutawayTask.destination_store_id,
+        scanPutawayTask.destination_warehouse_ref_id,
       );
       if (
         scanPutawayTask.destination_bin_id &&
@@ -875,6 +1024,7 @@ function SimpleWarehouseModule() {
         grn_qr_code: putawayScan.materialQr.trim(),
         bin_qr_code: (putawayScan.binQr || "").trim(),
         quantity,
+        batch_number: scanPutawayTask.batch_number || undefined,
       });
       toast.success("Putaway confirmed and inventory updated.");
       setScanPutawayTask(null);
@@ -1010,7 +1160,7 @@ function SimpleWarehouseModule() {
     try {
       const nextCode = await api.getNextBinCode(zone.id);
       setNewBinForm({ zone_id: zone.id });
-      setNewBinRows([{ rack: "", position: "", capacity: "", bin_code: nextCode.suggested_bin_code }]);
+      setNewBinRows([{ rack: nextCode.suggested_rack_code, position: "", capacity: "", bin_code: nextCode.suggested_bin_code }]);
     } catch (err: any) {
       toast.error(err.message || "Unable to prepare the next bin code.");
       return;
@@ -1034,14 +1184,14 @@ function SimpleWarehouseModule() {
           await api.updateZone(String(editingZone.id), { zone_name: zoneName });
           toast.success(`Zone ${generatedZoneCode} updated.`);
         } else {
-          if (!stores.length && (!firstWarehouse.name.trim() || !firstWarehouse.location.trim())) {
+          if (!warehouses.length && (!firstWarehouse.name.trim() || !firstWarehouse.location.trim())) {
             toast.error("Enter the warehouse name and location / plant for the first zone.");
             return;
           }
           const createdZone = await api.createLocationZone({
             zone_name: zoneName,
             zone_code: generatedZoneCode,
-            ...(!stores.length ? {
+            ...(!warehouses.length ? {
               warehouse_name: firstWarehouse.name.trim(), warehouse_id: firstWarehouse.location.trim(),
             } : {}),
           });
@@ -1059,7 +1209,7 @@ function SimpleWarehouseModule() {
           !Number.isSafeInteger(Number(row.capacity)) || Number(row.capacity) <= 0 ||
           !row.bin_code.trim()
         ) {
-          toast.error("Enter a rack code and a positive whole Maximum Capacity (PCS).");
+          toast.error("Enter a positive whole Maximum Capacity (PCS). Reopen the form if codes are missing.");
           return;
         }
         if (
@@ -1068,17 +1218,12 @@ function SimpleWarehouseModule() {
           !isValidIdentifier(row.rack) ||
           !isValidIdentifier(row.bin_code)
         ) {
-          toast.error("Rack, position, and bin codes must be 1–64 characters using letters, numbers, underscores, or hyphens.");
-          return;
-        }
-        if (row.position.trim() && (row.position.trim().length > 64 || !isValidIdentifier(row.position))) {
-          toast.error("Shelf / Position must use up to 64 letters, numbers, underscores, or hyphens.");
+          toast.error("Rack and bin codes must be 1–64 characters using letters, numbers, underscores, or hyphens.");
           return;
         }
         const existingBins = await api.getZoneBins(newBinForm.zone_id);
         const normalizedBinCode = row.bin_code.trim().toUpperCase();
         const normalizedRack = row.rack.trim().toUpperCase();
-        const normalizedPosition = row.position.trim().toUpperCase() || undefined;
         if ((existingBins || []).some((b: any) => String(b.bin_code).toUpperCase() === normalizedBinCode)) {
           toast.error(`Bin code '${row.bin_code}' already exists in this zone.`);
           return;
@@ -1100,8 +1245,6 @@ function SimpleWarehouseModule() {
         await api.createBin(newBinForm.zone_id, {
           bin_code: normalizedBinCode,
           bin_name: normalizedBinCode,
-          rack: normalizedRack,
-          position: normalizedPosition,
           capacity: Number(row.capacity),
           qr_identifier: `QR-${normalizedBinCode}`,
         });
@@ -1128,8 +1271,7 @@ function SimpleWarehouseModule() {
         (item.batch_number || item.batch || "").toLowerCase().includes(invSearch.toLowerCase());
 
       const matchesWarehouse =
-        invWarehouseFilter === "ALL" ||
-        (item.warehouse_id || item.store_name || "").includes(invWarehouseFilter);
+        true;
 
       const matchesStatus = invStatusFilter === "ALL" || item.status === invStatusFilter;
 
@@ -1170,37 +1312,32 @@ function SimpleWarehouseModule() {
   const pendingPickingCount = pickupTasks.filter(
     (p) => p.status === "PENDING" || p.status === "IN_PROGRESS",
   ).length;
+  const statusChart = (rows: any[], statuses: string[]) => statuses.map((status) => ({
+    label: status.replaceAll("_", " "),
+    value: rows.filter((row) => String(row.status || "").toUpperCase() === status).length,
+  }));
+  const stockChart = inventorySummary.map((item: any) => ({
+    label: String(item.material_code || item.code || item.material_name || "Material"),
+    value: Math.max(0, Number(item.available_quantity ?? item.available ?? 0) || 0),
+  })).sort((a, b) => b.value - a.value).slice(0, 7);
+  const warehouseKpiCharts = {
+    stock: stockChart,
+    putaway: statusChart(putawayTasks, ["PENDING", "CREATED", "IN_PROGRESS", "COMPLETED", "STORED"]),
+    requests: statusChart(materialRequests, ["PENDING", "SUBMITTED", "PENDING_WAREHOUSE_APPROVAL", "APPROVED", "REJECTED"]),
+    picks: statusChart(pickupTasks, ["PENDING", "IN_PROGRESS", "COMPLETED"]),
+  };
+
   const pendingDockAllocationsCount = dockRequests.length;
   const availableDocksCount = docks.filter((d) => d.status === "AVAILABLE").length;
   const occupiedDocksCount = docks.filter((d) => ["OCCUPIED", "RESERVED"].includes(d.status)).length;
   const totalDocksCount = docks.length;
-  const inventoryByCategory = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const item of inventorySummary) {
-      const category = String(item.category || item.material_category || item.material_group || "Other").trim() || "Other";
-      const quantity = Number(item.available ?? item.available_quantity ?? item.on_hand_quantity ?? item.total_quantity ?? 0);
-      if (quantity > 0) totals.set(category, (totals.get(category) || 0) + 1);
-    }
-    const sorted = Array.from(totals, ([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-    if (sorted.length <= 6) return sorted;
-    const visible = sorted.slice(0, 5);
-    visible.push({ name: "Other categories", value: sorted.slice(5).reduce((sum, item) => sum + item.value, 0) });
-    return visible;
-  }, [inventorySummary]);
-  const openWorkByType = [
-    { name: "Putaway", tasks: pendingPutawayCount, fill: "#d97706" },
-    { name: "Requests", tasks: pendingRequestsCount, fill: "#2563eb" },
-    { name: "Picking", tasks: pendingPickingCount, fill: "#7c3aed" },
-  ];
-  const totalOpenTasks = openWorkByType.reduce((total, queue) => total + queue.tasks, 0);
-  const busiestQueue = [...openWorkByType].sort((a, b) => b.tasks - a.tasks)[0];
   const groupedPutawayTasks = useMemo(() => {
     const groups = new Map<string, any>();
     for (const task of putawayTasks) {
       const key =
         task.grn_number ||
         task.grnNumber ||
+        (task.grn_id ? `grn:${task.grn_id}` : undefined) ||
         task.order_number ||
         task.asn_number ||
         task.asnNumber ||
@@ -1260,20 +1397,34 @@ function SimpleWarehouseModule() {
   const visiblePutawayMaterials = new Set(visiblePutawayBatches.map((task: any) => task.item_code || task.material_name)).size;
   const visiblePutawayQuantity = visiblePutawayBatches.reduce((total: number, task: any) =>
     total + (putawayView === "assign" ? unassignedPutawayQuantity(task) : Number(task.quantity || 0)), 0);
+  const putawayStage = (status: string) => ["COMPLETED", "STORED"].includes(status)
+    ? "COMPLETED" : ["IN_PROGRESS", "ASSIGNED", "PARTIALLY_COMPLETED"].includes(status) ? "IN_PROGRESS" : "PENDING";
+  const putawayStageCounts = groupedPutawayTasks.reduce((counts, task) => {
+    counts[putawayStage(task.status)] += 1;
+    return counts;
+  }, { PENDING: 0, IN_PROGRESS: 0, COMPLETED: 0 } as Record<string, number>);
+  const filteredPutawayTasks = groupedPutawayTasks.filter((task) => {
+    const query = putawaySearch.trim().toLowerCase();
+    const searchable = [task.grn_number, task.key, ...(task.material_names || []),
+      ...task.tasks.flatMap((item: any) => [item.batch_number, item.item_code, ...assignedPutawayLocations(item)])];
+    return (!query || searchable.some((value) => String(value || "").toLowerCase().includes(query)))
+      && (putawayStatus === "ALL" || putawayStage(task.status) === putawayStatus)
+      && (putawayBatchFilter === "ALL" || (putawayBatchFilter === "MULTIPLE" ? task.batch_count > 1 : task.batch_count === 1));
+  });
   const totalAvailableStock = inventorySummary.reduce(
     (acc, i) => acc + Number(i.available || i.available_quantity || 0),
     0,
   );
   const handleAllocateDockFromLocations = async (requestId: string) => {
     const dockId = dockChoices[requestId];
-    const storeId = dockStoreChoices[requestId];
-    if (!dockId || !storeId) {
+    const warehouseRefId = warehouses[0]?.id;
+    if (!dockId) {
       toast.error("Select an available dock and warehouse for this gate entry.");
       return;
     }
     setIsSubmitting(true);
     try {
-      await api.allocateDock(requestId, dockId, { assignedStoreId: storeId });
+      await api.allocateDock(requestId, dockId, { assignedWarehouseRefId: warehouseRefId });
       toast.success("Dock allocated. Gate Entry has been notified.");
       await fetchData(true);
     } catch (error: any) {
@@ -1301,15 +1452,81 @@ function SimpleWarehouseModule() {
     }
   };
 
+  const selectedInventoryBatches = useMemo(() => {
+    const batches = [...(selectedInventory?.batch_details || [])];
+    const timestamp = (batch: any) => {
+      const parsed = Date.parse(batch.received_at || batch.created_at || batch.mfg_date || "");
+      if (!Number.isNaN(parsed)) return parsed;
+      const compactDate = String(batch.batch_number || "").match(/20\d{6}/)?.[0];
+      if (compactDate) {
+        const date = Date.parse(`${compactDate.slice(0, 4)}-${compactDate.slice(4, 6)}-${compactDate.slice(6, 8)}`);
+        if (!Number.isNaN(date)) return date;
+      }
+      return Number.MAX_SAFE_INTEGER;
+    };
+    return batches.sort((a, b) => timestamp(a) - timestamp(b) || String(a.batch_number || "").localeCompare(String(b.batch_number || "")));
+  }, [selectedInventory]);
+  const visibleInventoryBatches = selectedInventoryBatchCode
+    ? selectedInventoryBatches.filter((batch: any) => batch.batch_number === selectedInventoryBatchCode)
+    : selectedInventoryBatches;
+  const openInventoryBatchDetails = async (item: any) => {
+    setSelectedInventoryBatchCode(null);
+    setSelectedInventory(item);
+    try {
+      const detail: any = await api.getMaterialInventoryDetail(String(item.material_code || ""));
+      const putawayMovements = (Array.isArray(detail?.movements) ? detail.movements : []).filter(
+        (movement: any) => movement.movement_type === "PUTAWAY" && movement.batch_lot,
+      );
+      const movementBatches = putawayMovements.map((movement: any) => ({
+        batch_number: movement.batch_lot,
+        quantity: movement.quantity,
+        uom: movement.uom || detail?.summary?.uom,
+        location: movement.to_location || movement.location_code,
+        received_at: movement.performed_at,
+      }));
+      setSelectedInventory((current: any) => current ? {
+        ...current,
+        batch_details: movementBatches.length ? movementBatches : detail?.batches || current.batch_details,
+        bin_code: movementBatches[0]?.location || current.bin_code,
+        location: movementBatches[0]?.location || current.location,
+        inventory_history: detail?.inventory_history,
+        total_quantity: detail?.summary?.total_stock ?? current.total_quantity,
+        available: detail?.summary?.available_stock ?? current.available,
+        uom: detail?.summary?.uom || current.uom,
+      } : current);
+    } catch {
+      // Keep the row details available if the per-material request fails.
+    }
+  };
+  const oldestAvailableBatch = selectedInventoryBatches.find((batch: any) =>
+    Number(batch.quantity ?? batch.available_quantity ?? 0) > 0,
+  );
+  const inventoryBatchQrValue = (batch: any) =>
+    batch.qr_payload || batch.qr_code || batch.material_qr ||
+    (batch.batch_number ? `QR-BATCH-${batch.batch_number}` : selectedInventory?.material_code || "");
+  const previewInventoryBatchQr = async (batch: any) => {
+    const value = inventoryBatchQrValue(batch);
+    if (!value) {
+      toast.error("No material or batch code is available for this QR.");
+      return;
+    }
+    try {
+      const image = await QRCode.toDataURL(value, { width: 320, margin: 2 });
+      setQrPreview({ title: `Material QR ${batch.batch_number || selectedInventory?.material_code || ""}`.trim(), image });
+    } catch {
+      toast.error("Unable to generate the material QR.");
+    }
+  };
+
   return (
     <AppShell activeItem="/inventory">
-      <div className="space-y-5 rounded-2xl bg-gradient-to-br from-slate-50 via-blue-50/50 to-teal-50/40 p-3 pb-8 sm:p-5">
+      <div className="warehouse-module-content space-y-5" data-warehouse-tab={activeTab}>
         {/* Header Title Bar */}
-        <div className="relative isolate flex min-h-[164px] flex-col justify-center gap-4 overflow-hidden rounded-2xl border border-[#0b315c] bg-[#0b315c] px-6 py-5 shadow-sm md:flex-row md:items-center md:justify-between md:px-8">
-          <div aria-hidden="true" className="absolute inset-0 -z-20 bg-cover bg-[center_43%]" style={{ backgroundImage: `url(${warehouseHero})` }} />
-          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,#071d3df2_0%,#0b315ce8_38%,#0b315ca8_68%,#0b315c32_100%)]" />
+        <div className="warehouse-module-hero relative isolate flex min-h-[164px] flex-col justify-center gap-4 overflow-hidden rounded-2xl px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
+          <div aria-hidden="true" className="warehouse-hero-image absolute inset-0 -z-20 bg-cover bg-[center_43%]" style={{ backgroundImage: `url(${warehouseHero})` }} />
+          <div aria-hidden="true" className="warehouse-hero-overlay absolute inset-0 -z-10" />
           <div className="relative max-w-3xl text-white">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-200">
+            <p hidden={activeTab === "putaway" || activeTab === "inventory" || activeTab === "picking" || activeTab === "locations"} className="warehouse-hero-eyebrow text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-200">
               Warehouse Control <span className="px-1 text-blue-300/70">/</span> {pageHeader[activeTab].eyebrow}
             </p>
             <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight md:text-[28px]">
@@ -1320,11 +1537,25 @@ function SimpleWarehouseModule() {
               {pageHeader[activeTab].description}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
+          <div className="warehouse-hero-actions flex items-center gap-2">
+            {activeTab === "picking" && (
+              <Button
+                data-pickup-history="true"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowPickupHistory(true)}
+                className="gap-2 border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground"
+              >
+                <History className="size-4" /> History
+                <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] text-primary-foreground">
+                  {pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length}
+                </span>
+              </Button>
+            )}
+            <Button data-refresh-control="true"
               variant="outline"
               size="icon"
-              onClick={() => void fetchData()}
+              onClick={() => { void fetchData(); if (activeTab === "picking") setRequisitionRefreshKey((value) => value + 1); }}
               title={`Refresh ${pageHeader[activeTab].title}`}
               aria-label={`Refresh ${pageHeader[activeTab].title}`}
               className="border-white/35 bg-white/10 text-white hover:bg-white/20 hover:text-white"
@@ -1397,8 +1628,34 @@ function SimpleWarehouseModule() {
           {/* 1. DASHBOARD TAB */}
           {/* ========================================================================= */}
           <TabsContent value="dashboard" className="mt-5 space-y-4">
+            <div className="warehouse-dashboard-kpis grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+              {([
+                { label: "Available stock", value: totalAvailableStock.toLocaleString(), help: "availableStockKpi", Icon: CheckCircle2, tone: "stock" },
+                { label: "Putaway to do", value: pendingPutawayCount, help: "putawayKpi", Icon: PackageCheck, tone: "putaway" },
+                { label: "Requests to review", value: pendingRequestsCount, help: "requestsReviewKpi", Icon: ClipboardList, tone: "requests" },
+                { label: "Picks to complete", value: pendingPickingCount, help: "picksCompleteKpi", Icon: ListOrdered, tone: "picks" },
+              ] as const).map(({ label, value, help, Icon, tone }) => (
+                <Card key={tone} className="warehouse-dashboard-kpi" data-tone={tone}>
+                  <div className="warehouse-dashboard-kpi-icon"><Icon aria-hidden="true" /></div>
+                  <div className="warehouse-dashboard-kpi-copy min-w-0">
+                    <div className="warehouse-dashboard-kpi-label flex items-start gap-1"><span className="text-sm font-medium">{label}</span><InformationTooltip help={help} /></div>
+                    <p className="mt-1 text-[32px] font-bold leading-tight tabular-nums">{value}</p>
+                  </div>
+                  <div className="warehouse-dashboard-kpi-chart" role="img"
+                    aria-label={`${label}: ${warehouseKpiCharts[tone].map((bar) => `${bar.label}: ${bar.value}`).join(", ") || "No data"}`}>
+                    {warehouseKpiCharts[tone].length === 0 ? <span className="warehouse-kpi-empty" title="No stock records" /> :
+                      warehouseKpiCharts[tone].map((bar, index, bars) => (
+                        <span key={`${bar.label}-${index}`} title={`${bar.label}: ${bar.value}`}
+                          style={{ height: `${bar.value > 0 ? Math.max(12, bar.value / Math.max(1, ...bars.map((item) => item.value)) * 100) : 3}%`, opacity: bar.value > 0 ? 0.5 + index / Math.max(1, bars.length - 1) * 0.5 : 0.15 }} />
+                      ))}
+                  </div>
+                </Card>
+              ))}
+            </div>
+
             {/* Horizontal Dock Allocation Status Banner */}
             <div
+              data-dock-allocation={pendingDockAllocationsCount > 0 ? "waiting" : "clear"}
               role="button"
               tabIndex={0}
               onClick={() => navigate({ to: "/dock-management" })}
@@ -1421,8 +1678,8 @@ function SimpleWarehouseModule() {
               className={cn(
                 "group relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border p-4 sm:px-5 sm:py-3.5 transition-all duration-300 cursor-pointer shadow-xs hover:shadow-md",
                 pendingDockAllocationsCount > 0
-                  ? "animate-dock-blink border-amber-400 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 text-amber-950 dark:border-amber-500/70 dark:bg-amber-950/40 dark:text-amber-100 ring-2 ring-amber-400/40"
-                  : "border-slate-200 bg-gradient-to-r from-sky-50/80 via-white to-blue-50/60 text-slate-800 hover:border-blue-300 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:border-slate-700"
+                  ? "animate-dock-blink border-red-400 bg-gradient-to-r from-red-500/15 via-red-500/10 to-red-500/15 text-red-950 dark:border-red-500/70 dark:bg-red-950/40 dark:text-red-100 ring-2 ring-red-400/40"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-900 hover:border-emerald-300 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100"
               )}
             >
               <div className="flex items-center gap-3.5">
@@ -1430,8 +1687,8 @@ function SimpleWarehouseModule() {
                   className={cn(
                     "flex size-11 shrink-0 items-center justify-center rounded-xl border transition-transform duration-300 group-hover:scale-105",
                     pendingDockAllocationsCount > 0
-                      ? "border-amber-400 bg-amber-500 text-white shadow-sm"
-                      : "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+                      ? "border-red-400 bg-red-500 text-white shadow-sm"
+                      : "border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
                   )}
                 >
                   <Truck className="size-5" />
@@ -1442,17 +1699,17 @@ function SimpleWarehouseModule() {
                       Dock Allocation Status
                     </span>
                     {pendingDockAllocationsCount > 0 ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-900 dark:text-amber-200 border border-amber-400/50 animate-dock-badge-blink">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-red-900 dark:text-red-200 border border-red-400/50 animate-dock-badge-blink">
                         <span className="relative flex h-2 w-2">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
-                          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-600" />
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-red-600" />
                         </span>
                         Allocation Required ({pendingDockAllocationsCount})
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800">
                         <CheckCircle2 className="size-3 text-emerald-600 dark:text-emerald-400" />
-                        All Docks Operational
+                        No Vehicles Waiting
                       </span>
                     )}
                   </div>
@@ -1463,7 +1720,7 @@ function SimpleWarehouseModule() {
                         {pendingDockAllocationsCount === 1 ? "vehicle" : "vehicles"}{" "}
                         waiting for dock assignment
                         {dockRequests[0]?.vehicle_number && (
-                          <span className="ml-1 font-mono font-normal text-xs text-amber-900/80 dark:text-amber-200/80">
+                          <span className="ml-1 font-mono font-normal text-xs text-red-900/80 dark:text-red-200/80">
                             (Latest: {dockRequests[0].vehicle_number})
                           </span>
                         )}
@@ -1489,8 +1746,8 @@ function SimpleWarehouseModule() {
                   className={cn(
                     "pointer-events-none rounded-lg text-xs font-semibold shadow-xs transition-colors",
                     pendingDockAllocationsCount > 0
-                      ? "bg-amber-600 hover:bg-amber-700 text-white border-transparent"
-                      : "border-slate-200 dark:border-slate-700"
+                      ? "bg-red-600 hover:bg-red-700 text-white border-transparent"
+                      : "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
                   )}
                   tabIndex={-1}
                 >
@@ -1500,30 +1757,8 @@ function SimpleWarehouseModule() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <Card className="rounded-xl border-emerald-200 border-t-4 border-t-emerald-600 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/30">
-                <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">Available stock</span><InformationTooltip help="availableStockKpi" /></div><CheckCircle2 className="size-5 text-emerald-600" /></div>
-                <div className="mt-3 text-3xl font-bold leading-none tabular-nums text-slate-900 dark:text-slate-100">{totalAvailableStock.toLocaleString()}</div>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Units ready for picking or issue</p>
-              </Card>
-              <Card className="rounded-xl border-amber-200 border-t-4 border-t-amber-500 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30">
-                <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">Putaway to do</span><InformationTooltip help="putawayKpi" /></div><PackageCheck className="size-5 text-amber-600" /></div>
-                <div className="mt-3 text-3xl font-bold leading-none tabular-nums text-slate-900 dark:text-slate-100">{pendingPutawayCount}</div>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Open putaway tasks</p>
-              </Card>
-              <Card className="rounded-xl border-blue-200 border-t-4 border-t-blue-600 bg-gradient-to-br from-blue-50 to-white p-4 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/30">
-                <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-200">Requests to review</span><InformationTooltip help="requestsReviewKpi" /></div><ClipboardList className="size-5 text-blue-600" /></div>
-                <div className="mt-3 text-3xl font-bold leading-none tabular-nums text-slate-900 dark:text-slate-100">{pendingRequestsCount}</div>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Waiting for warehouse review</p>
-              </Card>
-              <Card className="rounded-xl border-violet-200 border-t-4 border-t-violet-600 bg-gradient-to-br from-violet-50 to-white p-4 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/30">
-                <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-200">Picks to complete</span><InformationTooltip help="picksCompleteKpi" /></div><ListOrdered className="size-5 text-violet-600" /></div>
-                <div className="mt-3 text-3xl font-bold leading-none tabular-nums text-slate-900 dark:text-slate-100">{pendingPickingCount}</div>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Open picking tasks</p>
-              </Card>
-            </div>
 
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="warehouse-dashboard-panels grid grid-cols-1 gap-4 xl:grid-cols-2">
               <Card className="rounded-xl border-sky-200 bg-gradient-to-br from-sky-50 via-white to-blue-50/60 p-5 shadow-sm dark:border-sky-900/60 dark:bg-sky-950/20">
                 <div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="font-bold text-slate-900 dark:text-slate-100">Warehouse locations</h2><p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Your zones and storage bins</p></div><Building2 className="size-5 text-sky-700" /></div>
                 <div className="flex gap-3">
@@ -1549,81 +1784,36 @@ function SimpleWarehouseModule() {
               </Card>
             </div>
 
-            <section aria-labelledby="warehouse-analytics-title" className="space-y-3">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2 id="warehouse-analytics-title" className="text-lg font-bold text-slate-900">Warehouse analytics</h2>
-                  <p className="text-sm text-slate-600">A quick view of available stock and work waiting in your queues.</p>
-                </div>
-                <p className="text-xs font-medium text-slate-500">Based on the latest loaded records</p>
-              </div>
 
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <Card className="border-cyan-200 bg-gradient-to-br from-cyan-50/80 via-white to-sky-50/60 p-5 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20">
-                  <div className="mb-2">
-                    <h3 className="font-bold text-slate-900 dark:text-slate-100">Stock records by category</h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Counts inventory records with available stock in each material category.</p>
-                  </div>
-                  {inventoryByCategory.length ? (
-                    <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(150px,0.8fr)]">
-                      <div className="h-[250px] min-w-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie data={inventoryByCategory} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={3}>
-                              {inventoryByCategory.map((entry, index) => (
-                                <Cell key={entry.name} fill={["#0284c7", "#0d9488", "#4f46e5", "#d97706", "#db2777", "#64748b"][index % 6]} />
-                              ))}
-                            </Pie>
-                            <Tooltip formatter={(value) => [Number(value).toLocaleString(), "Stock records"]} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="space-y-2">
-                        {inventoryByCategory.map((entry, index) => (
-                          <div key={entry.name} className="flex items-center justify-between gap-3 rounded-lg border border-white/80 bg-white/75 px-3 py-2 text-sm shadow-sm">
-                            <span className="flex min-w-0 items-center gap-2 text-slate-700"><span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: ["#0284c7", "#0d9488", "#4f46e5", "#d97706", "#db2777", "#64748b"][index % 6] }} /><span className="truncate">{entry.name}</span></span>
-                            <span className="shrink-0 font-semibold tabular-nums text-slate-900">{entry.value.toLocaleString()} records</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid h-[250px] place-items-center rounded-xl border border-dashed border-cyan-200 bg-white/60 text-center text-sm text-slate-500">No available stock to chart yet.</div>
-                  )}
-                </Card>
-
-                <Card className="border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/60 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div><h3 className="font-bold text-slate-900 dark:text-slate-100">Open work by queue</h3><p className="text-sm text-slate-600 dark:text-slate-400">Compare tasks waiting for warehouse action.</p></div>
-                    <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-800">{totalOpenTasks} open items</span>
-                  </div>
-                  <div className="h-[250px] min-w-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={openWorkByType} margin={{ top: 12, right: 12, left: -18, bottom: 4 }}>
-                        <CartesianGrid stroke="#e2e8f0" strokeDasharray="4 4" vertical={false} />
-                        <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: "#475569", fontSize: 12 }} />
-                        <YAxis allowDecimals={false} width={38} tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 11 }} />
-                        <Tooltip cursor={{ fill: "#eef2ff" }} formatter={(value) => [value, "Open tasks"]} />
-                        <Bar dataKey="tasks" name="Open tasks" radius={[6, 6, 0, 0]} maxBarSize={58}>
-                          {openWorkByType.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <p className="mt-1 rounded-lg border border-violet-100 bg-white/70 px-3 py-2 text-xs text-slate-600">
-                    {totalOpenTasks === 0 ? "All warehouse queues are clear." : `${busiestQueue.name} has the most open work (${busiestQueue.tasks}). Select its queue in the sidebar to review tasks.`}
-                  </p>
-                </Card>
-              </div>
-            </section>
           </TabsContent>
-          <TabsContent value="putaway" className="space-y-6 mt-6">
-            <Card className="overflow-x-auto border-amber-200 bg-gradient-to-br from-amber-50/80 via-white to-orange-50/50 p-5 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/20">
+          <TabsContent value="putaway" className="putaway-overview space-y-4 mt-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              {([
+                { label: "Pending putaway", status: "PENDING", Icon: PackageCheck, tone: "border-amber-200 bg-amber-50 text-amber-800" },
+                { label: "In progress", status: "IN_PROGRESS", Icon: RefreshCw, tone: "border-blue-200 bg-blue-50 text-blue-800" },
+                { label: "Completed", status: "COMPLETED", Icon: CheckCircle2, tone: "border-emerald-200 bg-emerald-50 text-emerald-800" },
+              ] as const).map(({ label, status, Icon, tone }) => (
+                <button key={status} type="button" onClick={() => setPutawayStatus(putawayStatus === status ? "ALL" : status)}
+                  aria-pressed={putawayStatus === status}
+                  className={`flex items-center gap-4 rounded-xl border p-4 text-left ${tone} ${putawayStatus === status ? "ring-2 ring-primary" : ""}`}>
+                  <Icon className="size-8 shrink-0" />
+                  <span><span className="block text-sm font-medium">{label}</span><span className="mt-1 block text-2xl font-bold tabular-nums">{putawayStageCounts[status]}</span></span>
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-col gap-3 md:flex-row">
+              <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={putawaySearch} onChange={(event) => setPutawaySearch(event.target.value)} placeholder="Search by GRN, material, batch or rack?" aria-label="Search putaway tasks" className="pl-9" /></div>
+              <select aria-label="Filter putaway status" value={putawayStatus} onChange={(event) => setPutawayStatus(event.target.value)} className="h-10 rounded-lg border bg-card px-3"><option value="ALL">All statuses</option><option value="PENDING">Pending putaway</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option></select>
+              <select aria-label="Filter putaway batches" value={putawayBatchFilter} onChange={(event) => setPutawayBatchFilter(event.target.value)} className="h-10 rounded-lg border bg-card px-3"><option value="ALL">All batches</option><option value="SINGLE">Single batch</option><option value="MULTIPLE">Multiple batches</option></select>
+              <Button variant="outline" onClick={() => { setPutawaySearch(""); setPutawayStatus("ALL"); setPutawayBatchFilter("ALL"); }}>Clear</Button>
+            </div>
+            <Card className="putaway-work-queue overflow-hidden border-amber-200 bg-gradient-to-br from-amber-50/80 via-white to-orange-50/50 p-5 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/20">
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 uppercase tracking-wider">
                 Putaway Work Queue (Assign Storage Locations & Confirm)
               </h3>
-              <table className="w-full min-w-[1440px] table-fixed text-left text-xs">
-                <colgroup><col /><col className="w-[26%]" /><col /><col /><col className="w-[18%]" /><col /><col className="w-[360px]" /></colgroup>
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[1050px] table-fixed text-left text-sm">
+                <colgroup><col className="w-[14%]" /><col className="w-[15%]" /><col className="w-[8%]" /><col className="w-[12%]" /><col className="w-[18%]" /><col className="w-[13%]" /><col className="w-[20%]" /></colgroup>
                 <thead>
                   <tr className="border-b border-sky-200 bg-sky-100/70 text-sky-950 uppercase dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-100">
                     <th className="py-2.5 px-3">GRN / Task No</th>
@@ -1632,18 +1822,18 @@ function SimpleWarehouseModule() {
                     <th className="py-2.5 px-3 whitespace-nowrap">Remaining Qty</th>
                     <th className="py-2.5 px-3">Assigned Rack</th>
                     <th className="py-2.5 px-3">Status<InformationTooltip help="workflowStatus" /></th>
-                    <th className="py-2.5 px-3 text-right">Actions</th>
+                    <th className="sticky right-0 z-10 bg-muted px-3 py-2.5 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {putawayTasks.length === 0 ? (
+                  {filteredPutawayTasks.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-6 text-slate-500">
-                        No putaway tasks pending. Post a GRN to generate putaway work.
+                        {putawayTasks.length === 0 ? "No putaway tasks available." : "No tasks match your search or filters."}
                       </td>
                     </tr>
                   ) : (
-                    groupedPutawayTasks.map((t, index) => (
+                    filteredPutawayTasks.map((t, index) => (
                       <tr
                         key={t.id || t.key || `${t.grn_number || "putaway"}-${index}`}
                         className="hover:bg-slate-50 dark:hover:bg-slate-900/50"
@@ -1665,13 +1855,15 @@ function SimpleWarehouseModule() {
                         </td>
                         <td className="py-3 px-3 font-mono text-slate-500">
                           {t.batch_count ? (
-                            <button
+                            <Button
                               type="button"
-                              className="underline hover:text-indigo-600"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 whitespace-nowrap rounded-lg px-3 text-xs font-medium text-primary"
                               onClick={() => openPutawayGroup(t)}
                             >
                               {t.batch_count} batch{t.batch_count === 1 ? "" : "es"}
-                            </button>
+                            </Button>
                           ) : (
                             "-"
                           )}
@@ -1697,9 +1889,9 @@ function SimpleWarehouseModule() {
                             {t.status || "—"}
                           </Badge>
                         </td>
-                        <td className="py-3 px-3 text-right">
-                          <div className="ml-auto grid w-[328px] grid-cols-3 items-center gap-2">
-                          <Button
+                        <td className="sticky right-0 bg-card py-3 px-3 text-right">
+                          <div className="grid grid-cols-1 items-center gap-2 [&_button]:w-full">
+                          {t.tasks.some(canAssignPutaway) && <Button
                             size="sm"
                             variant="outline"
                             onClick={() => t.tasks.length === 1 ? openAssignPutaway(t.tasks[0]) : openPutawayGroup(t, "assign")}
@@ -1707,8 +1899,8 @@ function SimpleWarehouseModule() {
                             className="h-8 w-full min-w-0 whitespace-nowrap px-2 text-xs border-indigo-200 text-indigo-700"
                           >
                             Assign Rack
-                          </Button>
-                          <Button
+                          </Button>}
+                          {t.tasks.some(canScanPutaway) && <Button
                             size="sm"
                             variant="outline"
                             onClick={() => t.tasks.length === 1 ? openPutawayScan(t.tasks[0]) : openPutawayGroup(t, "scan")}
@@ -1716,7 +1908,7 @@ function SimpleWarehouseModule() {
                             className="h-8 w-full min-w-0 whitespace-nowrap px-2 text-xs border-emerald-200 text-emerald-700"
                           >
                             <Scan className="mr-1 h-3 w-3" /> Scan QR
-                          </Button>
+                          </Button>}
                           <Button
                             size="sm"
                             variant="outline"
@@ -1732,16 +1924,50 @@ function SimpleWarehouseModule() {
                   )}
                 </tbody>
               </table>
+              </div>
+              <p className="border-t px-3 pt-3 text-sm text-muted-foreground">Showing {filteredPutawayTasks.length} of {groupedPutawayTasks.length} tasks</p>
             </Card>
+            <div role="status" className={cn(
+              "flex items-center gap-3 rounded-xl border p-4",
+              putawayStageCounts.COMPLETED === groupedPutawayTasks.length
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-red-200 bg-red-50 text-red-800",
+            )}>
+              {putawayStageCounts.COMPLETED === groupedPutawayTasks.length
+                ? <CheckCircle2 className="size-6 shrink-0" />
+                : <AlertTriangle className="size-6 shrink-0" />}
+              <div>
+                <p className="font-semibold">{putawayStageCounts.COMPLETED === groupedPutawayTasks.length ? "No putaway tasks pending" : "Putaway tasks require attention"}</p>
+                <p className="text-sm">{putawayStageCounts.COMPLETED === groupedPutawayTasks.length
+                  ? "All currently listed materials have been assigned to storage locations."
+                  : `${groupedPutawayTasks.length - putawayStageCounts.COMPLETED} task(s) still need putaway work.`}</p>
+              </div>
+            </div>
           </TabsContent>
 
           {/* ========================================================================= */}
           {/* 3. INVENTORY TAB */}
           {/* ========================================================================= */}
           <TabsContent value="inventory" className="space-y-6 mt-6">
-            <Card className="space-y-4 border-sky-200 bg-gradient-to-br from-sky-50/80 via-white to-cyan-50/50 p-5 shadow-sm dark:border-sky-900/60 dark:bg-sky-950/20">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="relative w-full sm:w-80">
+            <div className="inventory-stock-overview grid gap-4 sm:grid-cols-3">
+              {[
+                { label: "Materials tracked", value: inventorySummary.length, Icon: Boxes, tone: "blue" },
+                { label: "In stock", value: inventorySummary.filter((item) => Number(getInventoryDisplayQuantity(item)) > 0).length, Icon: CheckCircle2, tone: "green" },
+                { label: "Out of stock", value: inventorySummary.filter((item) => Number(getInventoryDisplayQuantity(item)) === 0).length, Icon: AlertTriangle, tone: "amber" },
+              ].map(({ label, value, Icon, tone }) => (
+                <div key={label} className="inventory-stock-summary" data-tone={tone}>
+                  <div className="inventory-stock-summary-icon"><Icon className="size-6" /></div>
+                  <div><p className="text-sm font-medium text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-bold tabular-nums">{value}</p></div>
+                </div>
+              ))}
+            </div>
+            <Card className="inventory-stock-card space-y-4 border-sky-200 bg-gradient-to-br from-sky-50/80 via-white to-cyan-50/50 p-5 shadow-sm dark:border-sky-900/60 dark:bg-sky-950/20">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><h2 className="text-lg font-semibold">Stock overview</h2><p className="mt-1 text-sm text-muted-foreground">Material availability and storage locations</p></div>
+                <span className="text-sm text-muted-foreground">{filteredInventory.length} of {inventorySummary.length} materials</span>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="relative w-full sm:max-w-lg sm:flex-1">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
                   <Input
                     placeholder="Search material, code, batch..."
@@ -1750,33 +1976,20 @@ function SimpleWarehouseModule() {
                     className="pl-9 text-xs"
                   />
                 </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <Select value={invWarehouseFilter} onValueChange={setInvWarehouseFilter}>
-                    <SelectTrigger className="w-40 text-xs">
-                      <SelectValue placeholder="Warehouse" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ALL">All Warehouses</SelectItem>
-                      {stores.map((s) => (
-                        <SelectItem key={s.id} value={s.store_code || s.store_name}>
-                          {s.store_code || s.store_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full min-w-[1000px] table-fixed text-left text-sm">
+                  <colgroup><col className="w-[15%]" /><col className="w-[15%]" /><col className="w-[24%]" /><col className="w-[13%]" /><col className="w-[21%]" /><col className="w-[12%]" /></colgroup>
                   <thead>
                     <tr className="border-b border-sky-200 bg-sky-100/70 text-sky-950 uppercase dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-100">
                       <th className="py-2.5 px-3">Material Code</th>
                       <th className="py-2.5 px-3">Material Name</th>
-                      <th className="py-2.5 px-3">Batch</th>
+                      <th className="py-2.5 px-3">Batches</th>
                       <th className="py-2.5 px-3">Available<InformationTooltip help="inventory" /></th>
                       <th className="py-2.5 px-3">Location</th>
-                      <th className="py-2.5 px-3 text-right">Action</th>
+                      <th className="sticky right-0 bg-muted py-2.5 px-3 text-center">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1795,25 +2008,35 @@ function SimpleWarehouseModule() {
                           <td className="py-3 px-3 font-medium text-slate-900 dark:text-slate-100">
                             {item.material_name || item.material}
                           </td>
-                          <td className="py-3 px-3 font-mono text-slate-500">
-                            {item.batch_number ||
-                              item.batch ||
-                              item.batch_details?.map((b: any) => b.batch_number).join(", ") ||
-                              "-"}
+                          <td className="py-3 px-3 text-slate-600">
+                            {(() => {
+                              const batchCodes = Array.isArray(item.batch_details)
+                                ? item.batch_details.map((batch: any) => String(batch.batch_number || "")).filter(Boolean)
+                                : [
+                                ...(item.batch_number ? String(item.batch_number).split(",") : []),
+                                ...(item.batch ? String(item.batch).split(",") : []),
+                              ].map((batch) => batch.trim()).filter((batch, index, all) => batch && all.indexOf(batch) === index);
+                              return batchCodes.length ? (
+                                <button type="button" onClick={() => void openInventoryBatchDetails(item)} className="inline-flex min-w-20 items-center justify-center rounded-full border bg-muted/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                                  Batch {batchCodes.length}
+                                </button>
+                              ) : "—";
+                            })()}
                           </td>
-                          <td className="py-3 px-3 font-bold text-emerald-600">
-                            Available: {getInventoryDisplayQuantity(item)} {item.uom || ""}
+                          <td className={`py-3 px-3 font-semibold tabular-nums ${Number(getInventoryDisplayQuantity(item)) > 0 ? "text-emerald-700" : "text-amber-700"}`}>
+                            {getInventoryDisplayQuantity(item)} {item.uom || ""}
                           </td>
                           <td className="py-3 px-3">
                             <Badge variant="outline" className="text-[10px] font-mono">
                               {getInventoryDisplayLocation(item)}
                             </Badge>
                           </td>
-                          <td className="py-3 px-3 text-right">
+                          <td className="sticky right-0 bg-card py-3 px-3 text-center">
                             <Button
                               size="sm"
-                              variant="ghost"
+                              variant="outline"
                               onClick={() => {
+                                setSelectedInventoryBatchCode(null);
                                 setSelectedInventory(item);
                                 void api
                                   .getMaterialInventoryDetail(String(item.material_code || ""))
@@ -1832,6 +2055,7 @@ function SimpleWarehouseModule() {
                                         batch_number: movement.batch_lot,
                                         quantity: movement.quantity,
                                         uom: movement.uom || detail?.summary?.uom,
+                                        location: movement.to_location || movement.location_code,
                                       }));
                                     const refreshedRow = {
                                       batch_details: movementBatches,
@@ -1869,7 +2093,7 @@ function SimpleWarehouseModule() {
                                               : detail?.batches || [],
                                             detail_movements: detail?.movements,
                                             warehouse:
-                                              firstLocation?.store_name || detail?.warehouse,
+                                              firstLocation?.warehouse_name || detail?.warehouse,
                                             zone_code: firstLocation?.zone_code,
                                             bin_code:
                                               firstLocation?.bin_code ||
@@ -2005,13 +2229,42 @@ function SimpleWarehouseModule() {
           {/* ========================================================================= */}
           {/* 5. PICKING TAB */}
           {/* ========================================================================= */}
-          <TabsContent value="picking" className="space-y-6 mt-6">
-            <AssemblyRequisitionsPanel onUpdated={() => fetchData(true)} />
-            <Card className="overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 uppercase tracking-wider">
-                Warehouse Picking Queue (Operator Pick Tasks)
-              <InformationTooltip help="pickRemaining" /></h3>
-              <table className="w-full text-left text-xs">
+          <TabsContent value="picking" className="assembly-picking-overview space-y-4 mt-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              {[
+                { label: "Requests to review", value: pendingRequestsCount, Icon: ClipboardList, tone: "blue" },
+                { label: "Picks in progress", value: pendingPickingCount, Icon: ListOrdered, tone: "amber" },
+                { label: "Completed picks", value: pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length, Icon: CheckCircle2, tone: "green" },
+              ].map(({ label, value, Icon, tone }) => (
+                <div key={label} className="inventory-stock-summary" data-tone={tone}>
+                  <div className="inventory-stock-summary-icon"><Icon className="size-6" /></div>
+                  <div><p className="text-sm font-medium text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-bold tabular-nums">{value}</p></div>
+                </div>
+              ))}
+            </div>
+            <AssemblyRequisitionsPanel
+              refreshKey={requisitionRefreshKey}
+              showRefresh={false}
+              pickupTasks={pickupTasks}
+              onConfirmPick={(task) => {
+                setPickupFifoAlert("");
+                setPickupQrVerified({ material: false, rack: false });
+                setPickupQrError("");
+                setPickupConfirmation({
+                  material_scan: "",
+                  zone_scan: "",
+                  quantity: String(Math.max(0, Number(task.requested_quantity || 0) - Number(task.picked_quantity || 0))),
+                });
+                setPickupToConfirm(task);
+              }}
+              onUpdated={() => fetchData(true)}
+            />
+            <Card className="warehouse-picking-queue overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
+              <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                Warehouse picking queue <InformationTooltip help="pickRemaining" />
+              </h3>
+              <table className="w-full min-w-[1040px] table-fixed text-left text-sm">
+                <colgroup><col className="w-[15%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[24%]" /><col className="w-[10%]" /><col className="w-[12%]" /><col className="w-[10%]" /></colgroup>
                 <thead>
                   <tr className="border-b border-violet-200 bg-violet-100/70 text-violet-950 uppercase dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100">
                     <th className="py-2.5 px-3">Task No</th>
@@ -2024,20 +2277,20 @@ function SimpleWarehouseModule() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {pickupTasks.length === 0 ? (
+                  {pickupTasks.filter((task) => !["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-6 text-slate-500">
                         No pick tasks in queue. Approve a Material Request to generate pick tasks.
                       </td>
                     </tr>
                   ) : (
-                    pickupTasks.map((p) => (
+                    pickupTasks.filter((task) => !["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).map((p) => (
                       <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
                         <td className="py-3 px-3 font-semibold text-indigo-600">
                           <button
                             type="button"
                             className="underline underline-offset-2"
-                            onClick={() => { setPickupFifoAlert(""); setPickupToConfirm(p); }}
+                            onClick={() => { setPickupFifoAlert(""); setPickupQrVerified({ material: false, rack: false }); setPickupQrError(""); setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: String(Math.max(0, Number(p.requested_quantity || 0) - Number(p.picked_quantity || 0))) }); setPickupToConfirm(p); }}
                           >
                             {p.task_number || p.id}
                           </button>
@@ -2072,7 +2325,7 @@ function SimpleWarehouseModule() {
                           {p.status !== "COMPLETED" && (
                             <Button
                               size="sm"
-                              onClick={() => { setPickupFifoAlert(""); setPickupToConfirm(p); }}
+                              onClick={() => { setPickupFifoAlert(""); setPickupQrVerified({ material: false, rack: false }); setPickupQrError(""); setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: String(Math.max(0, Number(p.requested_quantity || 0) - Number(p.picked_quantity || 0))) }); setPickupToConfirm(p); }}
                               className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
                             >
                               Confirm Pick
@@ -2085,19 +2338,62 @@ function SimpleWarehouseModule() {
                 </tbody>
               </table>
             </Card>
+            <Dialog open={showPickupHistory} onOpenChange={setShowPickupHistory}>
+              <DialogContent className="w-[calc(100vw-2rem)] max-h-[85dvh] max-w-5xl overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2"><History className="size-5 text-primary" /> Warehouse pick history</DialogTitle>
+                  <DialogDescription>Completed assembly material picks and their confirmation details.</DialogDescription>
+                </DialogHeader>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full min-w-[850px] text-left text-sm">
+                    <thead className="border-b bg-muted/50 text-xs uppercase text-muted-foreground">
+                      <tr><th className="px-3 py-3">Task No</th><th className="px-3">Assembly Request</th><th className="px-3">Material</th><th className="px-3">Pick Location</th><th className="px-3">Picked Quantity</th><th className="px-3">Confirmed By</th><th className="px-3">Confirmed At</th></tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).map((task) => (
+                        <tr key={task.id}>
+                          <td className="px-3 py-3 font-semibold text-primary">{task.task_number || task.id}</td>
+                          <td className="px-3">{task.assembly_order_number || task.assembly_order || "—"}</td>
+                          <td className="px-3"><span className="font-medium">{task.material_name || task.material_code || "—"}</span>{task.material_name && task.material_code && <span className="block text-xs text-muted-foreground">{task.material_code}</span>}</td>
+                          <td className="px-3 font-mono text-xs">{task.pick_location || "—"}</td>
+                          <td className="px-3 font-semibold">{task.picked_quantity ?? task.quantity ?? "—"} {task.uom || ""}</td>
+                          <td className="px-3">{task.confirmation?.confirmed_by || "—"}</td>
+                          <td className="px-3 text-xs text-muted-foreground">{formatApiDateTime(task.confirmation?.confirmed_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!pickupTasks.some((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())) && (
+                    <p className="p-8 text-center text-sm text-muted-foreground">No completed picks have been recorded yet.</p>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           {/* ========================================================================= */}
           {/* 7. LOCATIONS TAB */}
           {/* ========================================================================= */}
-          <TabsContent value="locations" className="space-y-6 mt-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <TabsContent value="locations" className="warehouse-locations-overview space-y-4 mt-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              {[
+                { label: "Storage zones", value: zones.length, Icon: Building2, tone: "blue" },
+                { label: "Racks configured", value: new Set(allFlattenedBins.map((bin) => bin.rack_capacity?.id || `${bin.zone_id}:${bin.rack || bin.id}`)).size, Icon: Building2, tone: "green" },
+                { label: "Storage bins", value: allFlattenedBins.length, Icon: Boxes, tone: "amber" },
+              ].map(({ label, value, Icon, tone }) => (
+                <div key={label} className="inventory-stock-summary" data-tone={tone}>
+                  <div className="inventory-stock-summary-icon"><Icon className="size-6" /></div>
+                  <div><p className="text-sm font-medium text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-bold tabular-nums">{value}</p></div>
+                </div>
+              ))}
+            </div>
+            <div className="locations-section-header flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  <Building2 className="h-5 w-5 text-indigo-600" /> Zones & Racks
+                  <Layers className="h-5 w-5 text-primary" /> Zones & Racks
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Zone → Rack → Shelf/Position → Bin
+                  Zone → Rack → Bin
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2159,28 +2455,10 @@ function SimpleWarehouseModule() {
                               </option>
                             ))}
                         </select>
-                        <select
-                          className="h-9 rounded-md border bg-background px-2 text-xs"
-                          value={dockStoreChoices[request.id] || ""}
-                          onChange={(event) =>
-                            setDockStoreChoices((current) => ({
-                              ...current,
-                              [request.id]: event.target.value,
-                            }))
-                          }
-                        >
-                          <option value="">Select warehouse</option>
-                          {stores
-                            .filter((store) => (store.status || "").toUpperCase() === "ACTIVE")
-                            .map((store) => (
-                              <option key={store.id} value={store.id}>
-                                {store.store_name} · {store.store_code}
-                              </option>
-                            ))}
-                        </select>
+
                         <Button
                           size="sm"
-                          disabled={isSubmitting || !stores.length}
+                          disabled={isSubmitting || !warehouses.length}
                           onClick={() => void handleAllocateDockFromLocations(request.id)}
                         >
                           Allocate dock
@@ -2234,7 +2512,7 @@ function SimpleWarehouseModule() {
                   const zoneBins = allFlattenedBins.filter((bin) => bin.zone_id === zone.id);
                   const rackCount = new Set(zoneBins.map(bin => bin.rack_capacity?.id || bin.rack || bin.id)).size;
                   return (
-                    <Card key={zone.id} className="overflow-hidden border-indigo-200 bg-gradient-to-br from-indigo-50/70 via-white to-sky-50/40 shadow-sm dark:border-indigo-900/60 dark:bg-indigo-950/20">
+                    <Card key={zone.id} className="zone-storage-card overflow-hidden border-indigo-200 bg-gradient-to-br from-indigo-50/70 via-white to-sky-50/40 shadow-sm dark:border-indigo-900/60 dark:bg-indigo-950/20">
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-50 px-5 py-4">
                         <div>
                           <h3 className="font-bold text-slate-900">
@@ -2286,11 +2564,13 @@ function SimpleWarehouseModule() {
           if (!open && !isSubmitting) {
             setPickupToConfirm(null);
             setPickupFifoAlert("");
+            setPickupQrVerified({ material: false, rack: false });
+            setPickupQrError("");
             setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: "" });
           }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl">
           <DialogHeader>
             <DialogTitle>
               {pickupToConfirm?.status === "COMPLETED"
@@ -2305,10 +2585,11 @@ function SimpleWarehouseModule() {
           </DialogHeader>
           {pickupToConfirm && (
             <form onSubmit={handleCompletePickup} className="space-y-4">
-              <p className="text-xs text-muted-foreground">
-                Task {pickupToConfirm.task_number || pickupToConfirm.id} ·{" "}
-                {pickupToConfirm.material_name || pickupToConfirm.material_code}
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/30 px-3 py-2.5 text-xs">
+                <span className="font-semibold text-foreground">Task {pickupToConfirm.task_number || pickupToConfirm.id}</span>
+                <span className="text-muted-foreground">{pickupToConfirm.assembly_order_number || "Assembly request"}</span>
+                <span className="font-medium text-primary">{pickupToConfirm.material_name || pickupToConfirm.material_code}</span>
+              </div>
               {pickupFifoAlert && <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><p><strong>Older stock must be cleared first.</strong> {pickupFifoAlert}</p></div>}
               {pickupToConfirm.status === "COMPLETED" && (
                 <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs">
@@ -2349,7 +2630,7 @@ function SimpleWarehouseModule() {
               )}
               {pickupToConfirm.status !== "COMPLETED" && (
                 <>
-                  <div className="space-y-2">
+                  <div className="space-y-2.5 rounded-xl border border-border/80 p-3">
                     <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-material-scan">
                       Material code / QR scan
                     </label><InformationTooltip help="qr" /></span>
@@ -2359,37 +2640,42 @@ function SimpleWarehouseModule() {
                       value={pickupConfirmation.material_scan}
                       onChange={(event) => {
                         setPickupFifoAlert("");
+                        setPickupQrVerified((current) => ({ ...current, material: false }));
                         setPickupConfirmation((current) => ({
                           ...current,
                           material_scan: event.target.value,
                         }));
                       }}
                     />
-                    <div className="flex flex-wrap items-center gap-3 text-xs">
-                      <label className="cursor-pointer font-semibold text-primary underline">
-                        Upload QR
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/jpg"
-                          className="hidden"
-                          onChange={(event) =>
-                            event.target.files?.[0] &&
-                            decodePickupQrUpload(event.target.files[0], "material")
-                          }
-                        />
-                      </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Button type="button" variant="outline" size="sm" className="w-full gap-1" onClick={() => setCameraField("pickup-material")}>
+                        <Camera className="size-4" /> Scan &amp; Verify
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" className="w-full gap-2" onClick={() => pickupMaterialFileInput.current?.click()}>
+                        <Upload className="size-4" /> Upload QR
+                      </Button>
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        className="h-6 px-1.5 text-xs"
+                        className="w-full gap-2"
+                        disabled={!pickupMaterialQrValue}
                         onClick={() => void downloadQrValue(pickupMaterialQrValue, "Material QR")}
                       >
-                        Download QR
+                        <Download className="size-4" /> Download QR
                       </Button>
                     </div>
+                    <input
+                      ref={pickupMaterialFileInput}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      className="sr-only"
+                      aria-label="Upload material QR image"
+                      onChange={(event) => event.target.files?.[0] && decodePickupQrUpload(event.target.files[0], "material")}
+                    />
+                    {pickupQrVerified.material && <p className="text-xs font-semibold text-emerald-700">✓ Material QR verified</p>}
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2.5 rounded-xl border border-border/80 p-3">
                     <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-zone-scan">
                       BIN / location code / QR scan
                     </label><InformationTooltip help="qr" /></span>
@@ -2397,37 +2683,59 @@ function SimpleWarehouseModule() {
                       id="pickup-zone-scan"
                       required
                       value={pickupConfirmation.zone_scan}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        setPickupQrVerified((current) => ({ ...current, rack: false }));
                         setPickupConfirmation((current) => ({
                           ...current,
                           zone_scan: event.target.value,
-                        }))
-                      }
+                        }));
+                      }}
                     />
-                    <div className="flex flex-wrap items-center gap-3 text-xs">
-                      <label className="cursor-pointer font-semibold text-primary underline">
-                        Upload QR
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/jpg"
-                          className="hidden"
-                          onChange={(event) =>
-                            event.target.files?.[0] &&
-                            decodePickupQrUpload(event.target.files[0], "rack")
-                          }
-                        />
-                      </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Button type="button" variant="outline" size="sm" className="w-full gap-1" onClick={() => setCameraField("pickup-bin")}>
+                        <Camera className="size-4" /> Scan &amp; Verify
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" className="w-full gap-2" onClick={() => pickupRackFileInput.current?.click()}>
+                        <Upload className="size-4" /> Upload QR
+                      </Button>
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        className="h-6 px-1.5 text-xs"
+                        className="w-full gap-2"
+                        disabled={!pickupRackQrValue}
                         onClick={() => void downloadQrValue(pickupRackQrValue, "BIN QR")}
                       >
-                        Download QR
+                        <Download className="size-4" /> Download QR
                       </Button>
                     </div>
+                    <input
+                      ref={pickupRackFileInput}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      className="sr-only"
+                      aria-label="Upload bin or location QR image"
+                      onChange={(event) => event.target.files?.[0] && decodePickupQrUpload(event.target.files[0], "rack")}
+                    />
+                    {pickupQrVerified.rack && <p className="text-xs font-semibold text-emerald-700">✓ BIN QR verified</p>}
+                    {availablePickupBin && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-900">
+                        <p className="font-semibold">Remaining stock location</p>
+                        <p className="mt-1">{availablePickupBin.location_code} · {availablePickupBin.available_quantity} {availablePickupBin.uom || ""} available</p>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <Button type="button" size="sm" variant="outline" onClick={() => {
+                            const value = String(availablePickupBin.qr_value || availablePickupBin.location_code || "");
+                            setPickupConfirmation((current) => ({ ...current, zone_scan: value }));
+                            void verifyPickupQr("rack", value);
+                          }}>Use &amp; Verify BIN</Button>
+                          <Button type="button" size="sm" variant="outline" onClick={() => void downloadQrValue(String(availablePickupBin.qr_value || availablePickupBin.location_code || ""), `${availablePickupBin.bin_code || "Available BIN"} QR`)}>
+                            <Download className="mr-1 size-4" /> Download BIN QR
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
+                  {pickupQrError && <p role="alert" className="text-xs font-medium text-rose-600">{pickupQrError}</p>}
                   <div className="space-y-2">
                     <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-quantity">
                       Quantity picked {pickupToConfirm.uom ? `(${pickupToConfirm.uom})` : ""}
@@ -2454,10 +2762,12 @@ function SimpleWarehouseModule() {
                           0,
                           Number(pickupToConfirm.requested_quantity) -
                             Number(
-                              pickupToConfirm.picked_quantity ||
+                              pickupToConfirm.picked_quantity ??
                                 (pickupToConfirm.status === "COMPLETED"
                                   ? pickupToConfirm.requested_quantity
-                                  : 0),
+                                  : pickupToConfirm.status === "IN_PROGRESS"
+                                    ? pickupToConfirm.quantity
+                                    : 0),
                             ),
                         )}{" "}
                         {pickupToConfirm.uom || ""}
@@ -2493,6 +2803,8 @@ function SimpleWarehouseModule() {
                       !pickupConfirmation.material_scan.trim() ||
                       !pickupConfirmation.zone_scan.trim() ||
                       Number(pickupConfirmation.quantity) <= 0
+                      || !pickupQrVerified.material
+                      || !pickupQrVerified.rack
                     }
                   >
                     {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm pick"}
@@ -2506,8 +2818,8 @@ function SimpleWarehouseModule() {
 
       {/* 1. Assign Storage Location Modal */}
       <Dialog open={!!assignPutawayTask} onOpenChange={() => setAssignPutawayTask(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-xl max-h-[90dvh] overflow-y-auto">
+          <DialogHeader className="pr-6 text-left">
             <DialogTitle>Assign Storage Location</DialogTitle>
             <DialogDescription>
               Select destination rack for Putaway Task {assignPutawayTask?.grn_number}
@@ -2515,55 +2827,37 @@ function SimpleWarehouseModule() {
           </DialogHeader>
 
           {assignPutawayTask && (
-            <div className="space-y-4 text-xs py-2">
+            <div className="space-y-5 text-sm py-2 min-w-0">
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
                 <div className="font-semibold text-slate-900 dark:text-slate-100">
                   {assignPutawayTask.material_name || "-"}
                 </div>
-                <div className="text-slate-500">
-                  Quantity: {assignPutawayTask.quantity ?? "—"} {assignPutawayTask.uom || ""} |
-                  Batch: {assignPutawayTask.batch_number || "—"}
-                </div>
+                <dl className="grid gap-3 pt-2 sm:grid-cols-[100px_1fr] text-sm">
+                  <div><dt className="text-muted-foreground text-xs">Quantity</dt><dd className="mt-1 font-medium">{assignPutawayTask.quantity ?? "—"} {assignPutawayTask.uom || ""}</dd></div>
+                  <div className="min-w-0"><dt className="text-muted-foreground text-xs">Batch</dt><dd className="mt-1 break-all font-medium">{assignPutawayTask.batch_number || "—"}</dd></div>
+                </dl>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Select
-                  value={assignStoreId}
-                  onValueChange={(value) => {
-                    setAssignStoreId(value);
-                    setAssignZoneId("");
-                    setSelectedLocationId("");
-                  }}
-                >
-                  <SelectTrigger className="text-xs">
-                    <SelectValue placeholder="Select warehouse" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {stores
-                      .filter((s) => !s.status || String(s.status).toUpperCase() === "ACTIVE")
-                      .map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.store_code} - {s.store_name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+              <div className="grid gap-4 sm:grid-cols-2">
+
+                <div className="min-w-0 space-y-2">
+                <label htmlFor="assign-zone" className="font-medium">Zone</label>
                 <Select
                   value={assignZoneId}
                   onValueChange={(value) => {
                     setAssignZoneId(value);
                     setSelectedLocationId("");
                   }}
-                  disabled={!assignStoreId}
+                  disabled={!assignWarehouseRefId}
                 >
-                  <SelectTrigger className="text-xs">
+                  <SelectTrigger id="assign-zone" className="w-full text-sm">
                     <SelectValue placeholder="Select zone" />
                   </SelectTrigger>
                   <SelectContent>
                     {zones
                       .filter(
                         (z) =>
-                          z.store_id === assignStoreId &&
+                          z.warehouse_ref_id === assignWarehouseRefId &&
                           (!z.status || String(z.status).toUpperCase() === "ACTIVE"),
                       )
                       .map((z) => (
@@ -2573,19 +2867,22 @@ function SimpleWarehouseModule() {
                       ))}
                   </SelectContent>
                 </Select>
+                </div>
+                <div className="min-w-0 space-y-2 sm:col-span-2">
+                <label htmlFor="assign-rack" className="font-medium">Destination rack</label>
                 <Select
                   value={selectedLocationId}
                   onValueChange={setSelectedLocationId}
                   disabled={!assignZoneId}
                 >
-                  <SelectTrigger className="text-xs">
+                  <SelectTrigger id="assign-rack" className="w-full text-sm">
                     <SelectValue placeholder="Select active rack" />
                   </SelectTrigger>
                   <SelectContent>
                     {allFlattenedBins
                       .filter(
                         (loc) =>
-                          loc.store_id === assignStoreId &&
+                          loc.warehouse_ref_id === assignWarehouseRefId &&
                           loc.zone_id === assignZoneId &&
                           isAssignableRack(loc.status),
                       )
@@ -2596,12 +2893,14 @@ function SimpleWarehouseModule() {
                       ))}
                   </SelectContent>
                 </Select>
+                </div>
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold">
+                <label htmlFor="assign-quantity" className="font-medium">
                   Assign Quantity ({assignPutawayTask.uom || "PCS"})
                 </label>
                 <Input
+                  id="assign-quantity"
                   type="number"
                   min="0.0001"
                   step="0.0001"
@@ -2622,7 +2921,7 @@ function SimpleWarehouseModule() {
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="border-t pt-4 gap-2">
             <Button variant="outline" onClick={() => setAssignPutawayTask(null)}>
               Cancel
             </Button>
@@ -2630,16 +2929,16 @@ function SimpleWarehouseModule() {
               onClick={handleConfirmAssignPutaway}
               disabled={
                 isSubmitting ||
-                !assignStoreId ||
+                !assignWarehouseRefId ||
                 !assignZoneId ||
                 !selectedLocationId ||
                 !Number.isFinite(Number(assignQuantity)) ||
                 Number(assignQuantity) <= 0 ||
                 Number(assignQuantity) > (assignPutawayTask ? unassignedPutawayQuantity(assignPutawayTask) : 0)
               }
-              className="bg-indigo-600 text-white"
+              className="bg-primary text-primary-foreground"
             >
-              ASSIGN RACK
+              {isSubmitting ? "Assigning…" : "Assign rack"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2647,32 +2946,31 @@ function SimpleWarehouseModule() {
 
       {/* 1b. Scan and confirm physical BIN putaway */}
       <Dialog open={!!scanPutawayTask} onOpenChange={() => setScanPutawayTask(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-xl max-h-[90dvh] overflow-y-auto">
+          <DialogHeader className="pr-6 text-left">
             <DialogTitle>Scan Material & BIN</DialogTitle>
             <DialogDescription>
               Scan the existing material QR first, then scan the assigned BIN QR.
             </DialogDescription>
           </DialogHeader>
           {scanPutawayTask && (
-            <div className="space-y-4 text-xs">
+            <div className="space-y-5 text-sm min-w-0">
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                 <div className="font-semibold">
                   {scanPutawayTask.material_name || scanPutawayTask.item_code}
                 </div>
-                <div className="text-slate-500">
-                  GRN: {scanPutawayTask.grn_number || "-"} · Batch:{" "}
-                  {scanPutawayTask.batch_number || "-"}
-                </div>
-                <div className="mt-1 font-semibold">
-                  Pending: {scanPutawayTask.quantity} {scanPutawayTask.uom || ""}
-                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-3">
+                  <div><dt className="text-xs text-muted-foreground">GRN</dt><dd className="mt-1 font-medium">{scanPutawayTask.grn_number || "-"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Pending quantity</dt><dd className="mt-1 font-medium">{scanPutawayTask.quantity} {scanPutawayTask.uom || ""}</dd></div>
+                  <div className="col-span-2 min-w-0"><dt className="text-xs text-muted-foreground">Batch</dt><dd className="mt-1 break-all font-medium">{scanPutawayTask.batch_number || "-"}</dd></div>
+                </dl>
               </div>
               <div className="space-y-1.5">
-                <span className="inline-flex items-center"><label className="font-semibold">Material QR</label><InformationTooltip help="qr" /></span>
-                <div className="flex gap-2">
+                <span className="inline-flex items-center"><label htmlFor="putaway-material-qr" className="font-medium">Material QR</label><InformationTooltip help="qr" /></span>
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] items-stretch">
                   <Input
-                    className="flex-1"
+                    id="putaway-material-qr"
+                    className="min-w-0 w-full"
                     value={putawayScan.materialQr}
                     placeholder="Scan material QR"
                     onChange={(e) => {
@@ -2684,7 +2982,7 @@ function SimpleWarehouseModule() {
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
+                    className="h-auto min-h-10 py-2"
                     onClick={() => setCameraField("material")}
                   >
                     <Camera className="mr-1 h-4 w-4" />
@@ -2692,12 +2990,13 @@ function SimpleWarehouseModule() {
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="cursor-pointer text-xs text-primary underline">
+                  <label className="relative inline-flex min-h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-white px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-accent focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
                     Upload QR Image
                     <input
                       type="file"
                       accept="image/png,image/jpeg,image/jpg"
-                      className="hidden"
+                      aria-label="Upload material QR image"
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                       onChange={(e) =>
                         e.target.files?.[0] && decodeQrUpload(e.target.files[0], "material")
                       }
@@ -2709,10 +3008,11 @@ function SimpleWarehouseModule() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold">BIN QR</label>
-                <div className="flex gap-2">
+                <label htmlFor="putaway-bin-qr" className="font-medium">BIN QR</label>
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] items-stretch">
                   <Input
-                    className="flex-1"
+                    id="putaway-bin-qr"
+                    className="min-w-0 w-full"
                     value={putawayScan.binQr}
                     placeholder="Scan BIN QR"
                     onChange={(e) => {
@@ -2723,7 +3023,7 @@ function SimpleWarehouseModule() {
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
+                    className="h-auto min-h-10 py-2"
                     onClick={() => setCameraField("bin")}
                   >
                     <Camera className="mr-1 h-4 w-4" />
@@ -2731,12 +3031,13 @@ function SimpleWarehouseModule() {
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="cursor-pointer text-xs text-primary underline">
+                  <label className="relative inline-flex min-h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-white px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-accent focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
                     Upload QR Image
                     <input
                       type="file"
                       accept="image/png,image/jpeg,image/jpg"
-                      className="hidden"
+                      aria-label="Upload BIN QR image"
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                       onChange={(e) =>
                         e.target.files?.[0] && decodeQrUpload(e.target.files[0], "bin")
                       }
@@ -2745,48 +3046,61 @@ function SimpleWarehouseModule() {
                   {binQrVerified && (
                     <span className="font-semibold text-emerald-600">✓ Verified</span>
                   )}
-                </div>
-                {qrScanError && <p className="text-xs text-rose-600">{qrScanError}</p>}
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="h-7 px-2"
+                  className="ml-auto bg-white px-3"
                   disabled={!putawayQrImages.bin}
                   onClick={() =>
                     putawayQrImages.bin &&
-                    setQrPreview({ title: "BIN QR", image: putawayQrImages.bin })
+                    setQrPreview({
+                      title: `Assigned BIN QR — ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin || "Bin"}`,
+                      image: putawayQrImages.bin,
+                    })
                   }
                 >
                   View QR
                 </Button>
+                </div>
+                {qrScanError && <p className="text-xs text-rose-600">{qrScanError}</p>}
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold">
+                <label htmlFor="putaway-stored-quantity" className="font-medium">
                   Stored quantity {scanPutawayTask.uom ? `(${scanPutawayTask.uom})` : ""}
                 </label>
                 <Input
+                  id="putaway-stored-quantity"
                   type="number"
                   min="0.0001"
                   step="0.0001"
-                  max={scanPutawayTask.quantity}
+                  max={scanMaximumQuantity}
                   value={putawayScan.quantity}
                   onChange={(e) => setPutawayScan((s) => ({ ...s, quantity: e.target.value }))}
                 />
+                {Number.isFinite(scanAvailableCapacity) && (
+                  <p className="text-xs text-muted-foreground">
+                    Rack space available: <span className="font-semibold text-foreground">{Math.max(0, scanAvailableCapacity)} {scanPutawayTask.uom || "PCS"}</span>.
+                    {scanAvailableCapacity < Number(scanPutawayTask.quantity || 0) &&
+                      " Confirm this partial quantity, then assign the remainder to another rack."}
+                  </p>
+                )}
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="items-center gap-2 border-t pt-4">
             <Button variant="outline" onClick={() => setScanPutawayTask(null)}>
               Cancel
             </Button>
+            <div className="flex items-center justify-end gap-2">
             <Button
               onClick={handleConfirmPutaway}
               disabled={isSubmitting || !putawayScanValid}
               className="bg-emerald-600 text-white"
             >
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Putaway"}
-            </Button><InformationTooltip help="putaway" />
+            </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2794,7 +3108,7 @@ function SimpleWarehouseModule() {
       <Dialog open={!!cameraField} onOpenChange={(open) => !open && setCameraField(null)}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
-            <DialogTitle>Scan {cameraField === "material" ? "Material" : "BIN"} QR</DialogTitle>
+            <DialogTitle>Scan {cameraField?.includes("material") ? "Material" : "BIN"} QR</DialogTitle>
             <DialogDescription>
               Allow camera access and hold the QR label inside the frame.
             </DialogDescription>
@@ -2811,24 +3125,28 @@ function SimpleWarehouseModule() {
       </Dialog>
 
       <Dialog open={!!qrPreview} onOpenChange={(open) => !open && setQrPreview(null)}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-xs">
-          <DialogHeader>
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-sm max-h-[90dvh] overflow-y-auto gap-5">
+          <DialogHeader className="pr-6 text-left">
             <DialogTitle>{qrPreview?.title}</DialogTitle>
+            <DialogDescription>Scan this code or download the label.</DialogDescription>
           </DialogHeader>
           {qrPreview?.image && (
             <>
+              <div className="flex justify-center rounded-xl border bg-slate-50 p-4">
               <img
                 src={qrPreview.image}
                 alt={qrPreview.title}
-                className="mx-auto h-56 w-56 rounded-lg border bg-white p-3"
+                className="aspect-square w-full max-w-64 object-contain rounded-lg bg-white p-3"
               />
+              </div>
+              <Button asChild className="w-full">
               <a
                 href={qrPreview.image}
                 download={`${qrPreview.title.replaceAll(" ", "-").toLowerCase()}.png`}
-                className="mx-auto block text-center text-sm font-semibold text-primary underline"
               >
                 Download QR Image
               </a>
+              </Button>
             </>
           )}
         </DialogContent>
@@ -2870,8 +3188,8 @@ function SimpleWarehouseModule() {
       </Dialog>
 
       {/* 2. Inventory Detail Modal */}
-      <Dialog open={!!selectedInventory} onOpenChange={() => setSelectedInventory(null)}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl">
+      <Dialog open={!!selectedInventory} onOpenChange={() => { setSelectedInventory(null); setSelectedInventoryBatchCode(null); }}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-4xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {selectedInventory?.material_name ||
@@ -2881,126 +3199,102 @@ function SimpleWarehouseModule() {
           </DialogHeader>
 
           {selectedInventory && (
-            <div className="space-y-4 text-xs py-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
+            <div className="space-y-4 py-2 text-xs">
+              <div className="grid gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-[minmax(150px,0.7fr)_minmax(0,1.3fr)]">
+                <div className="min-w-0">
                   <span className="text-slate-500">Material Code:</span>
                   <div className="font-mono font-semibold">
                     {selectedInventory.material_code || "-"}
                   </div>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <span className="text-slate-500">Batch:</span>
-                  <div className="font-mono font-semibold">
-                    {selectedInventory.batch_details?.length
-                      ? selectedInventory.batch_details.map((b: any) => b.batch_number).join(", ")
-                      : selectedInventory.batch_number || selectedInventory.batch || "-"}
+                  <div className="mt-1 flex min-w-0 flex-wrap gap-1.5 font-mono font-semibold">
+                    {visibleInventoryBatches.length ? visibleInventoryBatches.map((batch: any, index: number) => (
+                      <span key={`${batch.batch_number || "batch"}-summary-${index}`} className="max-w-full break-all rounded-md bg-background px-2 py-1">
+                        Batch {selectedInventoryBatchCode ? selectedInventoryBatches.findIndex((entry: any) => entry.batch_number === selectedInventoryBatchCode) + 1 : index + 1}: {batch.batch_number || "-"}
+                      </span>
+                    )) : <span>{selectedInventory.batch_number || selectedInventory.batch || "-"}</span>}
                   </div>
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
+              <div className="grid gap-3 lg:grid-cols-2">
+              <div className="min-w-0 space-y-1 rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                 <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
                   Storage Location
                 </div>
-                <div className="font-semibold">
+                <div className="break-words font-semibold">
                   {selectedInventory.warehouse || selectedInventory.warehouse_id || "-"} →{" "}
                   {selectedInventory.zone_code || selectedInventory.zone_name || "-"} →{" "}
                   {selectedInventory.bin_code || selectedInventory.location || "-"}
                 </div>
               </div>
+              <div className="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
+                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">Stock</div>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 font-medium">
+                  <span>Total Physical Stock:</span>
+                  <span className="text-right font-bold">{selectedInventory.total_quantity ?? selectedInventory.on_hand_quantity ?? "—"} {selectedInventory.uom || ""}</span>
+                  <span className="text-emerald-600">Available Stock:</span>
+                  <span className="text-right font-bold text-emerald-600">{selectedInventory.available ?? selectedInventory.available_quantity ?? "—"} {selectedInventory.uom || ""}</span>
+                </div>
+              </div>
+              </div>
 
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-2">
                 <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
-                  Batch-wise Stock
+                  {selectedInventoryBatchCode ? "Selected Batch Details" : "Batch-wise Stock"}
                 </div>
-                {(selectedInventory.batch_details || []).length > 0 ? (
-                  selectedInventory.batch_details.map((batch: any) => (
-                    <div
-                      key={batch.batch_number}
-                      className="flex justify-between border-b last:border-0 pb-1 last:pb-0"
-                    >
-                      <span className="font-mono">{batch.batch_number}</span>
-                      <span className="font-semibold">
-                        {batch.quantity} {batch.uom || selectedInventory.uom || ""}
-                      </span>
-                    </div>
-                  ))
+                {visibleInventoryBatches.length > 0 ? (
+                  visibleInventoryBatches.map((batch: any, index: number) => {
+                    const batchIndex = selectedInventoryBatches.findIndex((entry: any) => entry.batch_number === batch.batch_number);
+                    const isOldestAvailable = Boolean(oldestAvailableBatch) && batch === oldestAvailableBatch;
+                    const qrValue = inventoryBatchQrValue(batch);
+                    const qrTitle = `Material QR ${batch.batch_number || selectedInventory.material_code}`;
+                    return (
+                      <div
+                        key={`${batch.batch_number || "batch"}-${index}`}
+                        className={`grid gap-2 border-b pb-2 last:border-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center ${isOldestAvailable ? "rounded-lg border border-red-200 bg-red-50 p-2.5 text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100" : ""}`}
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <div className="space-y-0.5">
+                            <span className="block font-semibold">Batch {batchIndex + 1}</span>
+                            <span className="block break-all font-mono">{batch.batch_number || selectedInventory.material_code}</span>
+                            <span className="block break-words text-[10px] text-muted-foreground">Location: {batch.location || batch.location_code || batch.to_location || selectedInventory.bin_code || selectedInventory.location || "-"}</span>
+                          </div>
+                          {isOldestAvailable ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-[10px] font-bold text-red-800 dark:bg-red-900/50 dark:text-red-100">
+                              <AlertTriangle className="size-3" /> Oldest stock · Use first (FIFO)
+                            </span>
+                          ) : null}
+                        </div>
+                        <span className="font-semibold sm:min-w-20 sm:text-right">{batch.quantity ?? batch.available_quantity ?? "—"} {batch.uom || selectedInventory.uom || ""}</span>
+                        <div className="flex flex-wrap gap-2 sm:justify-end">
+                          <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 px-2 text-[10px]" onClick={() => void previewInventoryBatchQr(batch)}><QrCode className="size-3.5" /> Material QR</Button>
+                          <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 px-2 text-[10px]" disabled={!qrValue} onClick={() => void downloadQrValue(qrValue, qrTitle)}><Download className="size-3.5" /> Download</Button>
+                        </div>
+                      </div>
+                    );
+                  })
                 ) : (
                   <div className="text-slate-500">No batch movement details available.</div>
                 )}
               </div>
 
-              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-2">
-                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
-                  Stock
-                </div>
-                <div className="flex justify-between font-medium">
-                  <span>Total Physical Stock:</span>
-                  <span className="font-bold">
-                    {selectedInventory.total_quantity ?? selectedInventory.on_hand_quantity ?? "—"}{" "}
-                    {selectedInventory.uom || ""}
-                  </span>
-                </div>
-                <div className="flex justify-between font-medium text-emerald-600">
-                  <span>Available Stock:</span>
-                  <span className="font-bold">
-                    {selectedInventory.available ?? selectedInventory.available_quantity ?? "—"}{" "}
-                    {selectedInventory.uom || ""}
-                  </span>
-                </div>
-              </div>
-
               {selectedInventory.inventory_history && (
-                <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
+                <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                   <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
                     Inventory History
                   </div>
-                  <div>
-                    Original GRN:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.original_grn || "-"}
-                    </span>
-                  </div>
-                  <div>
-                    Batch:{" "}
-                    <span className="font-mono font-semibold">
-                      {selectedInventory.inventory_history.batch_number || "-"}
-                    </span>
-                  </div>
-                  <div>
-                    Previous Rack Location:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.original_rack || "-"}
-                    </span>
-                  </div>
-                  <div>
-                    Received Quantity:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.received_quantity}{" "}
-                      {selectedInventory.uom || ""}
-                    </span>
-                  </div>
-                  <div>
-                    Issued to Assembly:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.issued_quantity}{" "}
-                      {selectedInventory.uom || ""}
-                    </span>
-                  </div>
-                  <div>
-                    Remaining Quantity:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.remaining_quantity}{" "}
-                      {selectedInventory.uom || ""}
-                    </span>
-                  </div>
-                  <div>
-                    Picking Task:{" "}
-                    <span className="font-mono font-semibold">
-                      {selectedInventory.inventory_history.picking_task || "-"}
-                    </span>
-                  </div>
+                  <dl className="mt-2 grid grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)] gap-x-3 gap-y-2">
+                    <dt className="text-muted-foreground">Original GRN</dt><dd className="break-all font-semibold">{selectedInventory.inventory_history.original_grn || "-"}</dd>
+                    <dt className="text-muted-foreground">Batch</dt><dd className="break-all font-mono font-semibold">{selectedInventory.inventory_history.batch_number || "-"}</dd>
+                    <dt className="text-muted-foreground">Previous Rack Location</dt><dd className="break-all font-semibold">{selectedInventory.inventory_history.original_rack || "-"}</dd>
+                    <dt className="text-muted-foreground">Received Quantity</dt><dd className="font-semibold">{selectedInventory.inventory_history.received_quantity} {selectedInventory.uom || ""}</dd>
+                    <dt className="text-muted-foreground">Issued to Assembly</dt><dd className="font-semibold">{selectedInventory.inventory_history.issued_quantity} {selectedInventory.uom || ""}</dd>
+                    <dt className="text-muted-foreground">Remaining Quantity</dt><dd className="font-semibold">{selectedInventory.inventory_history.remaining_quantity} {selectedInventory.uom || ""}</dd>
+                    <dt className="text-muted-foreground">Picking Task</dt><dd className="break-all font-mono font-semibold">{selectedInventory.inventory_history.picking_task || "-"}</dd>
+                  </dl>
                 </div>
               )}
 
@@ -3200,14 +3494,14 @@ function SimpleWarehouseModule() {
             <DialogDescription>
               {createLocationType === "zone" && (editingZone ? "Update the zone name. The generated zone code remains unchanged." : "Define a storage zone.")}
               {createLocationType === "bin" &&
-                "Configure the rack capacity and optional shelf / position. A bin code and QR code are generated automatically."}
+                "Configure the rack capacity. Rack, bin, and QR codes are generated automatically."}
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleCreateLocationSubmit} className="space-y-4 text-xs py-2">
             {createLocationType === "zone" && (
               <>
-                {!editingZone && !stores.length && (
+                {!editingZone && !warehouses.length && (
                   <div className="space-y-3 rounded-lg border p-3">
                     <p className="text-muted-foreground">Set up the warehouse with your first zone.</p>
                     <div className="space-y-1">
@@ -3243,16 +3537,12 @@ function SimpleWarehouseModule() {
                 </div>
                 <div className="grid grid-cols-1 items-start gap-x-4 gap-y-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="new-rack-code" className="block text-sm leading-5">Rack Code *</Label>
-                    <Input id="new-rack-code" className="h-11 w-full" required maxLength={64} placeholder="RACK-001" value={newBinRows[0].rack} onChange={e => setNewBinRows([{ ...newBinRows[0], rack: e.target.value.toUpperCase() }])} />
+                    <Label htmlFor="new-rack-code" className="block text-sm leading-5">Rack Code (auto-generated)</Label>
+                    <Input id="new-rack-code" className="h-11 w-full" readOnly value={newBinRows[0].rack} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="new-rack-capacity" className="block text-sm leading-5">Maximum Capacity (PCS) *</Label>
                     <Input id="new-rack-capacity" className="h-11 w-full" type="number" min={1} max={2147483647} step={1} required placeholder="80" value={newBinRows[0].capacity} onChange={e => setNewBinRows([{ ...newBinRows[0], capacity: e.target.value }])} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="new-rack-position" className="block text-sm leading-5">Shelf / Position (optional)</Label>
-                    <Input id="new-rack-position" className="h-11 w-full" maxLength={64} placeholder="e.g. SHELF-001" value={newBinRows[0].position} onChange={e => setNewBinRows([{ ...newBinRows[0], position: e.target.value.toUpperCase() }])} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="new-rack-bin-code" className="block text-sm leading-5">Bin Code (auto-generated)</Label>

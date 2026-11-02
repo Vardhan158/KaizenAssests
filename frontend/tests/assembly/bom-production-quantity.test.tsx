@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-vi.mock("@tanstack/react-router", () => ({ createFileRoute: () => (options: any) => ({ options }), useNavigate: () => vi.fn() }));
+vi.mock("@tanstack/react-router", () => ({ createFileRoute: () => (options: any) => ({ options }), useNavigate: () => vi.fn(), useSearch: () => ({}) }));
 vi.mock("@/components/wms/app-shell", () => ({ AppShell: ({ children, actions }: any) => <main>{actions}{children}</main> }));
 vi.mock("@/lib/auth-utils", () => ({ requireRole: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));

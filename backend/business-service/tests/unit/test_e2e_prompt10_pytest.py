@@ -1,12 +1,12 @@
 """
-E2E Test Suite - Prompt 10: Assembly Reservation Completion -> Store Pickup -> Material Issue
+E2E Test Suite - Prompt 10: Assembly Reservation Completion -> Warehouse Pickup -> Material Issue
 Validates:
 1. AR-2026-0002 material availability refresh (Motor required=10, previously reserved=6, free available=4, remaining shortage=0).
 2. Reservation of remaining 4 Motors (Motor reserved=10, shortage=0, total BOM shortage=0).
 3. Reservation idempotency (no over-reservation, physical on-hand unchanged before issue).
-4. Electrical Store (STR-1E6BD7) store isolation & visibility for the reservation.
-5. Assembly readiness & Store Assignment.
-6. Store pickup and material issue execution for all 8 BOM components.
+4. Electrical Warehouse (STR-1E6BD7) warehouse isolation & visibility for the reservation.
+5. Assembly readiness & Warehouse Assignment.
+6. Warehouse pickup and material issue execution for all 8 BOM components.
 7. Physical inventory balance decrement & immutable ledger transaction verification.
 8. Post-issue AR status transition (ready for production).
 9. Downstream isolation (Production NOT started, FG NOT created, MR count remains 1).
@@ -32,14 +32,14 @@ from app.modules.storage.infrastructure.persistence.models import (
     InventoryIssueTransactionModel,
     PickupTaskModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 
 
 @pytest.mark.asyncio
-async def test_e2e_prompt10_assembly_reservation_store_pickup_and_material_issue():
+async def test_e2e_prompt10_assembly_reservation_warehouse_pickup_and_material_issue():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         warehouse_headers = {
@@ -47,12 +47,12 @@ async def test_e2e_prompt10_assembly_reservation_store_pickup_and_material_issue
             "X-User-Roles": "WAREHOUSE_MANAGER,WAREHOUSE_OPERATOR,ADMIN",
             "X-User-Name": "warehouse_operator",
         }
-        elec_store_headers = {
-            "Authorization": "Bearer mock-jwt-store-mgr-token",
-            "X-User-Roles": "STORE_MANAGER,STORE_KEEPER",
-            "X-Store-Id": "9e93cb84-e799-424c-a0e5-ce06175222ec",
-            "X-Store-Code": "STR-1E6BD7",
-            "X-User-Name": "elec_store_keeper",
+        elec_warehouse_headers = {
+            "Authorization": "Bearer mock-jwt-warehouse-mgr-token",
+            "X-User-Roles": "WAREHOUSE_OPERATOR,WAREHOUSE_OPERATOR",
+            "X-Warehouse-Id": "9e93cb84-e799-424c-a0e5-ce06175222ec",
+            "X-Warehouse-Code": "STR-1E6BD7",
+            "X-User-Name": "elec_warehouse_keeper",
         }
 
         # -------------------------------------------------------------
@@ -83,18 +83,18 @@ async def test_e2e_prompt10_assembly_reservation_store_pickup_and_material_issue
             assert total_reserved == Decimal("10.0")
 
         # -------------------------------------------------------------
-        # STEP 4: Verify Store Visibility & Store Isolation
+        # STEP 4: Verify Warehouse Visibility & Warehouse Isolation
         # -------------------------------------------------------------
-        elec_store_id = "9e93cb84-e799-424c-a0e5-ce06175222ec"
-        res_store_metrics = await client.get(
-            f"/api/v1/stores/{elec_store_id}/dashboard-metrics",
-            headers=elec_store_headers,
+        elec_warehouse_ref_id = "9e93cb84-e799-424c-a0e5-ce06175222ec"
+        res_warehouse_metrics = await client.get(
+            f"/api/v1/warehouse/{elec_warehouse_ref_id}/dashboard-metrics",
+            headers=elec_warehouse_headers,
         )
-        assert res_store_metrics.status_code == 200
-        reservations = res_store_metrics.json().get("assembly_reservations", [])
-        motor_store_res = next((r for r in reservations if r["material_code"] == "MAT-MOTOR-001"), None)
-        assert motor_store_res is not None
-        assert float(motor_store_res["reserved_quantity"]) == 10.0
+        assert res_warehouse_metrics.status_code == 200
+        reservations = res_warehouse_metrics.json().get("assembly_reservations", [])
+        motor_warehouse_res = next((r for r in reservations if r["material_code"] == "MAT-MOTOR-001"), None)
+        assert motor_warehouse_res is not None
+        assert float(motor_warehouse_res["reserved_quantity"]) == 10.0
 
         # -------------------------------------------------------------
         # STEP 5 & 6: Verify Pickup Tasks & Material Issue Completed

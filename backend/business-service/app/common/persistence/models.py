@@ -724,5 +724,7 @@ class SupplierUserModel(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     must_change_password: Mapped[bool] = mapped_column(default=False, nullable=False)
+    auth_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    auth_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     supplier: Mapped["SupplierModel"] = relationship("SupplierModel")

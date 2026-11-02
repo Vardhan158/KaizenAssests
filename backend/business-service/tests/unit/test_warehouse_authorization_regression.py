@@ -1,6 +1,6 @@
 """
 Regression test for Warehouse authorization & permissions on storage and inventory endpoints.
-Verifies that Warehouse users have full access to warehouse endpoints, while Store Managers
+Verifies that Warehouse users have full access to warehouse endpoints, while Warehouse Operators
 remain properly restricted from global gate/storage endpoints.
 """
 import pytest
@@ -58,17 +58,17 @@ async def test_manager_mock_token_has_explicit_approval_permissions_only():
 
 
 @pytest.mark.asyncio
-async def test_store_manager_restricted_from_global_warehouse_endpoints():
+async def test_warehouse_operator_restricted_from_global_warehouse_endpoints():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        store_mgr_headers = {
-            "Authorization": "Bearer mock-jwt-store-manager-elec",
+        warehouse_mgr_headers = {
+            "Authorization": "Bearer mock-jwt-warehouse-operator-elec",
         }
 
-        # 1. Store Manager should NOT have access to global gate inventory transactions (403 Forbidden)
-        res_tx = await client.get("/api/gate-entries/inventory-transactions", headers=store_mgr_headers)
-        assert res_tx.status_code == 403, f"Store manager should get 403 on global transactions, got: {res_tx.status_code}"
+        # 1. Warehouse Operator should NOT have access to global gate inventory transactions (403 Forbidden)
+        res_tx = await client.get("/api/gate-entries/inventory-transactions", headers=warehouse_mgr_headers)
+        assert res_tx.status_code == 403, f"Warehouse manager should get 403 on global transactions, got: {res_tx.status_code}"
 
-        # 2. Store Manager should NOT have access to another Store's inventory locations (403 Forbidden)
-        res_loc = await client.get("/api/storage/putaway-tasks/inventory-locations?store_id=00000000-0000-0000-0000-000000000000", headers=store_mgr_headers)
-        assert res_loc.status_code == 403, f"Store manager should get 403 on cross-store locations, got: {res_loc.status_code}"
+        # 2. Warehouse Operator should NOT have access to another Warehouse's inventory locations (403 Forbidden)
+        res_loc = await client.get("/api/storage/putaway-tasks/inventory-locations?warehouse_ref_id=00000000-0000-0000-0000-000000000000", headers=warehouse_mgr_headers)
+        assert res_loc.status_code == 403, f"Warehouse manager should get 403 on cross-warehouse locations, got: {res_loc.status_code}"

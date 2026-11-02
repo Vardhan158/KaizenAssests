@@ -6,6 +6,7 @@ import {
   Loader2,
   PackagePlus,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   ToggleLeft,
@@ -56,6 +57,7 @@ function SupplierMaterials() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [uomFilter, setUomFilter] = useState("ALL");
+  const [materialPage, setMaterialPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -99,6 +101,12 @@ function SupplierMaterials() {
       ),
     [materials, query, uomFilter],
   );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / 10));
+  const currentPage = Math.min(materialPage, pageCount);
+  const pageStart = (currentPage - 1) * 10;
+  const pagedMaterials = filtered.slice(pageStart, pageStart + 10);
+  useEffect(() => { setMaterialPage(1); }, [query, uomFilter]);
+  useEffect(() => { setMaterialPage(page => Math.min(page, pageCount)); }, [pageCount]);
   const uoms = [...new Set([...UOMS, ...materials.map((m) => m.uom).filter(Boolean)])];
   const openAdd = async () => {
     setEditing(null);
@@ -216,31 +224,47 @@ function SupplierMaterials() {
     <TooltipProvider delayDuration={150}>
       <AppShell
         title={
-          <span className="inline-flex items-center gap-2">
-            Materials
+          <span className="supplier-page-title inline-flex items-center gap-3">
+            <span className="supplier-page-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+              <PackagePlus className="size-5" aria-hidden="true" />
+            </span>
+            Material Master
           </span>
         }
         subtitle="Create and manage the materials available for your ASN submissions."
         actions={
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={openAdd}
-                className="h-10 rounded-lg bg-primary text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
-              >
-                <Plus className="size-4" /> Add Material
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent
-              side="bottom"
-              className="rounded-lg border border-border bg-popover text-xs font-medium text-popover-foreground shadow-soft"
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              data-refresh-control="true"
+              aria-label="Refresh material master"
+              title="Refresh material master"
+              disabled={loading}
+              onClick={() => void loadMaterials()}
             >
-              Add a new material to your supplier catalog.
-            </TooltipContent>
-          </Tooltip>
+              {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={openAdd}
+                  className="h-10 rounded-lg bg-primary text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
+                >
+                  <Plus className="size-4" /> Add Material
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                className="rounded-lg border border-border bg-popover text-xs font-medium text-popover-foreground shadow-soft"
+              >
+                Add a new material to your supplier catalog.
+              </TooltipContent>
+            </Tooltip>
+          </div>
         }
       >
-        <Card className="rounded-xl border-border bg-card shadow-sm">
+        <Card className="supplier-module-page rounded-xl border-border bg-card shadow-sm">
           <CardHeader className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <CardTitle className="flex items-center gap-2 text-base font-semibold">
               <PackagePlus className="size-4 text-primary" /> Material catalog
@@ -358,7 +382,7 @@ function SupplierMaterials() {
                           </td>
                         </tr>
                       ) : (
-                        filtered.map((m) => (
+                        pagedMaterials.map((m) => (
                           <tr key={m.id || m.code} className="transition-colors hover:bg-muted/40">
                             <td className="px-4 py-3 font-mono font-medium text-primary">
                               {m.code || "—"}
@@ -443,12 +467,15 @@ function SupplierMaterials() {
                 </div>
                 {!loading && !error && (
                   <div
-                    className="border-t border-border px-4 py-3 text-xs text-muted-foreground sm:px-5"
+                    className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted-foreground sm:px-5"
                     aria-live="polite"
                   >
-                    {filtered.length === materials.length
-                      ? `${filtered.length} ${filtered.length === 1 ? "material" : "materials"}`
-                      : `${filtered.length} of ${materials.length} materials`}
+                    <span>Showing {filtered.length ? pageStart + 1 : 0}–{Math.min(pageStart + 10, filtered.length)} of {filtered.length} materials</span>
+                    <nav aria-label="Material catalog pagination" className="flex items-center gap-3">
+                      <Button size="sm" variant="outline" disabled={currentPage === 1} onClick={() => setMaterialPage(currentPage - 1)}>Previous</Button>
+                      <span>{currentPage} / {pageCount}</span>
+                      <Button size="sm" variant="outline" disabled={currentPage === pageCount} onClick={() => setMaterialPage(currentPage + 1)}>Next</Button>
+                    </nav>
                   </div>
                 )}
               </>
@@ -456,7 +483,7 @@ function SupplierMaterials() {
           </CardContent>
         </Card>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+          <DialogContent id="supplier-material-form-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
             <DialogHeader>
               <DialogTitle>{editing ? "Edit Material" : "Add Material"}</DialogTitle>
             </DialogHeader>
@@ -569,7 +596,7 @@ function SupplierMaterials() {
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {pendingAction?.type === "delete"
-                  ? `Delete ${pendingAction.material?.code}? This cannot be undone. Materials referenced by transactions will be deactivated instead.`
+                  ? `Delete ${pendingAction.material?.code} from the catalog? This cannot be undone. Existing transaction history will be preserved.`
                   : `Deactivate this material? It will no longer be available for new ASN submissions.`}
               </AlertDialogDescription>
             </AlertDialogHeader>

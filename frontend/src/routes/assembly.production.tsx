@@ -1,5 +1,5 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useSearch, createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
@@ -102,6 +102,8 @@ function AssemblyProductionPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
+  const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
+  useEffect(() => { if (typeof moduleSearchParams.search === "string") setSearch(moduleSearchParams.search); }, [moduleSearchParams.search]);
   const [statusFilter, setStatusFilter] = useState("ALL");
 
   // Complete Production Modal State
@@ -276,6 +278,14 @@ function AssemblyProductionPage() {
           )),
     );
   }, [orders, search, statusFilter]);
+  const [productionPage, setProductionPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(filteredOrders.length / 10));
+  const currentPage = Math.min(productionPage, pageCount);
+  const pageStart = (currentPage - 1) * 10;
+  const pagedOrders = filteredOrders.slice(pageStart, pageStart + 10);
+  useEffect(() => { setProductionPage(1); }, [search, statusFilter]);
+  useEffect(() => { setProductionPage(page => Math.min(page, pageCount)); }, [pageCount]);
+
 
   return (
     <AppShell
@@ -301,25 +311,20 @@ function AssemblyProductionPage() {
             <Boxes className="size-3.5 text-amber-500" />
             Material Requests
           </Button>
-          <Button
+          <Button data-refresh-control="true" aria-label="Refresh" title="Refresh"
             variant="outline"
             size="sm"
             onClick={() => fetchOrders(true)}
             disabled={refreshing}
             className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80"
           >
-            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} />
-            Refresh
-          </Button>
+            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} /></Button>
         </div>
       }
     >
       <div className="space-y-6">
         {/* Main Work Center Table Card */}
         <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-soft space-y-4">
-          <p className="text-xs text-muted-foreground" aria-label="Workflow">
-            Materials received &rarr; Start production &rarr; Record output &rarr; Quality check
-          </p>
           {/* Header & Controls */}
           <div className="space-y-4 pb-4 border-b border-border/60">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -354,7 +359,7 @@ function AssemblyProductionPage() {
                     aria-pressed={statusFilter === tab.key}
                     onClick={() => setStatusFilter(tab.key)}
                     className={cn(
-                      "px-2.5 py-1 text-xs font-semibold rounded-lg transition-all",
+                      "min-h-9 px-3 py-2 text-sm font-medium rounded-lg transition-all",
                       statusFilter === tab.key
                         ? "bg-card text-foreground shadow-xs border border-border/50"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted",
@@ -366,7 +371,7 @@ function AssemblyProductionPage() {
               </div>
 
               {/* Search input */}
-              <div className="relative min-w-[240px]">
+              <div className="relative w-full min-w-0 lg:w-80">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                 <input
                   type="text"
@@ -374,7 +379,7 @@ function AssemblyProductionPage() {
                   placeholder="Search order or product..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="h-8 w-full rounded-lg border border-border bg-card pl-8 pr-7 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
+                  className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
                 />
                 {search && (
                   <button
@@ -439,7 +444,7 @@ function AssemblyProductionPage() {
             </div>
           ) : (
             <div className="overflow-x-auto -mx-5 px-5">
-              <table className="w-full text-left text-sm mt-1">
+              <table className="w-full min-w-[960px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                     <th className="py-3 px-3">Order Number</th>
@@ -452,7 +457,7 @@ function AssemblyProductionPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {filteredOrders.map((order) => {
+                  {pagedOrders.map((order) => {
                     const percent =
                       order.target_quantity > 0
                         ? Math.min(
@@ -639,6 +644,14 @@ function AssemblyProductionPage() {
               </table>
             </div>
           )}
+          {!loading && filteredOrders.length > 0 && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
+            <p className="text-muted-foreground">Showing {pageStart + 1} to {Math.min(pageStart + 10, filteredOrders.length)} of {filteredOrders.length} orders</p>
+            <nav aria-label="Production pagination" className="flex items-center gap-3">
+              <Button size="sm" variant="outline" disabled={currentPage === 1} onClick={() => setProductionPage(currentPage - 1)}>Previous</Button>
+              <span>{currentPage} / {pageCount}</span>
+              <Button size="sm" variant="outline" disabled={currentPage === pageCount} onClick={() => setProductionPage(currentPage + 1)}>Next</Button>
+            </nav>
+          </div>}
         </div>
 
         <Dialog open={!!consumptionOrder} onOpenChange={(open) => !open && !savingConsumption && setConsumptionOrder(null)}>

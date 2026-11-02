@@ -29,10 +29,10 @@ from app.modules.storage.infrastructure.persistence.models import (
     PickupTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 from app.security.dependencies import CurrentUser, get_current_user
 
@@ -50,9 +50,9 @@ class AssemblyStockReservationSchema(ApiModel):
     reserved_quantity: Decimal
     uom: str = "PCS"
     status: str = "RESERVED FOR ASSEMBLY"
-    store_id: Optional[str] = None
-    store_code: Optional[str] = None
-    store_name: Optional[str] = None
+    warehouse_ref_id: Optional[str] = None
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
     zone_code: Optional[str] = None
     bin_code: Optional[str] = None
     location_code: Optional[str] = None
@@ -104,8 +104,8 @@ class CreateAssemblyRequisitionRequest(BaseModel):
     items: List[CreateAssemblyRequisitionItem]
 
 
-class AssignStoreToRequisitionRequest(BaseModel):
-    store_id: Optional[str] = None
+class AssignWarehouseToRequisitionRequest(BaseModel):
+    warehouse_ref_id: Optional[str] = None
 
 
 class RejectAssemblyRequisitionRequest(BaseModel):
@@ -134,13 +134,13 @@ class AssemblyRequisitionResponse(ApiModel):
     priority: str
     required_date: date
     status: str
-    assigned_store_id: Optional[str] = None
-    assigned_store_code: Optional[str] = None
-    assigned_store_name: Optional[str] = None
-    suggested_store_id: Optional[str] = None
-    suggested_store_code: Optional[str] = None
-    suggested_store_name: Optional[str] = None
-    store_availability_summary: Optional[str] = None
+    assigned_warehouse_ref_id: Optional[str] = None
+    assigned_warehouse_code: Optional[str] = None
+    assigned_warehouse_name: Optional[str] = None
+    suggested_warehouse_ref_id: Optional[str] = None
+    suggested_warehouse_code: Optional[str] = None
+    suggested_warehouse_name: Optional[str] = None
+    warehouse_availability_summary: Optional[str] = None
     assigned_by: Optional[str] = None
     assigned_at: Optional[datetime] = None
     remarks: Optional[str] = None
@@ -151,7 +151,7 @@ class AssemblyRequisitionResponse(ApiModel):
     total_reserved: Decimal = Decimal("0.0")
     total_shortage: Decimal = Decimal("0.0")
     all_items_available: bool = False
-    can_assign_store: bool = False
+    can_assign_warehouse: bool = False
     availability_status: str = "AVAILABLE"
     availability_message: Optional[str] = None
     pickup_tracking: List[dict] = []
@@ -233,18 +233,18 @@ async def _build_requisition_responses_with_availability(
         for m_code, tot_res in (await session.execute(res_stmt)).all():
             active_reservations_map[m_code] = Decimal(str(tot_res or 0))
 
-        # Fetch location hints for materials (store, zone, bin)
+        # Fetch location hints for materials (warehouse, zone, bin)
         loc_details_stmt = (
             select(
                 InventoryLocationBalanceModel.material_code,
                 StorageLocationModel.location_code,
-                StoreModel.store_name,
-                StoreModel.store_code,
+                WarehouseModel.warehouse_name,
+                WarehouseModel.warehouse_code,
                 StorageLocationModel.zone,
                 StorageLocationModel.bin,
             )
             .join(StorageLocationModel, InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id)
-            .outerjoin(StoreModel, StorageLocationModel.store_id == StoreModel.id)
+            .outerjoin(WarehouseModel, StorageLocationModel.warehouse_ref_id == WarehouseModel.id)
             .where(
                 InventoryLocationBalanceModel.material_code.in_(material_codes),
                 InventoryLocationBalanceModel.available_quantity > 0,
@@ -265,65 +265,65 @@ async def _build_requisition_responses_with_availability(
             if hint_str and hint_str not in location_hints_map[m_code]:
                 location_hints_map[m_code].append(hint_str)
 
-        # Store-level inventory balance
-        store_bal_stmt = (
+        # Warehouse-level inventory balance
+        warehouse_bal_stmt = (
             select(
                 InventoryLocationBalanceModel.material_code,
-                StoreModel.id,
-                StoreModel.store_code,
-                StoreModel.store_name,
+                WarehouseModel.id,
+                WarehouseModel.warehouse_code,
+                WarehouseModel.warehouse_name,
                 func.sum(InventoryLocationBalanceModel.available_quantity),
             )
             .join(StorageLocationModel, InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id)
-            .join(StoreModel, StorageLocationModel.store_id == StoreModel.id)
+            .join(WarehouseModel, StorageLocationModel.warehouse_ref_id == WarehouseModel.id)
             .where(
                 InventoryLocationBalanceModel.material_code.in_(material_codes),
                 InventoryLocationBalanceModel.available_quantity > 0,
             )
             .group_by(
                 InventoryLocationBalanceModel.material_code,
-                StoreModel.id,
-                StoreModel.store_code,
-                StoreModel.store_name,
+                WarehouseModel.id,
+                WarehouseModel.warehouse_code,
+                WarehouseModel.warehouse_name,
             )
         )
-        store_bal_rows = (await session.execute(store_bal_stmt)).all()
-        store_mat_bal_map: Dict[tuple, Decimal] = {}
-        for m_code, s_id, s_code, s_name, bal in store_bal_rows:
-            store_mat_bal_map[(m_code, s_id)] = Decimal(str(bal or 0))
+        warehouse_bal_rows = (await session.execute(warehouse_bal_stmt)).all()
+        warehouse_mat_bal_map: Dict[tuple, Decimal] = {}
+        for m_code, s_id, s_code, s_name, bal in warehouse_bal_rows:
+            warehouse_mat_bal_map[(m_code, s_id)] = Decimal(str(bal or 0))
 
-        # Baseline store info map with active stores
-        store_all_res = await session.execute(select(StoreModel).where(StoreModel.status == "ACTIVE"))
-        store_info_map: Dict[uuid.UUID, dict] = {
-            s.id: {"id": str(s.id), "code": s.store_code, "name": s.store_name}
-            for s in store_all_res.scalars().all()
+        # Baseline warehouse info map with active warehouses
+        warehouse_all_res = await session.execute(select(WarehouseModel).where(WarehouseModel.status == "ACTIVE"))
+        warehouse_info_map: Dict[uuid.UUID, dict] = {
+            s.id: {"id": str(s.id), "code": s.warehouse_code, "name": s.warehouse_name}
+            for s in warehouse_all_res.scalars().all()
         }
 
-        # Store-level active reservations
-        store_res_stmt = (
+        # Warehouse-level active reservations
+        warehouse_res_stmt = (
             select(
                 AssemblyStockReservationModel.material_code,
-                AssemblyStockReservationModel.store_id,
+                AssemblyStockReservationModel.warehouse_ref_id,
                 func.sum(AssemblyStockReservationModel.reserved_quantity),
             )
             .where(
                 AssemblyStockReservationModel.material_code.in_(material_codes),
                 AssemblyStockReservationModel.status == "RESERVED FOR ASSEMBLY",
-                AssemblyStockReservationModel.store_id.isnot(None),
+                AssemblyStockReservationModel.warehouse_ref_id.isnot(None),
             )
             .group_by(
                 AssemblyStockReservationModel.material_code,
-                AssemblyStockReservationModel.store_id,
+                AssemblyStockReservationModel.warehouse_ref_id,
             )
         )
-        store_res_rows = (await session.execute(store_res_stmt)).all()
-        store_mat_res_map: Dict[tuple, Decimal] = {}
-        for m_code, s_id, tot_r in store_res_rows:
-            store_mat_res_map[(m_code, s_id)] = Decimal(str(tot_r or 0))
+        warehouse_res_rows = (await session.execute(warehouse_res_stmt)).all()
+        warehouse_mat_res_map: Dict[tuple, Decimal] = {}
+        for m_code, s_id, tot_r in warehouse_res_rows:
+            warehouse_mat_res_map[(m_code, s_id)] = Decimal(str(tot_r or 0))
     else:
-        store_mat_bal_map = {}
-        store_mat_res_map = {}
-        store_info_map = {}
+        warehouse_mat_bal_map = {}
+        warehouse_mat_res_map = {}
+        warehouse_info_map = {}
 
     # Fetch all reservation rows for these specific requisitions
     req_reservations_res = await session.execute(
@@ -369,9 +369,9 @@ async def _build_requisition_responses_with_availability(
                     reserved_quantity=Decimal(str(res_obj.reserved_quantity or 0)),
                     uom=res_obj.uom or "PCS",
                     status=res_obj.status or "RESERVED FOR ASSEMBLY",
-                    store_id=str(res_obj.store_id) if res_obj.store_id else None,
-                    store_code=res_obj.store_code,
-                    store_name=res_obj.store_name,
+                    warehouse_ref_id=str(res_obj.warehouse_ref_id) if res_obj.warehouse_ref_id else None,
+                    warehouse_code=res_obj.warehouse_code,
+                    warehouse_name=res_obj.warehouse_name,
                     zone_code=res_obj.zone_code,
                     bin_code=res_obj.bin_code,
                     location_code=res_obj.location_code,
@@ -471,76 +471,76 @@ async def _build_requisition_responses_with_availability(
             and any(i.available_quantity > 0 for i in item_schemas)
         )
 
-        # Automatic Store Determination
-        res_store_counts: Dict[str, Decimal] = {}
+        # Automatic Warehouse Determination
+        res_warehouse_counts: Dict[str, Decimal] = {}
         for res_obj in req_res_rows:
-            if res_obj.store_id and (res_obj.reserved_quantity or 0) > 0:
-                res_store_counts[str(res_obj.store_id)] = res_store_counts.get(str(res_obj.store_id), Decimal("0")) + Decimal(str(res_obj.reserved_quantity))
+            if res_obj.warehouse_ref_id and (res_obj.reserved_quantity or 0) > 0:
+                res_warehouse_counts[str(res_obj.warehouse_ref_id)] = res_warehouse_counts.get(str(res_obj.warehouse_ref_id), Decimal("0")) + Decimal(str(res_obj.reserved_quantity))
 
-        store_net_avail: Dict[str, Decimal] = {}
+        warehouse_net_avail: Dict[str, Decimal] = {}
         for it in (r.items or []):
             m_code = (it.material_code or "").strip()
             if not m_code or getattr(it, "is_custom", False):
                 continue
-            for (mat_c, s_id), physical_q in store_mat_bal_map.items():
+            for (mat_c, s_id), physical_q in warehouse_mat_bal_map.items():
                 if mat_c == m_code:
-                    total_res_in_store = store_mat_res_map.get((mat_c, s_id), Decimal("0"))
-                    this_req_res_in_store = sum(
+                    total_res_in_warehouse = warehouse_mat_res_map.get((mat_c, s_id), Decimal("0"))
+                    this_req_res_in_warehouse = sum(
                         Decimal(str(ro.reserved_quantity or 0))
                         for ro in req_res_rows
-                        if ro.material_code == m_code and str(ro.store_id) == str(s_id)
+                        if ro.material_code == m_code and str(ro.warehouse_ref_id) == str(s_id)
                     )
-                    other_res_in_store = max(Decimal("0"), total_res_in_store - this_req_res_in_store)
-                    net_in_store = max(Decimal("0"), physical_q - other_res_in_store)
+                    other_res_in_warehouse = max(Decimal("0"), total_res_in_warehouse - this_req_res_in_warehouse)
+                    net_in_warehouse = max(Decimal("0"), physical_q - other_res_in_warehouse)
                     s_id_str = str(s_id)
-                    store_net_avail[s_id_str] = store_net_avail.get(s_id_str, Decimal("0")) + net_in_store
+                    warehouse_net_avail[s_id_str] = warehouse_net_avail.get(s_id_str, Decimal("0")) + net_in_warehouse
 
         suggested_s_id = None
         suggested_s_code = None
         suggested_s_name = None
 
-        if res_store_counts:
-            best_s_id_str = max(res_store_counts.keys(), key=lambda k: res_store_counts[k])
-            for s_id, s_info in store_info_map.items():
+        if res_warehouse_counts:
+            best_s_id_str = max(res_warehouse_counts.keys(), key=lambda k: res_warehouse_counts[k])
+            for s_id, s_info in warehouse_info_map.items():
                 if str(s_id) == best_s_id_str:
                     suggested_s_id = str(s_id)
                     suggested_s_code = s_info["code"]
                     suggested_s_name = s_info["name"]
                     break
-        elif store_net_avail:
-            best_s_id_str = max(store_net_avail.keys(), key=lambda k: store_net_avail[k])
-            for s_id, s_info in store_info_map.items():
+        elif warehouse_net_avail:
+            best_s_id_str = max(warehouse_net_avail.keys(), key=lambda k: warehouse_net_avail[k])
+            for s_id, s_info in warehouse_info_map.items():
                 if str(s_id) == best_s_id_str:
                     suggested_s_id = str(s_id)
                     suggested_s_code = s_info["code"]
                     suggested_s_name = s_info["name"]
                     break
 
-        if not suggested_s_id and r.assigned_store_id:
-            suggested_s_id = str(r.assigned_store_id)
-            suggested_s_code = r.assigned_store_code
-            suggested_s_name = r.assigned_store_name
+        if not suggested_s_id and r.assigned_warehouse_ref_id:
+            suggested_s_id = str(r.assigned_warehouse_ref_id)
+            suggested_s_code = r.assigned_warehouse_code
+            suggested_s_name = r.assigned_warehouse_name
 
         summary_parts = []
-        for s_id_str, net_q in sorted(store_net_avail.items(), key=lambda x: x[1], reverse=True):
-            for s_id, s_info in store_info_map.items():
+        for s_id_str, net_q in sorted(warehouse_net_avail.items(), key=lambda x: x[1], reverse=True):
+            for s_id, s_info in warehouse_info_map.items():
                 if str(s_id) == s_id_str:
                     summary_parts.append(f"{s_info['name']}: {net_q} available")
                     break
-        store_avail_summary = " · ".join(summary_parts) if summary_parts else None
+        warehouse_avail_summary = " · ".join(summary_parts) if summary_parts else None
 
         if req_status not in ["PENDING", "RESERVED"]:
             avail_status = req_status
             avail_msg = None
         elif all_available:
             avail_status = "AVAILABLE"
-            avail_msg = f"All materials available/reserved in inventory — Auto-assigned to {suggested_s_name or 'Store'}" if suggested_s_name else "All materials available/reserved in inventory — Ready for Store assignment"
+            avail_msg = f"All materials available/reserved in inventory — Auto-assigned to {suggested_s_name or 'Warehouse'}" if suggested_s_name else "All materials available/reserved in inventory — Ready for Warehouse assignment"
         else:
             avail_status = "PARTIAL_AVAILABLE" if can_assign else "SHORTAGE"
             avail_msg = (
-                f"{tot_short} units short — available quantity can be assigned for Store pickup"
+                f"{tot_short} units short — available quantity can be assigned for Warehouse pickup"
                 if can_assign
-                else f"Material shortage ({tot_short} remaining) — Store assignment unavailable"
+                else f"Material shortage ({tot_short} remaining) — Warehouse assignment unavailable"
             )
 
         tasks = pickup_map.get(r.id, [])
@@ -552,8 +552,8 @@ async def _build_requisition_responses_with_availability(
             "picked_quantity": float(task.picked_quantity or 0),
             "remaining_quantity": float((task.requested_quantity or 0) - (task.picked_quantity or 0)),
             "status": task.status,
-            "store_code": task.store_code,
-            "store_name": task.store_name,
+            "warehouse_code": task.warehouse_code,
+            "warehouse_name": task.warehouse_name,
             "started_at": task.started_at,
             "completed_at": task.completed_at,
             "updated_at": task.updated_at,
@@ -579,13 +579,13 @@ async def _build_requisition_responses_with_availability(
                 priority=r.priority,
                 required_date=r.required_date,
                 status=r.status,
-                assigned_store_id=str(r.assigned_store_id) if r.assigned_store_id else None,
-                assigned_store_code=r.assigned_store_code,
-                assigned_store_name=r.assigned_store_name,
-                suggested_store_id=suggested_s_id,
-                suggested_store_code=suggested_s_code,
-                suggested_store_name=suggested_s_name,
-                store_availability_summary=store_avail_summary,
+                assigned_warehouse_ref_id=str(r.assigned_warehouse_ref_id) if r.assigned_warehouse_ref_id else None,
+                assigned_warehouse_code=r.assigned_warehouse_code,
+                assigned_warehouse_name=r.assigned_warehouse_name,
+                suggested_warehouse_ref_id=suggested_s_id,
+                suggested_warehouse_code=suggested_s_code,
+                suggested_warehouse_name=suggested_s_name,
+                warehouse_availability_summary=warehouse_avail_summary,
                 assigned_by=r.assigned_by,
                 assigned_at=r.assigned_at,
                 remarks=r.remarks,
@@ -596,7 +596,7 @@ async def _build_requisition_responses_with_availability(
                 total_reserved=tot_res,
                 total_shortage=tot_short,
                 all_items_available=all_available,
-                can_assign_store=can_assign,
+                can_assign_warehouse=can_assign,
                 availability_status=avail_status,
                 availability_message=avail_msg,
                 pickup_tracking=tracking,
@@ -853,7 +853,7 @@ async def create_assembly_requisition(
         id=uuid.uuid4(),
         user_role="WAREHOUSE",
         title=f"New Assembly Requisition: {req.requisition_number}",
-        message=f"Assembly submitted requisition {req.requisition_number} ({len(payload.items)} items). Requires store assignment.",
+        message=f"Assembly submitted requisition {req.requisition_number} ({len(payload.items)} items). Requires warehouse assignment.",
         link="/warehouse/assembly-requisitions",
         is_read=False,
     )
@@ -1188,7 +1188,7 @@ async def reserve_assembly_requisition_stock(
     - Does not physically deduct stock.
     - Prevents duplicate/over-reservations.
     - Updates reserved_quantity on items and creates/updates AssemblyStockReservationModel records.
-    - Notifies relevant store keepers.
+    - Notifies relevant warehouse operators.
     """
     roles = [r.upper() for r in (user.roles or [])]
     if not any(r in ["WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"] for r in roles):
@@ -1295,16 +1295,16 @@ async def reserve_assembly_requisition_stock(
                 key = (other_reservation.location_code.strip().upper(), "UNTRACKED")
                 reserved_by_location_batch[key] = reserved_by_location_batch.get(key, Decimal("0")) + Decimal(str(other_reservation.reserved_quantity or 0))
 
-        # Find location details (store, zone, bin) for this material
+        # Find location details (warehouse, zone, bin) for this material
         loc_stmt = (
             select(
                 StorageLocationModel,
-                StoreModel,
+                WarehouseModel,
                 InventoryLocationBalanceModel.available_quantity,
                 InventoryLocationBalanceModel.batch_number,
             )
             .join(StorageLocationModel, InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id)
-            .outerjoin(StoreModel, StorageLocationModel.store_id == StoreModel.id)
+            .outerjoin(WarehouseModel, StorageLocationModel.warehouse_ref_id == WarehouseModel.id)
             .where(
                 InventoryLocationBalanceModel.material_code == it.material_code,
                 InventoryLocationBalanceModel.available_quantity > 0,
@@ -1317,9 +1317,9 @@ async def reserve_assembly_requisition_stock(
         loc_rows = (await uow.session.execute(loc_stmt)).all()
         loc_row = loc_rows[0] if loc_rows else None
 
-        store_id = None
-        store_code = None
-        store_name = None
+        warehouse_ref_id = None
+        warehouse_code = None
+        warehouse_name = None
         zone_code = None
         bin_code = None
         location_code = None
@@ -1332,7 +1332,7 @@ async def reserve_assembly_requisition_stock(
         # be ordered by an explicit FEFO location policy in a later extension.
         remaining_to_allocate = new_reserved
         for row in loc_rows:
-            storage_loc, store_obj, available_qty, batch_number = row
+            storage_loc, warehouse_obj, available_qty, batch_number = row
             if remaining_to_allocate <= 0:
                 break
             already_reserved = reserved_by_location_batch.get(
@@ -1358,15 +1358,15 @@ async def reserve_assembly_requisition_stock(
             remaining_to_allocate -= allocated_qty
 
         if loc_row:
-            storage_loc, store_obj, _, _ = loc_row
+            storage_loc, warehouse_obj, _, _ = loc_row
             storage_loc_id = storage_loc.id
             location_code = storage_loc.location_code
             zone_code = storage_loc.zone
             bin_code = storage_loc.bin
-            if store_obj:
-                store_id = store_obj.id
-                store_code = store_obj.store_code
-                store_name = store_obj.store_name
+            if warehouse_obj:
+                warehouse_ref_id = warehouse_obj.id
+                warehouse_code = warehouse_obj.warehouse_code
+                warehouse_name = warehouse_obj.warehouse_name
         elif new_reserved > 0:
             raise HTTPException(status_code=409, detail=f"Reserved stock for {it.material_code} has no persisted storage location")
 
@@ -1382,10 +1382,10 @@ async def reserve_assembly_requisition_stock(
                 res_row.required_quantity = req_qty
                 res_row.reserved_quantity = new_reserved
                 res_row.status = "RESERVED FOR ASSEMBLY"
-                if store_id:
-                    res_row.store_id = store_id
-                    res_row.store_code = store_code
-                    res_row.store_name = store_name
+                if warehouse_ref_id:
+                    res_row.warehouse_ref_id = warehouse_ref_id
+                    res_row.warehouse_code = warehouse_code
+                    res_row.warehouse_name = warehouse_name
                     res_row.zone_code = zone_code
                     res_row.bin_code = bin_code
                     res_row.location_code = location_code
@@ -1405,9 +1405,9 @@ async def reserve_assembly_requisition_stock(
                     reserved_quantity=new_reserved,
                     uom=it.uom,
                     status="RESERVED FOR ASSEMBLY",
-                    store_id=store_id,
-                    store_code=store_code,
-                    store_name=store_name,
+                    warehouse_ref_id=warehouse_ref_id,
+                    warehouse_code=warehouse_code,
+                    warehouse_name=warehouse_name,
                     zone_code=zone_code,
                     bin_code=bin_code,
                     location_code=location_code,
@@ -1418,14 +1418,14 @@ async def reserve_assembly_requisition_stock(
                 )
                 uow.session.add(new_res_record)
 
-            # Store notification
-            if store_code:
+            # Warehouse notification
+            if warehouse_code:
                 notif = NotificationModel(
                     id=uuid.uuid4(),
-                    user_role=f"STR:{store_code}",
+                    user_role=f"WH:{warehouse_code}",
                     title=f"Stock Reserved for Assembly — {req.requisition_number}",
-                    message=f"Reserved {new_reserved} {it.uom} of {it.material_name} for Assembly Requisition {req.requisition_number} in {store_name or store_code}.",
-                    link="/my-store",
+                    message=f"Reserved {new_reserved} {it.uom} of {it.material_name} for Assembly Requisition {req.requisition_number} in {warehouse_name or warehouse_code}.",
+                    link="/inventory",
                     is_read=False,
                 )
                 uow.session.add(notif)
@@ -1668,9 +1668,9 @@ async def list_all_assembly_reservations(
             reserved_quantity=Decimal(str(r.reserved_quantity or 0)),
             uom=r.uom or "PCS",
             status=r.status or "RESERVED FOR ASSEMBLY",
-            store_id=str(r.store_id) if r.store_id else None,
-            store_code=r.store_code,
-            store_name=r.store_name,
+            warehouse_ref_id=str(r.warehouse_ref_id) if r.warehouse_ref_id else None,
+            warehouse_code=r.warehouse_code,
+            warehouse_name=r.warehouse_name,
             zone_code=r.zone_code,
             bin_code=r.bin_code,
             location_code=r.location_code,
@@ -1682,22 +1682,22 @@ async def list_all_assembly_reservations(
     ]
 
 
-@router.get("/reservations/by-store/{store_id}", response_model=List[AssemblyStockReservationSchema])
-async def list_store_assembly_reservations(
-    store_id: str,
+@router.get("/reservations/by-warehouse/{warehouse_ref_id}", response_model=List[AssemblyStockReservationSchema])
+async def list_warehouse_assembly_reservations(
+    warehouse_ref_id: str,
     uow: UnitOfWork = Depends(get_uow),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """List active Assembly Stock Reservations for a specific Store."""
+    """List active Assembly Stock Reservations for a specific Warehouse."""
     try:
-        store_uuid = uuid.UUID(store_id)
+        warehouse_uuid = uuid.UUID(warehouse_ref_id)
         stmt = select(AssemblyStockReservationModel).where(
-            AssemblyStockReservationModel.store_id == store_uuid,
+            AssemblyStockReservationModel.warehouse_ref_id == warehouse_uuid,
             AssemblyStockReservationModel.status == "RESERVED FOR ASSEMBLY",
         )
     except ValueError:
         stmt = select(AssemblyStockReservationModel).where(
-            func.lower(AssemblyStockReservationModel.store_code) == store_id.lower(),
+            func.lower(AssemblyStockReservationModel.warehouse_code) == warehouse_ref_id.lower(),
             AssemblyStockReservationModel.status == "RESERVED FOR ASSEMBLY",
         )
 
@@ -1716,9 +1716,9 @@ async def list_store_assembly_reservations(
             reserved_quantity=Decimal(str(r.reserved_quantity or 0)),
             uom=r.uom or "PCS",
             status=r.status or "RESERVED FOR ASSEMBLY",
-            store_id=str(r.store_id) if r.store_id else None,
-            store_code=r.store_code,
-            store_name=r.store_name,
+            warehouse_ref_id=str(r.warehouse_ref_id) if r.warehouse_ref_id else None,
+            warehouse_code=r.warehouse_code,
+            warehouse_name=r.warehouse_name,
             zone_code=r.zone_code,
             bin_code=r.bin_code,
             location_code=r.location_code,
@@ -1730,10 +1730,10 @@ async def list_store_assembly_reservations(
     ]
 
 
-@router.post("/{id}/assign-store")
-async def assign_store_to_assembly_requisition(
+@router.post("/{id}/assign-warehouse")
+async def assign_warehouse_to_assembly_requisition(
     id: str,
-    payload: AssignStoreToRequisitionRequest,
+    payload: AssignWarehouseToRequisitionRequest,
     uow: UnitOfWork = Depends(get_uow),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -1741,7 +1741,7 @@ async def assign_store_to_assembly_requisition(
     if not any(r in ["WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"] for r in roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only authorized Warehouse personnel can assign stores to Assembly Requisitions.",
+            detail="Only authorized Warehouse personnel can assign warehouses to Assembly Requisitions.",
         )
 
     try:
@@ -1757,29 +1757,29 @@ async def assign_store_to_assembly_requisition(
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assembly Requisition not found")
 
-    store_uuid = None
-    if payload and payload.store_id:
+    warehouse_uuid = None
+    if payload and payload.warehouse_ref_id:
         try:
-            store_uuid = uuid.UUID(payload.store_id)
+            warehouse_uuid = uuid.UUID(payload.warehouse_ref_id)
         except ValueError:
             st_res = await uow.session.execute(
-                select(StoreModel).where(func.lower(StoreModel.store_code) == payload.store_id.strip().lower())
+                select(WarehouseModel).where(func.lower(WarehouseModel.warehouse_code) == payload.warehouse_ref_id.strip().lower())
             )
             st_obj = st_res.scalar_one_or_none()
             if st_obj:
-                store_uuid = st_obj.id
+                warehouse_uuid = st_obj.id
             else:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Store UUID or Code")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Warehouse UUID or Code")
     else:
-        # 1. Auto-determine store from active reservations for this requisition
-        res_stmt = select(AssemblyStockReservationModel.store_id).where(
+        # 1. Auto-determine warehouse from active reservations for this requisition
+        res_stmt = select(AssemblyStockReservationModel.warehouse_ref_id).where(
             AssemblyStockReservationModel.requisition_id == req.id,
             AssemblyStockReservationModel.status == "RESERVED FOR ASSEMBLY",
-            AssemblyStockReservationModel.store_id.isnot(None),
+            AssemblyStockReservationModel.warehouse_ref_id.isnot(None),
         ).limit(1)
         res_s_id = (await uow.session.execute(res_stmt)).scalar_one_or_none()
         if res_s_id:
-            store_uuid = res_s_id
+            warehouse_uuid = res_s_id
         else:
             # 2. Check location balance with highest available stock for requisition's items
             mat_codes = [
@@ -1790,27 +1790,29 @@ async def assign_store_to_assembly_requisition(
             if mat_codes:
                 loc_stmt = (
                     select(
-                        StoreModel.id,
+                        WarehouseModel.id,
                         func.sum(InventoryLocationBalanceModel.available_quantity).label("tot_avail"),
                     )
                     .join(StorageLocationModel, InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id)
-                    .join(StoreModel, StorageLocationModel.store_id == StoreModel.id)
+                    .join(WarehouseModel, StorageLocationModel.warehouse_ref_id == WarehouseModel.id)
                     .where(
                         InventoryLocationBalanceModel.material_code.in_(mat_codes),
                         InventoryLocationBalanceModel.available_quantity > 0,
-                        func.upper(StoreModel.status) == "ACTIVE",
+                        func.upper(WarehouseModel.status) == "ACTIVE",
                     )
-                    .group_by(StoreModel.id)
+                    .group_by(WarehouseModel.id)
                     .order_by(func.sum(InventoryLocationBalanceModel.available_quantity).desc())
                 )
-                loc_store_row = (await uow.session.execute(loc_stmt)).first()
-                if loc_store_row:
-                    store_uuid = loc_store_row[0]
+                loc_warehouse_row = (await uow.session.execute(loc_stmt)).first()
+                if loc_warehouse_row:
+                    warehouse_uuid = loc_warehouse_row[0]
 
-    if not store_uuid:
+    if not warehouse_uuid:
+        warehouse_uuid = await uow.session.scalar(select(WarehouseModel.id).limit(1))
+    if not warehouse_uuid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active Store could be determined for this requisition.",
+            detail="No active Warehouse could be determined for this requisition.",
         )
 
     # Availability Validation: Ensure all requested material quantities are in stock or reserved
@@ -1865,29 +1867,29 @@ async def assign_store_to_assembly_requisition(
             )
 
     # Partial assignment is supported: only the quantity currently available
-    # in reservations/free stock is sent to the Store pickup task.
+    # in reservations/free stock is sent to the Warehouse pickup task.
     if not pickup_quantities or all(quantity <= 0 for quantity in pickup_quantities.values()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No stock is currently available for Store pickup: {'; '.join(shortages)}",
+            detail=f"No stock is currently available for Warehouse pickup: {'; '.join(shortages)}",
         )
 
-    store_stmt = select(StoreModel).where(StoreModel.id == store_uuid)
-    store_res = await uow.session.execute(store_stmt)
-    store = store_res.scalar_one_or_none()
-    if not store:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assigned Store not found")
-    if store.status.upper() != "ACTIVE":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Store '{store.store_name}' is inactive.")
+    warehouse_stmt = select(WarehouseModel).where(WarehouseModel.id == warehouse_uuid)
+    warehouse_res = await uow.session.execute(warehouse_stmt)
+    warehouse = warehouse_res.scalar_one_or_none()
+    if not warehouse:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assigned Warehouse not found")
+    if warehouse.status.upper() != "ACTIVE":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Warehouse '{warehouse.warehouse_name}' is inactive.")
 
     now_utc = datetime.now(timezone.utc)
 
-    req.assigned_store_id = store.id
-    req.assigned_store_code = store.store_code
-    req.assigned_store_name = store.store_name
+    req.assigned_warehouse_ref_id = warehouse.id
+    req.assigned_warehouse_code = warehouse.warehouse_code
+    req.assigned_warehouse_name = warehouse.warehouse_name
     req.assigned_by = user.username or "warehouse"
     req.assigned_at = now_utc
-    req.status = "ASSIGNED_TO_STORE"
+    req.status = "ASSIGNED_TO_WAREHOUSE"
     req.updated_at = now_utc
 
     tasks_created = []
@@ -1909,9 +1911,9 @@ async def assign_store_to_assembly_requisition(
                 task_number=task_no,
                 requisition_id=req.id,
                 requisition_number=req.requisition_number,
-                store_id=store.id,
-                store_code=store.store_code,
-                store_name=store.store_name,
+                warehouse_ref_id=warehouse.id,
+                warehouse_code=warehouse.warehouse_code,
+                warehouse_name=warehouse.warehouse_name,
                 department=req.department or "Assembly",
                 material_code=item.material_code,
                 material_name=item.material_name,
@@ -1920,7 +1922,7 @@ async def assign_store_to_assembly_requisition(
                 uom=item.uom or "PCS",
                 priority=req.priority or "MEDIUM",
                 required_date=req.required_date,
-                status="ASSIGNED_TO_STORE",
+                status="ASSIGNED_TO_WAREHOUSE",
                 assigned_by=user.username or "warehouse",
                 assigned_at=now_utc,
                 created_at=now_utc,
@@ -1928,31 +1930,31 @@ async def assign_store_to_assembly_requisition(
             )
             uow.session.add(pck)
         else:
-            pck.store_id = store.id
-            pck.store_code = store.store_code
-            pck.store_name = store.store_name
-            pck.status = "ASSIGNED_TO_STORE"
+            pck.warehouse_ref_id = warehouse.id
+            pck.warehouse_code = warehouse.warehouse_code
+            pck.warehouse_name = warehouse.warehouse_name
+            pck.status = "ASSIGNED_TO_WAREHOUSE"
             pck.updated_at = now_utc
         tasks_created.append(pck)
 
-    # Targeted store notification to STR:<store_code>
+    # Targeted warehouse notification to WH:<warehouse_code>
     notif = NotificationModel(
         id=uuid.uuid4(),
-        user_role=f"STR:{store.store_code}",
-        title=f"New Pickup Task Assigned — {store.store_name}",
-        message=f"Assembly Requisition {req.requisition_number} ({len(req.items)} items) assigned to {store.store_name}.",
-        link="/my-store",
+        user_role=f"WH:{warehouse.warehouse_code}",
+        title=f"New Pickup Task Assigned — {warehouse.warehouse_name}",
+        message=f"Assembly Requisition {req.requisition_number} ({len(req.items)} items) assigned to {warehouse.warehouse_name}.",
+        link="/inventory",
         is_read=False,
     )
     uow.session.add(notif)
 
-    # Targeted notification to STORE_KEEPER
+    # Targeted notification to WAREHOUSE_OPERATOR
     notif_sk = NotificationModel(
         id=uuid.uuid4(),
-        user_role="STORE_KEEPER",
-        title=f"New Pickup Task — {store.store_code}",
-        message=f"Assembly Requisition {req.requisition_number} assigned to {store.store_name}.",
-        link="/my-store",
+        user_role="WAREHOUSE_OPERATOR",
+        title=f"New Pickup Task — {warehouse.warehouse_code}",
+        message=f"Assembly Requisition {req.requisition_number} assigned to {warehouse.warehouse_name}.",
+        link="/inventory",
         is_read=False,
     )
     uow.session.add(notif_sk)
@@ -1962,10 +1964,10 @@ async def assign_store_to_assembly_requisition(
     return {
         "status": "success",
         "requisition_number": req.requisition_number,
-        "assigned_store": {
-            "id": str(store.id),
-            "store_code": store.store_code,
-            "store_name": store.store_name,
+        "assigned_warehouse": {
+            "id": str(warehouse.id),
+            "warehouse_code": warehouse.warehouse_code,
+            "warehouse_name": warehouse.warehouse_name,
         },
         "tasks": [{"id": str(t.id), "task_number": t.task_number} for t in tasks_created],
     }

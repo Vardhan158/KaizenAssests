@@ -55,9 +55,8 @@ function DispatchExceptionsPage() {
       title="Dispatch Exceptions & Returns"
       subtitle="Handle dispatch cancellations, delivery exceptions, customer returns, and inventory restocking"
       actions={
-        <Button variant="outline" className="rounded-xl" onClick={() => void loadData()}>
-          <RefreshCw className="size-4" /> Refresh
-        </Button>
+        <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" className="rounded-xl" onClick={() => void loadData()}>
+          <RefreshCw className="size-4" /></Button>
       }
     >
       {loading ? (

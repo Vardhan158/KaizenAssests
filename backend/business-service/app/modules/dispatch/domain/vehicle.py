@@ -67,7 +67,7 @@ class Vehicle:
         if not vehicle_number:
             raise ValueError("Vehicle number is required")
         normalized_vehicle = vehicle_number.upper().replace(" ", "").replace("-", "")
-        if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}", normalized_vehicle):
+        if not re.fullmatch(r"[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}", normalized_vehicle):
             raise ValueError("Invalid Indian vehicle registration number format")
         if not rc_number or not re.fullmatch(r"[A-Z0-9-]{6,20}", rc_number.upper()):
             raise ValueError("A valid RC number is required")

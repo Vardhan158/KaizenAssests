@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 from fastapi import HTTPException
 
 from app.modules.receiving.infrastructure.persistence.repository_impl import SqlAlchemyGrnRepository
-from app.modules.store.infrastructure.api.location_router import _get_primary_store, list_zones
+from app.modules.warehouse.infrastructure.api.location_router import _get_primary_warehouse, list_zones
 
 
 class CompletedGrnLabelsTests(unittest.IsolatedAsyncioTestCase):
@@ -40,5 +40,5 @@ class EmptyWarehouseZonesTests(unittest.IsolatedAsyncioTestCase):
     async def test_mutations_still_require_a_configured_warehouse(self):
         uow = SimpleNamespace(session=SimpleNamespace(scalar=AsyncMock(return_value=None)))
         with self.assertRaises(HTTPException) as error:
-            await _get_primary_store(uow)
+            await _get_primary_warehouse(uow)
         self.assertEqual(error.exception.status_code, 409)

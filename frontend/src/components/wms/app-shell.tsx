@@ -27,7 +27,6 @@ import {
   AlertTriangle,
   QrCode,
   PlusCircle,
-  Store,
   ShieldAlert,
   DoorOpen,
   Factory,
@@ -44,9 +43,12 @@ import { pageHelp } from "@/lib/information-help";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api-client";
+import { isDashboardSearchVisible } from "@/lib/dashboard-search";
+import { searchModule } from "@/lib/module-search";
 import logoUrl from "@/assets/Logo.png";
 import { toast } from "sonner";
 import { getUserInfo, type UserInfo } from "@/lib/auth-utils";
+import { getPageAccess } from "@/lib/page-permissions";
 import { SecureAssistant } from "@/components/wms/secure-assistant";
 
 function getUserDisplayName(user: UserInfo | null): string {
@@ -91,11 +93,11 @@ function getUserRoleLabel(user: UserInfo | null): string {
   ) {
     return "GRN / Operations Manager";
   }
-  if (roles.includes("STORE_MANAGER")) {
-    return "Store Manager";
+  if (roles.includes("WAREHOUSE_OPERATOR")) {
+    return "Warehouse Operator";
   }
-  if (roles.includes("STORE_KEEPER") || roles.includes("STORE_OPERATOR")) {
-    return "Store Keeper";
+  if (roles.includes("WAREHOUSE_OPERATOR") || roles.includes("WAREHOUSE_OPERATOR")) {
+    return "Warehouse Operator";
   }
   if (roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_MANAGER")) {
     return "Assembly Manager";
@@ -123,6 +125,7 @@ function getSearchPlaceholder(path: string, searchStr: string): string {
   if (route.startsWith("/vehicle-exit")) return "Search vehicle, gate pass, or GRN...";
   if (route.startsWith("/gate-dashboard")) return "Search gate pass, vehicle, or supplier...";
   if (route.startsWith("/grn")) return "Search GRN, PO, supplier, vehicle, or material...";
+  if (route.startsWith("/warehouse-dashboard") || (path === "/inventory" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard")) return "Search material, stock, putaway, GRN, or dock...";
   if (route.startsWith("/inventory")) {
     if (route.includes("tab=locations")) return "Search zone, bin, or location code...";
     if (route.includes("tab=putaway")) return "Search putaway task, GRN, or material...";
@@ -144,6 +147,7 @@ type NavItem = {
   to: string;
   icon: any;
   count?: number;
+  section?: "Administration" | "Operational Monitoring";
 };
 
 const grnNav: NavItem[] = [
@@ -159,7 +163,7 @@ const dispatchNav = [
   { label: "Gate Out", to: "/dispatch-gate-out", icon: DoorOpen },
 ];
 
-const storeManagerNav = [
+const warehouseManagerNav = [
   { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
   { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
   { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
@@ -204,11 +208,19 @@ const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
   { label: "Material Master", to: "/supplier-materials", icon: Database },
   { label: "ASN Management", to: "/supplier/asns", icon: Truck },
-  { label: "Damage Claims", to: "/damage-claims", icon: ShieldAlert },
   { label: "FG Dispatch Requests", to: "/supplier/dispatch", icon: PackageCheck },
+  { label: "Damage Claims", to: "/damage-claims", icon: ShieldAlert },
 ];
 
 const managerNav: any[] = [];
+
+const adminNav: NavItem[] = [
+  { label: "Dashboard", to: "/admin", icon: LayoutDashboard, section: "Administration" },
+  { label: "User Management", to: "/admin/users", icon: Users, section: "Administration" },
+  { label: "Audit Log", to: "/admin/audit", icon: ClipboardList, section: "Administration" },
+  { label: "Suppliers", to: "/admin/suppliers", icon: Truck, section: "Administration" },
+  { label: "Operational Monitoring", to: "/admin/operations", icon: BarChart3, section: "Operational Monitoring" },
+];
 
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
@@ -240,7 +252,6 @@ const ICON_MAP: Record<string, any> = {
   QrCode,
   Bell,
   Inbox,
-  Store,
   ShieldAlert,
   PlusCircle,
 };
@@ -296,14 +307,20 @@ function getNotificationRole(user: { username?: string; roles?: string[] } | nul
 
 function getStrictRoleNav(user: { username?: string; roles?: string[] } | null): NavItem[] {
   if (!user) return [];
+  if (
+    hasUserRole(user, "ADMIN") ||
+    hasUserRole(user, "SUPERUSER") ||
+    hasUserRole(user, "SUPER_ADMIN")
+  )
+    return adminNav;
   if (hasUserRole(user, "SUPPLIER")) return supplierNav;
   if (hasUserRole(user, "GATE_SECURITY") || hasUserRole(user, "GATE_OPERATOR"))
     return gateSecurityNav;
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return qualityNav;
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER")) return assemblyNav;
-  if (hasUserRole(user, "STORE_MANAGER") || hasUserRole(user, "STORE_KEEPER"))
-    return storeManagerNav;
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "STORE_OPERATOR"))
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
+    return warehouseManagerNav;
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
     return warehouseOperatorNav;
   if (isDispatchSession(user)) return dispatchNav;
   if (isGrnSession(user)) return grnNav;
@@ -316,10 +333,10 @@ function getRoleLabel(user: { username?: string; roles?: string[] } | null): str
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return "Quality Inspector";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
     return "Assembly Manager";
-  if (hasUserRole(user, "STORE_MANAGER")) return "Store Manager";
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "STORE_OPERATOR"))
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR")) return "Warehouse Operator";
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
     return "Warehouse Operator";
-  if (hasUserRole(user, "STORE_KEEPER")) return "Store Keeper";
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR")) return "Warehouse Operator";
   if (isDispatchSession(user)) return "Dispatch Manager";
   if (isGrnSession(user)) return "GRN / Operations Manager";
   return "Operations Manager";
@@ -349,45 +366,62 @@ export function AppShell({
   const location = useRouterState({ select: (s) => s.location });
   const path = location.pathname;
   const searchStr = location.searchStr || "";
+  const showHeaderSearch = isDashboardSearchVisible(path, searchStr);
   const fullHref = path + searchStr;
   const navigate = useNavigate();
   const [user, setUser] = useState<UserInfo | null>(null);
+  const isAdmin = Boolean(user?.roles?.some((role) =>
+    ["ADMIN", "SUPERUSER", "SUPER_ADMIN"].includes(role.toUpperCase()),
+  ));
   const { unreadCount: unreadNotifications, alert: notificationAlert, dismissAlert } = useNotificationAlerts(user ? getNotificationRole(user) : null, user?.username);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchRequestId = useRef(0);
+
+  useEffect(() => {
+    searchRequestId.current += 1;
+    setSearchTerm("");
+    setSearchResults([]);
+    setShowSearch(false);
+    setIsSearching(false);
+  }, [path]);
 
   const executeSearch = async (term: string) => {
-    if (!term || !term.trim()) {
+    const requestId = ++searchRequestId.current;
+    if (!showHeaderSearch || !term || !term.trim()) {
       setSearchResults([]);
       setShowSearch(false);
       return;
     }
     setIsSearching(true);
     try {
-      const data = await api.globalSearch(term.trim());
-      setSearchResults(data?.results || []);
+      const results = await searchModule(path, term.trim());
+      if (requestId !== searchRequestId.current) return;
+      setSearchResults(results);
       setShowSearch(true);
     } catch (e) {
+      if (requestId !== searchRequestId.current) return;
+      setSearchResults([]);
       console.error("Search failed", e);
     } finally {
-      setIsSearching(false);
+      if (requestId === searchRequestId.current) setIsSearching(false);
     }
   };
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      if (searchTerm.length >= 1) {
+      if (showHeaderSearch && searchTerm.length >= 1) {
         void executeSearch(searchTerm);
       } else {
         setSearchResults([]);
         setShowSearch(false);
       }
     }, 200);
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm]);
+    return () => { clearTimeout(delayDebounceFn); searchRequestId.current += 1; };
+  }, [searchTerm, showHeaderSearch, path, searchStr]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -400,7 +434,7 @@ export function AppShell({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (showHeaderSearch && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
@@ -411,7 +445,7 @@ export function AppShell({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchTerm]);
+  }, [searchTerm, showHeaderSearch]);
   const isGrnUser =
     mounted &&
     (user?.roles?.includes("GRN") ||
@@ -434,9 +468,8 @@ export function AppShell({
     path === "/assembly-dashboard" ||
     path === "/dispatch-picking-packing" ||
     path === "/dispatch-loading";
-  const isStoreUser =
-    mounted && (user?.roles?.includes("STORE_MANAGER") || user?.roles?.includes("STORE_KEEPER"));
-  const isStoreRoute = path === "/my-store" || path.startsWith("/my-store");
+  const isWarehouseUser =
+    mounted && (user?.roles?.includes("WAREHOUSE_OPERATOR") || user?.roles?.includes("WAREHOUSE_OPERATOR"));
   const isGrnRoute = path === "/grn" || path.startsWith("/grn");
   const isSupplierRoute =
     path === "/supplier-dashboard" ||
@@ -480,36 +513,48 @@ export function AppShell({
       "/arrival-success",
     ].some((route) => path.startsWith(route)) ||
     (isGateSecurityUser && (isSharedOperationsRoute || isNotificationsRoute));
-  const resolvedNav = isSupplierRoute
+  const resolvedNav = isAdmin
+    ? adminNav
+    : isSupplierRoute
     ? supplierNav
-    : isAssemblyUser || isAssemblyRoute
-      ? assemblyNav
-      : isStoreUser || isStoreRoute
-        ? storeManagerNav
-        : isGrnUser || isGrnRoute
-          ? grnNav
-          : isSupplierRoute
-            ? supplierNav
-            : isGateSecurityRoute
-              ? gateSecurityNav
-              : isWarehouseRoute
-                ? warehouseNav
-                : mounted && user?.roles?.includes("DISPATCH")
-                  ? dispatchNav
-                  : mounted && user?.roles?.includes("ASSEMBLY")
-                    ? assemblyNav
-                    : mounted && user?.roles?.includes("SUPPLIER")
-                      ? supplierNav
-                      : isGateSecurityUser
-                        ? gateSecurityNav
-                        : warehouseNav;
+    : path.startsWith("/admin")
+      ? adminNav
+      : isAssemblyUser || isAssemblyRoute
+        ? assemblyNav
+        : isWarehouseUser
+          ? warehouseManagerNav
+          : isGrnUser || isGrnRoute
+            ? grnNav
+            : isSupplierRoute
+              ? supplierNav
+              : isGateSecurityRoute
+                ? gateSecurityNav
+                : isWarehouseRoute
+                  ? warehouseNav
+                  : mounted && user?.roles?.includes("DISPATCH")
+                    ? dispatchNav
+                    : mounted && user?.roles?.includes("ASSEMBLY")
+                      ? assemblyNav
+                      : mounted && user?.roles?.includes("SUPPLIER")
+                        ? supplierNav
+                        : isGateSecurityUser
+                          ? gateSecurityNav
+                          : warehouseNav;
   const navigationPending = !mounted && isSharedOperationsRoute;
-  const nav = navigationPending ? [] : resolvedNav;
+  const nav = navigationPending
+    ? []
+    : resolvedNav.filter((item) => {
+        const [itemPath, itemSearch = ""] = item.to.split("?");
+        if (hasUserRole(user, "SUPPLIER") && itemPath === "/damage-claims") return true;
+        return getPageAccess(user?.page_permissions, itemPath, itemSearch) !== null;
+      });
+  const currentPageAccess = getPageAccess(user?.page_permissions, path, searchStr);
+  const isReadOnlyPage = currentPageAccess === "READ";
   useEffect(() => {
     setMobileSidebarOpen(false);
   }, [fullHref]);
-  const handleLogout = () => {
-    api.logout();
+  const handleLogout = async () => {
+    await api.logout();
     setUser(null);
     toast.success("Logged out successfully");
     navigate({ to: "/login" });
@@ -559,6 +604,9 @@ export function AppShell({
       }
       return fullHref === to || (searchStr ? fullHref.startsWith(to) : to === "/grn?tab=dashboard");
     }
+    // The admin dashboard is the parent route for every admin page. Match it
+    // exactly so it does not stay highlighted alongside the selected child.
+    if (to === "/admin") return path === "/admin";
     return (
       path === to ||
       (to !== "/dashboard" &&
@@ -570,7 +618,7 @@ export function AppShell({
   const desktopSidebarCollapsed = !sidebarHovered;
 
   return (
-    <div className="flex min-h-screen w-full bg-background">
+    <div className={cn("flex min-h-screen w-full bg-background", isWarehouseWorkspace && "warehouse-visual-workspace", (isAssemblyRoute || path.startsWith("/assembly/")) && "assembly-visual-workspace", (isGateSecurityRoute || path.startsWith("/gate/")) && "gate-visual-workspace", isGrnRoute && "grn-visual-workspace")}>
       {mobileSidebarOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <button
@@ -579,11 +627,15 @@ export function AppShell({
             className="absolute inset-0 bg-background/70 backdrop-blur-sm"
             onClick={() => setMobileSidebarOpen(false)}
           />
-          <aside className="relative flex h-full w-[min(84vw,320px)] flex-col border-r border-sidebar-border bg-sidebar shadow-2xl">
+          <aside className="wms-sidebar relative flex h-full w-[min(84vw,320px)] flex-col border-r border-sidebar-border bg-sidebar shadow-2xl">
             <div className="flex h-16 items-center justify-between gap-2 border-b border-sidebar-border/40 px-4">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-glow">
-                  <Warehouse className="size-5" />
+                <div className="relative flex h-11 w-16 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
+                  <img
+                    src={logoUrl}
+                    alt="GTVP Logo"
+                    className="h-full w-full object-contain"
+                  />
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold tracking-tight">KaizenAssests</p>
@@ -593,7 +645,7 @@ export function AppShell({
               <button
                 type="button"
                 aria-label="Close navigation menu"
-                className="grid size-9 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                className="grid size-9 place-items-center rounded-xl text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 onClick={() => setMobileSidebarOpen(false)}
               >
                 <PanelLeftClose className="size-[18px]" />
@@ -605,32 +657,41 @@ export function AppShell({
                 Array.from({ length: 5 }).map((_, index) => (
                   <div key={index} className="h-10 animate-pulse rounded-xl bg-sidebar-accent/60" />
                 ))}
-              {nav.map((item) => {
+              {nav.map((item, index) => {
                 const active = isActiveNavItem(item.to);
+                const [itemPath, itemQuery = ""] = item.to.split("?", 2);
+                const itemSearch = itemQuery
+                  ? Object.fromEntries(new URLSearchParams(itemQuery).entries())
+                  : undefined;
                 return (
-                  <Link
-                    key={`${item.label}-${item.to}`}
-                    to={item.to as any}
-                    onClick={(e) => {
-                      e.preventDefault();
+                  <div key={`${item.label}-${item.to}`}>
+                    {item.section && item.section !== nav[index - 1]?.section && (
+                      <p className="px-3 pb-1 pt-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sidebar-foreground/60">
+                        {item.section}
+                      </p>
+                    )}
+                    <Link
+                    to={itemPath as any}
+                    search={itemSearch as any}
+                    onClick={() => {
                       setMobileSidebarOpen(false);
-                      void navigate({ to: item.to as any });
                     }}
 
                     className={cn(
                       "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-sidebar-foreground transition-all",
                       "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                      active && "bg-primary-soft text-primary shadow-soft",
+                      active && "bg-sidebar-primary text-sidebar-primary-foreground",
                     )}
                   >
-                    <item.icon className={cn("size-[18px] shrink-0", active && "text-primary")} />
+                    <item.icon className={cn("size-[18px] shrink-0 transition-colors", active ? "text-white" : "text-sidebar-foreground/80 group-hover:text-sidebar-foreground")} />
                     <span className="truncate">{item.label}</span>
                     {(item as any).badge && (
                       <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
                         {(item as any).badge}
                       </span>
                     )}
-                  </Link>
+                    </Link>
+                  </div>
                 );
               })}
             </nav>
@@ -644,7 +705,7 @@ export function AppShell({
         onMouseEnter={() => setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
         className={cn(
-          "sticky top-0 hidden h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 md:flex",
+          "wms-sidebar sticky top-0 hidden h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 md:flex",
           desktopSidebarCollapsed ? "w-[76px]" : "w-[264px]",
         )}
       >
@@ -657,29 +718,29 @@ export function AppShell({
           {!desktopSidebarCollapsed ? (
             <>
               <div className="flex items-center gap-3 min-w-0">
-                <div className="relative flex h-10 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-blue-500/10 to-teal/20 p-1 border border-primary/30 shadow-glow">
+                <div className="relative flex h-11 w-16 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
                   <img
                     src={logoUrl}
-                    alt="KGS Logo"
-                    className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(6,182,212,0.4)]"
+                    alt="GTVP Logo"
+                    className="h-full w-full object-contain"
                   />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold tracking-wider uppercase bg-gradient-to-r from-primary via-blue-600 to-teal bg-clip-text text-transparent">
+                  <p className="truncate text-sm font-bold tracking-wider uppercase text-sidebar-foreground">
                     KaizenAssests
                   </p>
-                  <p className="truncate text-[10px] font-mono text-muted-foreground font-semibold">
+                  <p className="truncate text-[10px] font-mono text-sidebar-foreground/80 font-semibold">
                     Pune DC · Plant 1200
                   </p>
                 </div>
               </div>
             </>
           ) : (
-            <div className="relative flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-blue-500/10 to-teal/20 p-1 border border-primary/30 shadow-glow">
+            <div className="relative flex h-11 w-12 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
               <img
                 src={logoUrl}
-                alt="KGS Logo"
-                className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(6,182,212,0.4)]"
+                alt="GTVP Logo"
+                className="h-full w-full object-contain"
               />
             </div>
           )}
@@ -690,39 +751,46 @@ export function AppShell({
             Array.from({ length: 5 }).map((_, index) => (
               <div key={index} className="h-10 animate-pulse rounded-xl bg-sidebar-accent/60" />
             ))}
-          {nav.map((item) => {
+          {nav.map((item, index) => {
             const active = isActiveNavItem(item.to);
+            const [itemPath, itemQuery = ""] = item.to.split("?", 2);
+            const itemSearch = itemQuery
+              ? Object.fromEntries(new URLSearchParams(itemQuery).entries())
+              : undefined;
             return (
-              <Link
-                key={`${item.label}-${item.to}`}
-                to={item.to as any}
-                onClick={(e) => {
-                  e.preventDefault();
-                  void navigate({ to: item.to as any });
-                }}
+              <div key={`${item.label}-${item.to}`}>
+                {!desktopSidebarCollapsed && item.section && item.section !== nav[index - 1]?.section && (
+                  <p className="px-3 pb-1 pt-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sidebar-foreground/60">
+                    {item.section}
+                  </p>
+                )}
+                <Link
+                to={itemPath as any}
+                search={itemSearch as any}
 
                 className={cn(
                   "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all",
                   "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  active && "bg-primary-soft text-primary shadow-soft",
+                  active && "bg-sidebar-primary text-sidebar-primary-foreground",
                 )}
               >
-                <item.icon className={cn("size-[18px] shrink-0", active && "text-primary")} />
+                <item.icon className={cn("size-[18px] shrink-0 transition-colors", active ? "text-white" : "text-sidebar-foreground/80 group-hover:text-sidebar-foreground")} />
                 {!desktopSidebarCollapsed && <span className="truncate">{item.label}</span>}
                 {!desktopSidebarCollapsed && (item as any).badge && (
                   <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
                     {(item as any).badge}
                   </span>
                 )}
-              </Link>
+                </Link>
+              </div>
             );
           })}
         </nav>
 
       </aside>
 
-      <div className={cn("flex min-w-0 flex-1 flex-col", isWarehouseWorkspace && "bg-[#eef5fd] dark:bg-[#151d2a]")}>
-        <header className={cn("sticky top-0 z-30 glass-strong", isWarehouseWorkspace && "border-b border-[#d7e5f7] bg-white/95 dark:border-slate-700 dark:bg-slate-900/95")}>
+      <div className={cn("flex min-w-0 flex-1 flex-col", isWarehouseWorkspace && "bg-background dark:bg-[#151d2a]")}>
+        <header className={cn("sticky top-0 z-30 border-b border-border bg-card", isWarehouseWorkspace && "border-b border-border bg-card dark:border-slate-700 dark:bg-slate-900/95")}>
           <div className="flex h-16 items-center gap-3 px-4 lg:px-7">
             <button
               type="button"
@@ -733,9 +801,9 @@ export function AppShell({
               <Warehouse className="size-4 transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0" />
               <Menu className="absolute size-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100" />
             </button>
-            <form
+            {showHeaderSearch && <form
               onSubmit={handleSearchSubmit}
-              className="relative hidden max-w-md flex-1 items-center sm:flex"
+              className={cn("relative hidden max-w-md flex-1 items-center sm:flex", isSupplierRoute && "supplier-header-search")}
             >
               <button
                 type="submit"
@@ -750,11 +818,7 @@ export function AppShell({
                 suppressHydrationWarning
                 type="text"
                 inputMode="search"
-                placeholder={
-                  hasUserRole(user, "SUPPLIER") || path.startsWith("/supplier")
-                    ? "Search ASN, vehicle number, status..."
-                    : "Search ASN, truck no, vendor, gate entry…"
-                }
+                placeholder={getSearchPlaceholder(path, searchStr)}
                 className="h-10 w-full rounded-xl border border-border bg-muted/60 pl-9 pr-16 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring/40 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
                 value={searchTerm}
                 onChange={(e) => {
@@ -852,7 +916,7 @@ export function AppShell({
                           <Search className="mb-2 size-8 opacity-20" />
                           <p className="text-sm font-medium">No results found for "{searchTerm}"</p>
                           <p className="text-xs">
-                            Try searching for a different ASN, vehicle number, or status
+                            Try a different reference, name, or status in this module
                           </p>
                         </div>
                       )}
@@ -860,21 +924,22 @@ export function AppShell({
                   </div>
                 </>
               )}
-            </form>
+            </form>}
 
             <div className="ml-auto flex items-center gap-1.5">
-                    <Link
-                      to="/notifications"
+                    <a
+                      href="/notifications"
                       aria-label="Notifications"
+                      title="Open notifications"
                       className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
                     >
                       <Bell className="size-[18px]" />
                       {unreadNotifications > 0 && (
-                        <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
+                        <span className="pointer-events-none absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
                           {unreadNotifications}
                         </span>
                       )}
-                    </Link>
+                    </a>
               <div className="group relative ml-1 flex items-center gap-2.5 rounded-xl border border-border bg-card py-1.5 pl-1.5 pr-3 transition-colors hover:bg-accent/50">
                 <span
                   suppressHydrationWarning
@@ -907,13 +972,20 @@ export function AppShell({
           <div role="status" aria-live="polite" className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl">
             <div className="flex items-start gap-3">
               <Bell className="mt-0.5 size-5 text-primary" />
-              <div className="min-w-0 flex-1">
+              <Link
+                to="/notifications"
+                onClick={dismissAlert}
+                className="min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                aria-label={`Open notification: ${notificationAlert.title || "New notification"}`}
+              >
                 <p className="text-sm font-bold">{notificationAlert.title || "New notification"}</p>
                 <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
                   {notificationAlert.message ||
                     notificationAlert.body ||
                     "Open Notification Center to view this update."}
                 </p>
+              </Link>
+              <div>
                 <Link to="/notifications" onClick={dismissAlert} className="mt-2 inline-block text-xs font-semibold text-primary">View notifications</Link>
               </div>
               <button
@@ -930,15 +1002,29 @@ export function AppShell({
         <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
           <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
             {(title || subtitle || actions) && (
-              <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", ["/assembly/material-requests", "/assembly/production", "/assembly/quality", "/assembly/finished-goods", "/assembly/dispatch"].includes(path) && "material-requests-header", path === "/supplier-dashboard" && "supplier-heading-image", ["/supplier/asns/new", "/supplier/dispatch", "/damage-claims", "/supplier-materials"].includes(path) && "supplier-module-header", ["/vehicle-queue", "/gate/finished-goods-pickup", "/gate/finished-goods-pickup-exit"].includes(path) && "gate-entry-header", path === "/notifications" && "notifications-header", path.startsWith("/admin") && "rounded-2xl border border-white/70 bg-white/35 p-5 shadow-sm backdrop-blur-sm", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") !== "dashboard" && "grn-form-header")}>
                 <div>
                   {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
                 </div>
-                {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+                {actions && (
+                  <fieldset
+                    disabled={isReadOnlyPage}
+                    className="flex flex-wrap items-center gap-2 border-0 p-0"
+                  >
+                    {actions}
+                  </fieldset>
+                )}
               </div>
             )}
-            {children}
+            {isReadOnlyPage && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                Read-only access: you can view this page but cannot perform actions.
+              </div>
+            )}
+            <fieldset disabled={isReadOnlyPage} className="min-w-0 border-0 p-0">
+              {children}
+            </fieldset>
           </div>
         </main>
       </div>
@@ -962,6 +1048,8 @@ export function StatusBadge({ status }: { status: string }) {
     "PO Created": "bg-primary-soft text-primary border-primary/25",
     Fulfilled: "bg-success-soft text-success border-success/30",
     Closed: "bg-muted text-muted-foreground border-border",
+    EXITED: "bg-red-50 text-red-600 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900",
+    VEHICLE_EXITED: "bg-red-50 text-red-600 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900",
     "Dock Assigned": "bg-teal-soft text-teal border-teal/30",
     Receiving: "bg-primary-soft text-primary border-primary/25",
     Completed: "bg-success-soft text-success border-success/30",
@@ -1158,121 +1246,73 @@ function parseDockAllocationDetails(n: any) {
 }
 
 export function DockAllocationNotificationCard({ notification }: { notification: any }) {
+  const navigate = useNavigate();
   const details = parseDockAllocationDetails(notification);
+  const additionalFields = [
+    ["Driver", details.driverName],
+    ["Driver contact", details.driverPhone],
+    ["ASN", details.asnNumber],
+    ["PO reference", details.poNumber],
+    ["Dock name", details.dockName],
+    ["Location", details.dockLocation],
+    ["Dock type", details.dockType],
+    ["Warehouse", details.warehouseName],
+  ].filter(([, value]) => value && value !== "N/A");
+  const openAllocation = () => {
+    const link = String(notification.link || "");
+    const destination = link.startsWith("/") ? link : "/dock-management";
+    void navigate({ to: destination as any });
+  };
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-teal-500/30 bg-teal-500/5 p-5 shadow-sm space-y-4 font-sans text-foreground">
-      <div className="absolute left-0 top-0 h-full w-1 bg-teal-600 dark:bg-teal-400" />
-
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-teal-500/20 pb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="grid size-9 place-items-center rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
-            <Warehouse className="size-5" />
-          </div>
-          <div>
-            <h3 className="font-black text-base tracking-tight text-foreground uppercase">
-              DOCK ALLOCATION CONFIRMED
-            </h3>
-            <p className="text-xs text-muted-foreground">Vehicle assigned & dock allocated</p>
-          </div>
+    <div
+      className="notification-centre-card relative cursor-pointer overflow-hidden rounded-xl border border-border bg-card p-4 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      onClick={openAllocation}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openAllocation();
+        }
+      }}
+      role="link"
+      tabIndex={0}
+      aria-label={`Open dock allocation for gate pass ${details.gatePass}`}
+    >
+      {!notification.is_read && <div className="absolute inset-y-0 left-0 w-1 bg-primary" />}
+      <div className="notification-centre-body flex items-start gap-3">
+        <div className="notification-centre-icon grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+          <Warehouse className="size-5" />
         </div>
-        <Badge
-          variant="outline"
-          className="bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-500/30 font-extrabold text-[11px] px-2.5 py-0.5 rounded-full"
-        >
-          Dock Allocated
-        </Badge>
-      </div>
-
-      {/* Details Grid */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {/* Vehicle Details */}
-        <div className="space-y-2 rounded-xl bg-card/80 p-3.5 border border-border/50 text-xs shadow-2xs">
-          <span className="text-[10px] font-black uppercase text-muted-foreground tracking-wider block border-b border-border/40 pb-1">
-            Vehicle Details
-          </span>
-          <div className="space-y-1.5 pt-1 font-medium">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Gate Pass:</span>
-              <span className="font-mono font-bold text-foreground">{details.gatePass}</span>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="notification-centre-heading flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">Dock allocation confirmed</h3>
+              <Badge variant="outline" className="border-primary/20 bg-primary/10 text-primary text-[10px] font-medium">Dock Allocated</Badge>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Vehicle:</span>
-              <span className="font-mono font-bold text-primary">{details.vehicle}</span>
-            </div>
-            {details.driverName && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Driver:</span>
-                <span className="font-semibold text-foreground">{details.driverName}</span>
-              </div>
-            )}
-            {details.driverPhone && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Driver Phone:</span>
-                <span className="font-mono text-foreground">{details.driverPhone}</span>
-              </div>
-            )}
-            {details.asnNumber && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">ASN:</span>
-                <span className="font-mono font-semibold text-foreground">{details.asnNumber}</span>
-              </div>
-            )}
-            {details.poNumber && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">PO:</span>
-                <span className="font-mono font-semibold text-foreground">{details.poNumber}</span>
-              </div>
-            )}
+            <span className="notification-centre-date text-xs text-muted-foreground">{details.allocatedAt}</span>
           </div>
-        </div>
-
-        {/* Allocated Dock Details */}
-        <div className="space-y-2 rounded-xl bg-card/80 p-3.5 border border-border/50 text-xs shadow-2xs">
-          <span className="text-[10px] font-black uppercase text-muted-foreground tracking-wider block border-b border-border/40 pb-1">
-            Allocated Dock Details
-          </span>
-          <div className="space-y-1.5 pt-1 font-medium">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Dock Code:</span>
-              <span className="font-mono font-bold text-teal-600 dark:text-teal-400">
-                {details.dockCode}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Dock Name:</span>
-              <span className="font-semibold text-foreground">{details.dockName}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Location:</span>
-              <span className="text-foreground">{details.dockLocation}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Dock Type:</span>
-              <span className="text-foreground">{details.dockType}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Warehouse:</span>
-              <span className="text-foreground">{details.warehouseName}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Allocated At:</span>
-              <span className="text-foreground">{details.allocatedAt}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Instruction Banner */}
-      <div className="rounded-xl border border-teal-500/20 bg-teal-500/10 p-3 text-xs flex items-center justify-between">
-        <div>
-          <span className="text-[10px] font-black uppercase tracking-wider block text-teal-700 dark:text-teal-300">
-            Instruction
-          </span>
-          <p className="font-extrabold text-teal-900 dark:text-teal-100 mt-0.5">
-            Proceed directly to Dock {details.dockCode}.
-          </p>
+          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+            {[["Gate pass", details.gatePass], ["Vehicle", details.vehicle], ["Dock", details.dockCode]].map(([label, value]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="mt-0.5 break-words font-mono font-semibold text-primary">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-xs text-muted-foreground">Proceed directly to Dock {details.dockCode}.</p>
+          {additionalFields.length > 0 && (
+            <details className="border-t pt-2" onClick={(event) => event.stopPropagation()}>
+              <summary className="w-fit cursor-pointer text-xs font-medium text-primary">View allocation details</summary>
+              <dl className="mt-3 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                {additionalFields.map(([label, value]) => (
+                  <div key={label} className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">{label}</dt>
+                    <dd className="mt-0.5 break-words font-medium">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          )}
         </div>
       </div>
     </div>

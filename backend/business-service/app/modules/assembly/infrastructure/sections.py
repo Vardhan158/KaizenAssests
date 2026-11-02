@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from fastapi import HTTPException
-from sqlalchemy import inspect, select, update, Sequence
+from sqlalchemy import inspect, select, text, update, Sequence
 from sqlalchemy.orm import defer
 from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, FinishedGoodsSectionModel
 
@@ -47,7 +47,12 @@ async def compatible_fg_read(session, query):
 async def assign_section_main_id(session, fg):
     await require_section_schema(session)
     if not fg.section_main_id:
-        number = await session.scalar(select(Sequence("fg_transport_main_number").next_value()))
+        connection = await session.connection()
+        if connection.dialect.name == "sqlite":
+            await session.execute(text("INSERT INTO fg_transport_main_number DEFAULT VALUES"))
+            number = await session.scalar(text("SELECT last_insert_rowid()"))
+        else:
+            number = await session.scalar(select(Sequence("fg_transport_main_number").next_value()))
         fg.section_main_id = f"FG-{number:04d}"
 
 

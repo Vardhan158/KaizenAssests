@@ -23,7 +23,12 @@ async def validate_grn_putaway_quantity(
     if grn is None:
         raise HTTPException(status_code=409, detail="Source GRN was not found")
     accepted = await session.scalar(
-        select(func.sum(GrnLineModel.accepted_quantity)).where(
+        select(func.sum(func.coalesce(
+            func.nullif(GrnLineModel.accepted_quantity, 0),
+            func.nullif(GrnLineModel.quality_approved_quantity, 0),
+            GrnLineModel.good_quantity,
+            0,
+        ))).where(
             GrnLineModel.grn_id == grn_id,
             func.upper(GrnLineModel.item_code) == item_code.upper(),
         )

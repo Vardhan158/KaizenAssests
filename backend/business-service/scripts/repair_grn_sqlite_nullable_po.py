@@ -69,6 +69,6 @@ def repair(database: Path, *, apply: bool = False) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("database", type=Path)
-    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--apply", action="warehouse_true")
     args = parser.parse_args()
     print(repair(args.database, apply=args.apply))

@@ -14,7 +14,7 @@ from app.modules.gate.infrastructure.persistence import models as gate_models  #
 from app.modules.receiving.infrastructure.persistence import models as receiving_models  # noqa: F401
 from app.modules.returns.infrastructure.persistence import models as returns_models  # noqa: F401
 from app.modules.storage.infrastructure.persistence import models as storage_models  # noqa: F401
-from app.modules.store.infrastructure.persistence import models as store_models  # noqa: F401
+from app.modules.warehouse.infrastructure.persistence import models as warehouse_models  # noqa: F401
 from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
 from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
 

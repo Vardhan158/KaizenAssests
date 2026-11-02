@@ -69,19 +69,19 @@ def serialize_notification(n: NotificationModel) -> dict[str, Any]:
     }
 
 
-def _build_role_condition(role: Optional[str], store_code: Optional[str] = None):
+def _build_role_condition(role: Optional[str], warehouse_code: Optional[str] = None):
     clauses = []
     if role:
         r = role.strip().upper()
         target_roles = {r, "ALL"}
         if "ASSEMBLY" in r:
             target_roles.update(["ASSEMBLY", "ASSEMBLY_MANAGER", "ASSEMBLY_OPERATOR"])
-        if "STORE" in r:
-            target_roles.update(["STORE", "STORE_MANAGER", "STORE_KEEPER"])
+        if "WAREHOUSE_OPERATOR" in r:
+            target_roles.update(["WAREHOUSE_OPERATOR"])
         if "WAREHOUSE" in r:
             target_roles.update(["WAREHOUSE", "WAREHOUSE_MANAGER", "OPERATOR"])
         if "GRN" in r:
-            target_roles.update(["GRN", "STORE_MANAGER"])
+            target_roles.update(["GRN", "WAREHOUSE_OPERATOR"])
         if "PROCUREMENT" in r:
             target_roles.update(["PROCUREMENT"])
         if "GATE" in r or "SECURITY" in r:
@@ -90,9 +90,9 @@ def _build_role_condition(role: Optional[str], store_code: Optional[str] = None)
         clauses.append(func.upper(NotificationModel.user_role).in_(list(target_roles)))
         clauses.append(NotificationModel.user_role.ilike(f"%{r}%"))
 
-    if store_code:
-        sc = store_code.strip().upper()
-        clauses.append(NotificationModel.user_role == f"STR:{sc}")
+    if warehouse_code:
+        sc = warehouse_code.strip().upper()
+        clauses.append(NotificationModel.user_role == f"WH:{sc}")
         clauses.append(NotificationModel.user_role.ilike(f"%{sc}%"))
 
     return or_(*clauses) if clauses else None
@@ -101,14 +101,14 @@ def _build_role_condition(role: Optional[str], store_code: Optional[str] = None)
 @router.get("/api/v1/notifications")
 async def get_notifications(
     role: Optional[str] = Query(None),
-    store_code: Optional[str] = Query(None),
-    store_id: Optional[str] = Query(None),
+    warehouse_code: Optional[str] = Query(None),
+    warehouse_ref_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     uow: UnitOfWork = Depends(get_uow),
 ) -> List[dict[str, Any]]:
     try:
         stmt = select(NotificationModel)
-        cond = _build_role_condition(role, store_code)
+        cond = _build_role_condition(role, warehouse_code)
         if cond is not None:
             stmt = stmt.where(cond)
         stmt = stmt.order_by(desc(NotificationModel.created_at)).limit(limit)
@@ -182,12 +182,12 @@ async def mark_notification_read(
 @router.post("/api/v1/notifications/mark-all-read")
 async def mark_all_notifications_read(
     role: Optional[str] = Query(None),
-    store_code: Optional[str] = Query(None),
+    warehouse_code: Optional[str] = Query(None),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict[str, Any]:
     try:
         stmt = update(NotificationModel).values(is_read=True)
-        cond = _build_role_condition(role, store_code)
+        cond = _build_role_condition(role, warehouse_code)
         if cond is not None:
             stmt = stmt.where(cond)
         await uow.session.execute(stmt)

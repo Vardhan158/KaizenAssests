@@ -8,9 +8,9 @@ Validates:
 5. Finished Goods creation: 10 PCS PUMP-100 created in PUTAWAY_PENDING.
 6. FG QR Generation: Unique serial number & QR generated (FG-QR|PUMP-100|...).
 7. Component Genealogy: All 8 components linked; Motor traceability to GRN-20260924-0003, LOT-MAT-MOTOR-001-20260924-ACF3, PT-20260924-65F7, ISS-2026-7475C5.
-8. FG Store Destination: STR-FG-01 (Finished Goods Store).
+8. FG Warehouse Destination: STR-FG-01 (Finished Goods Warehouse).
 9. FG Putaway: Putaway completed into STR-FG-01 / BIN-FG-001.
-10. FG Inventory: PUMP-100 available inventory = 10 PCS in Finished Goods Store.
+10. FG Inventory: PUMP-100 available inventory = 10 PCS in Finished Goods Warehouse.
 11. Downstream Isolation: Dispatch, picking, packing, loading, gate exit NOT started.
 12. Idempotency: Repeated queries/actions do not duplicate orders or inventory.
 """
@@ -42,10 +42,10 @@ from app.modules.storage.infrastructure.persistence.models import (
     PickupTaskModel,
     PutawayTaskModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreModel,
-    StoreZoneModel,
-    StoreBinModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseModel,
+    WarehouseZoneModel,
+    WarehouseBinModel,
 )
 
 
@@ -63,12 +63,12 @@ async def test_e2e_prompt11_assembly_production_fg_qr_genealogy_putaway():
             "X-User-Roles": "ASSEMBLY_MANAGER,ASSEMBLY,ADMIN",
             "X-User-Name": "assembly_manager",
         }
-        fg_store_headers = {
-            "Authorization": "Bearer mock-jwt-fg-store-token",
-            "X-User-Roles": "STORE_MANAGER,STORE_KEEPER",
-            "X-Store-Code": "STR-FG-01",
-            "X-Store-Id": "053b329e-3092-4786-b280-48fd8b8c20b5",
-            "X-User-Name": "store_manager_fg",
+        fg_warehouse_headers = {
+            "Authorization": "Bearer mock-jwt-fg-warehouse-token",
+            "X-User-Roles": "WAREHOUSE_OPERATOR,WAREHOUSE_OPERATOR",
+            "X-Warehouse-Code": "STR-FG-01",
+            "X-Warehouse-Id": "053b329e-3092-4786-b280-48fd8b8c20b5",
+            "X-User-Name": "warehouse_operator_fg",
         }
 
         # -------------------------------------------------------------
@@ -263,10 +263,10 @@ async def test_e2e_prompt11_assembly_production_fg_qr_genealogy_putaway():
         print("[OK] Genealogy verified with complete Motor traceability!")
 
         # -------------------------------------------------------------
-        # STEP 8 & 9: FG Store Destination & FG Putaway
+        # STEP 8 & 9: FG Warehouse Destination & FG Putaway
         # -------------------------------------------------------------
-        # List putaway tasks for FG Store Manager
-        res_putaway_tasks = await client.get("/api/storage/putaway-tasks", headers=fg_store_headers)
+        # List putaway tasks for FG Warehouse Operator
+        res_putaway_tasks = await client.get("/api/storage/putaway-tasks", headers=fg_warehouse_headers)
         assert res_putaway_tasks.status_code == 200
         tasks = res_putaway_tasks.json()
         fg_putaway_task = next((t for t in tasks if t.get("finished_goods_id") == fg_id or t.get("item_code") == "PUMP-100"), None)
@@ -278,14 +278,14 @@ async def test_e2e_prompt11_assembly_production_fg_qr_genealogy_putaway():
             # Start FG Putaway
             res_put_start = await client.post(
                 f"/api/storage/putaway-tasks/{putaway_id}/start",
-                headers=fg_store_headers,
+                headers=fg_warehouse_headers,
             )
             assert res_put_start.status_code in (200, 409), f"Start putaway failed: {res_put_start.text}"
 
             # Complete FG Putaway into BIN-FG-001
             res_put_complete = await client.post(
                 f"/api/storage/putaway-tasks/{putaway_id}/complete",
-                headers=fg_store_headers,
+                headers=fg_warehouse_headers,
                 json={
                     "material_scan": qr_code,
                     "location_scan": "BIN-FG-001",
@@ -299,7 +299,7 @@ async def test_e2e_prompt11_assembly_production_fg_qr_genealogy_putaway():
             assert fg_putaway_task["status"] in ("COMPLETED", "PUTAWAY_COMPLETED")
 
         # -------------------------------------------------------------
-        # STEP 10: Verify FG Inventory in FG Store
+        # STEP 10: Verify FG Inventory in FG Warehouse
         # -------------------------------------------------------------
         res_fg_list = await client.get("/api/v1/assembly/finished-goods", headers=asm_headers)
         assert res_fg_list.status_code == 200
@@ -307,14 +307,14 @@ async def test_e2e_prompt11_assembly_production_fg_qr_genealogy_putaway():
         fg_pump = next((f for f in fg_records if f["id"] == fg_id), None)
         assert fg_pump is not None
         assert fg_pump["status"] == "AVAILABLE"
-        assert fg_pump["store_code"] == "STR-FG-01"
+        assert fg_pump["warehouse_code"] == "STR-FG-01"
         assert float(fg_pump["quantity"]) == 10.0
 
         # Check FG Request availability view
         res_fgr_check = await client.get("/api/v1/assembly/finished-goods-requests/FGR-20260924-0001", headers=asm_headers)
         assert res_fgr_check.status_code == 200
         fgr_updated = res_fgr_check.json()
-        assert float(fgr_updated.get("fg_store_available", 0)) >= 10.0
+        assert float(fgr_updated.get("fg_warehouse_available", 0)) >= 10.0
         assert float(fgr_updated.get("shortage", 0)) == 0.0
 
         # -------------------------------------------------------------

@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   PackageCheck,
   History,
+  Bell,
 } from "lucide-react";
 import { AppShell, DockAllocationNotificationCard } from "@/components/wms/app-shell";
 import { Card } from "@/components/ui/card";
@@ -476,27 +477,15 @@ function Notifications() {
     }
   };
 
-  const handleOpenNotificationDetails = (n: any) => {
+  const handleOpenNotificationDetails = (notification: any) => {
     const isDamage =
-      n.title?.toLowerCase().includes("damage") ||
-      n.message?.toLowerCase().includes("damage") ||
-      n.type === "damaged_goods";
-
-    const isGrnOrQuality =
-      n.title?.toLowerCase().includes("grn") ||
-      n.title?.toLowerCase().includes("quality") ||
-      n.title?.toLowerCase().includes("receiving") ||
-      n.message?.toLowerCase().includes("grn") ||
-      n.message?.toLowerCase().includes("inspection");
-
+      /damage/i.test(`${notification.title || ""} ${notification.message || ""}`) ||
+      notification.type === "damaged_goods";
     if (isDamage) {
-      setSelectedDamageNotif(n);
+      setSelectedDamageNotif(notification);
       setShowDamageModal(true);
-    } else if (isGrnOrQuality) {
-      setSelectedGrnNotif(n);
-      setShowGrnModal(true);
     } else {
-      setSelectedGrnNotif(n);
+      setSelectedGrnNotif(notification);
       setShowGrnModal(true);
     }
   };
@@ -506,6 +495,20 @@ function Notifications() {
     : null;
 
   const grnDetails = selectedGrnNotif ? parseGrnNotificationDetails(selectedGrnNotif) : null;
+  const asnDispatch = String(selectedGrnNotif?.message || "").match(
+    /^ASN\s+(\S+)\s+dispatched by\s+(.+?)\.\s*Vehicle:\s*(.+?)\s*·\s*Driver:\s*(.+?)\s*\(([^)]*)\)\s*·\s*ETA:\s*(.+?)\s*·\s*Materials:\s*([\s\S]+)\s*$/i,
+  );
+  const asnDispatchFields = asnDispatch ? [
+    ["ASN reference", asnDispatch[1]],
+    ["Supplier", asnDispatch[2]],
+    ["Vehicle number", asnDispatch[3]],
+    ["Driver", asnDispatch[4]],
+    ["Driver contact", asnDispatch[5]],
+    ["Expected arrival", Number.isNaN(new Date(asnDispatch[6]).getTime())
+      ? asnDispatch[6]
+      : new Date(asnDispatch[6]).toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })],
+    ["Materials", asnDispatch[7]],
+  ] : [];
 
   const getPhotosForMaterial = (matString: string, itemCode?: string) => {
     const cleanMat = (matString || "").toLowerCase();
@@ -587,7 +590,14 @@ function Notifications() {
 
   return (
     <AppShell
-      title="Notification centre"
+      title={
+        <span className="notification-centre-title inline-flex items-center gap-3">
+          <span className="notification-centre-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl">
+            <Bell className="size-5" aria-hidden="true" />
+          </span>
+          <span>Notification centre</span>
+        </span>
+      }
       subtitle="Stay updated with procurement and supply chain alerts"
       actions={
         <div className="flex flex-wrap items-center gap-2">
@@ -629,7 +639,7 @@ function Notifications() {
           </p>
         </Card>
       ) : (
-        <div className="grid gap-4">
+        <div className="notification-centre-list grid gap-4">
           {notifications.map((n, index) => {
             const isGrnLinked = String(n.link || "").startsWith("/grn");
             const isDockAllocation =
@@ -664,8 +674,17 @@ function Notifications() {
               <Card
                 key={`${n.type || n.notification_type || "workflow"}-${n.id || "notification"}-${index}`}
                 onClick={() => handleOpenNotificationDetails(n)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleOpenNotificationDetails(n);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open notification: ${n.title || "Notification"}`}
                 className={cn(
-                  "relative overflow-hidden border-border/50 p-5 transition-all space-y-4",
+                  "notification-centre-card relative cursor-pointer overflow-hidden border-border/50 p-5 transition-all space-y-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                   !n.is_read && "bg-primary-soft/5 border-primary/20",
                   isDamage && "border-rose-500/30 bg-rose-500/5 hover:border-rose-500/60",
                 )}
@@ -679,10 +698,10 @@ function Notifications() {
                   />
                 )}
 
-                <div className="flex items-start gap-4">
+                <div className="notification-centre-body flex items-start gap-4">
                   <div
                     className={cn(
-                      "grid size-12 shrink-0 place-items-center rounded-2xl",
+                      "notification-centre-icon grid size-12 shrink-0 place-items-center rounded-2xl",
                       isDamage
                         ? "bg-rose-500/10 text-rose-600"
                         : n.title?.includes("Approved") || n.title?.includes("Completed")
@@ -703,7 +722,7 @@ function Notifications() {
 
                   <div className="flex-1 space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                      <div className="notification-centre-heading flex items-center gap-2">
                         <h3
                           className={cn(
                             "font-bold text-foreground text-sm",
@@ -822,7 +841,7 @@ function Notifications() {
                           );
                         })()}
                       </div>
-                      <span className="text-[10px] text-muted-foreground font-medium">
+                      <span className="notification-centre-date text-[10px] text-muted-foreground font-medium">
                         {notificationDate && !Number.isNaN(new Date(notificationDate).getTime())
                           ? new Date(notificationDate).toLocaleString()
                           : "Date unavailable"}
@@ -910,7 +929,7 @@ function Notifications() {
 
       {/* ✨ DAMAGED GOODS & PROCUREMENT RECEIPT DETAILS MODAL (POPUP) */}
       <Dialog open={showDamageModal} onOpenChange={setShowDamageModal}>
-        <DialogContent className="max-w-4xl rounded-3xl p-6 space-y-6 max-h-[90vh] overflow-y-auto border shadow-2xl">
+        <DialogContent id="supplier-damage-report-dialog" className="max-w-4xl rounded-3xl p-6 space-y-6 max-h-[90vh] overflow-y-auto border shadow-2xl">
           {/* HEADER */}
           <DialogHeader className="border-b pb-4 flex flex-row items-center justify-between">
             <div>
@@ -1170,31 +1189,7 @@ function Notifications() {
 
           {/* FOOTER */}
           <DialogFooter className="pt-4 border-t flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {damageDetails?.poNumber && (
-                <Button
-                  variant="outline"
-                  className="rounded-xl font-bold text-xs"
-                  onClick={() => {
-                    setShowDamageModal(false);
-                    window.location.href = `/purchase-order?po_number=${damageDetails.poNumber}`;
-                  }}
-                >
-                  <ExternalLink className="mr-1.5 size-3.5" /> View Purchase Order (
-                  {damageDetails.poNumber})
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                className="rounded-xl font-bold text-xs"
-                onClick={() => {
-                  setShowDamageModal(false);
-                  window.location.href = `/grn?tab=records`;
-                }}
-              >
-                <FileText className="mr-1.5 size-3.5" /> Open GRN Console
-              </Button>
-            </div>
+
 
             <Button
               variant="default"
@@ -1209,13 +1204,13 @@ function Notifications() {
 
       {/* ✨ GRN & QUALITY NOTIFICATION DETAILS MODAL */}
       <Dialog open={showGrnModal} onOpenChange={setShowGrnModal}>
-        <DialogContent className="max-w-4xl rounded-3xl p-6 space-y-6 max-h-[90vh] overflow-y-auto border shadow-2xl">
+        <DialogContent className="max-w-2xl rounded-2xl p-6 gap-4 max-h-[90vh] overflow-y-auto border shadow-2xl">
           {/* HEADER */}
           <DialogHeader className="border-b pb-4 flex flex-row items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <span className="px-3 py-1 rounded-full text-xs font-black bg-primary/10 text-primary border border-primary/20 flex items-center gap-1.5 uppercase tracking-wider">
-                  <FileText className="size-3.5" /> {grnDetails?.statusText || "GRN Details"}
+                  <FileText className="size-3.5" /> {asnDispatch ? "ASN Dispatched" : grnDetails?.statusText || "GRN Details"}
                 </span>
                 {grnDetails?.grnNumber && (
                   <span className="px-2.5 py-0.5 rounded-md font-mono text-xs font-bold bg-muted text-foreground">
@@ -1238,7 +1233,10 @@ function Notifications() {
           </DialogHeader>
 
           {/* DETAILS GRID */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 bg-muted/30 rounded-2xl p-4 border text-xs font-sans">
+          {!asnDispatch && (grnDetails?.grnNumber || grnDetails?.poNumber ||
+            (grnDetails?.supplierName && grnDetails.supplierName !== "Supplier") ||
+            grnDetails?.vehicleNumber) && (
+          <div className="grid gap-4 sm:grid-cols-2 bg-muted/20 rounded-xl p-4 border text-sm font-sans [&>div]:min-w-0 [&_span]:break-words">
             {grnDetails?.grnNumber && (
               <div className="space-y-0.5">
                 <span className="text-[10px] font-extrabold uppercase text-muted-foreground tracking-wider block">
@@ -1261,7 +1259,7 @@ function Notifications() {
               </div>
             )}
 
-            {grnDetails?.supplierName && (
+            {grnDetails?.supplierName && grnDetails.supplierName !== "Supplier" && (
               <div className="space-y-0.5">
                 <span className="text-[10px] font-extrabold uppercase text-muted-foreground tracking-wider block">
                   Supplier Name
@@ -1284,8 +1282,10 @@ function Notifications() {
             )}
           </div>
 
+          )}
+
           {/* BALANCES KPI GRID IF PRESENT */}
-          {grnDetails?.totals && (
+          {grnDetails?.totals && (grnDetails.grnNumber || (grnDetails.items?.length ?? 0) > 0) && (
             <div className="grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl border bg-muted/20 p-3">
                 <span className="text-[10px] font-bold uppercase text-muted-foreground block">
@@ -1390,7 +1390,20 @@ function Notifications() {
           )}
 
           {/* MESSAGE BODY (FALLBACK / REMARKS) */}
-          {(!grnDetails?.items || grnDetails.items.length === 0) && (
+          {asnDispatch && (
+            <section className="rounded-xl border bg-muted/10 p-4">
+              <h3 className="mb-4 text-sm font-semibold">Shipment details</h3>
+              <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                {asnDispatchFields.map(([label, value]) => (
+                  <div key={label} className={`min-w-0 ${label === "Materials" ? "border-t pt-4 sm:col-span-2" : ""}`}>
+                    <dt className="text-xs text-muted-foreground">{label}</dt>
+                    <dd className="mt-1 whitespace-pre-line break-words text-sm font-semibold leading-relaxed">{value || "—"}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
+          {!asnDispatch && (!grnDetails?.items || grnDetails.items.length === 0) && (
             <div className="rounded-2xl border bg-card p-4 space-y-1">
               <span className="text-[10px] font-black uppercase text-muted-foreground tracking-wider block">
                 Notification Message
@@ -1403,31 +1416,7 @@ function Notifications() {
 
           {/* FOOTER */}
           <DialogFooter className="pt-4 border-t flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {grnDetails?.poNumber && (
-                <Button
-                  variant="outline"
-                  className="rounded-xl font-bold text-xs"
-                  onClick={() => {
-                    setShowGrnModal(false);
-                    window.location.href = `/purchase-order?po_number=${grnDetails.poNumber}`;
-                  }}
-                >
-                  <ExternalLink className="mr-1.5 size-3.5" /> View Purchase Order (
-                  {grnDetails.poNumber})
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                className="rounded-xl font-bold text-xs"
-                onClick={() => {
-                  setShowGrnModal(false);
-                  window.location.href = "/grn?tab=records";
-                }}
-              >
-                <FileText className="mr-1.5 size-3.5" /> Open GRN Records
-              </Button>
-            </div>
+
 
             <Button
               variant="default"
@@ -1443,12 +1432,13 @@ function Notifications() {
       {/* ENLARGED PHOTO LIGHTBOX MODAL IF CLICKED */}
       {enlargedPhoto && (
         <Dialog open={!!enlargedPhoto} onOpenChange={() => setEnlargedPhoto(null)}>
-          <DialogContent className="max-w-2xl rounded-2xl p-4 bg-black/95 text-white border-none">
+          <DialogContent id="supplier-damage-photo-dialog" className="max-w-2xl rounded-2xl p-4 bg-black/95 text-white border-none">
             <div className="flex justify-between items-center pb-2 border-b border-white/20">
-              <span className="text-xs font-bold uppercase tracking-wider text-rose-400">
+              <DialogTitle className="text-xs font-bold uppercase tracking-wider text-rose-400">
                 Damage Photo Evidence
-              </span>
+              </DialogTitle>
               <button
+                aria-label="Close damage photo"
                 onClick={() => setEnlargedPhoto(null)}
                 className="text-white/70 hover:text-white"
               >

@@ -4,7 +4,7 @@ import { RackOccupancyCards } from "@/components/wms/rack-occupancy-cards";
 import { api } from "@/lib/api-client";
 import QRCode from "qrcode";
 vi.mock("@/lib/api-client", () => ({ api: {
-  getRackMaterials: vi.fn(), updateRackCapacity: vi.fn(), emptyRack: vi.fn(), moveRackMaterial: vi.fn(), getRackHistory: vi.fn(),
+  getRackMaterials: vi.fn(), updateRackCapacity: vi.fn(), emptyRack: vi.fn(), moveRackMaterial: vi.fn(), getRackHistory: vi.fn(), deleteRack: vi.fn(),
 } }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("qrcode", () => ({ default: { toDataURL: vi.fn().mockResolvedValue("data:image/png;base64,cmFjaw==") } }));
@@ -42,10 +42,22 @@ it("does not duplicate racks with multiple legacy bins", () => {
   expect(screen.getAllByRole("progressbar")).toHaveLength(1);
 });
 
-it("keeps exactly two actions on each main rack card", () => {
+it("offers deletion but disables it while the rack is occupied", () => {
   page(); const card = screen.getByRole("article", { name: "Rack RACK-001" });
-  expect(within(card).getAllByRole("button").map(b => b.textContent)).toEqual(["Add Material", "View Details"]);
+  expect(within(card).getAllByRole("button").map(b => b.textContent)).toEqual(["Add Material", "View Details", "Delete Rack"]);
+  expect(within(card).getByRole("button", { name: "Delete Rack" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Edit Capacity" })).not.toBeInTheDocument();
+});
+it("confirms deletion of an empty rack and refreshes the cards", async () => {
+  const emptyBin = { ...bin, rack_capacity: { ...rack, occupied_quantity: 0, available_capacity: 80, occupancy_percentage: 0, occupancy_status: "Empty" } };
+  vi.mocked(api.deleteRack).mockResolvedValue({ deleted: true });
+  render(<RackOccupancyCards bins={[emptyBin]} allBins={[emptyBin]} onAddMaterial={add} onUpdated={updated} />);
+  fireEvent.click(screen.getByRole("button", { name: "Delete Rack" }));
+  expect(api.deleteRack).not.toHaveBeenCalled();
+  fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete Rack" }));
+  await waitFor(() => expect(api.deleteRack).toHaveBeenCalledWith("zone1", "rack1"));
+  await waitFor(() => expect(updated).toHaveBeenCalledOnce());
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
 });
 it("shows rack, zone, materials, QR and transaction history together", async () => {
   vi.mocked(api.getRackHistory).mockResolvedValue([{ id: 1, quantity_delta: 60, reason: "Putaway MAT-001 / BATCH-1", actor: "Warehouse Manager", created_at: "2026-10-21T10:00:00Z" }]);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { ArrowLeft, Download, Eye, Loader2, Printer } from "lucide-react";
+import { ArrowLeft, Download, Eye, Loader2, Printer, Trash2 } from "lucide-react";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -98,6 +99,20 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
   bins: RackBin[]; allBins: RackBin[]; zone?: ZoneInfo; onAddMaterial: () => void; onUpdated: () => Promise<unknown>;
 }) {
   const [selection, setSelection] = useState<{ bin: RackBin; mode: Mode } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<RackBin | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  async function confirmDelete() {
+    if (!deleteTarget?.rack_capacity?.id || deleting) return;
+    setDeleting(true); setDeleteError("");
+    try {
+      await api.deleteRack(deleteTarget.zone_id, deleteTarget.rack_capacity.id);
+      setDeleteTarget(null);
+      toast.success("Rack deleted");
+      try { await onUpdated(); } catch { toast.error("Rack deleted. Refresh to update the rack list."); }
+    } catch (err: any) { setDeleteError(err.message || "Unable to delete this rack."); }
+    finally { setDeleting(false); }
+  }
   const [content, setContent] = useState<Details | null>(null);
   const [history, setHistory] = useState<HistoryEvent[] | null>(null);
   const [historyError, setHistoryError] = useState("");
@@ -180,6 +195,19 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
   const qrBin = selectedBins.find(b => b.id === qrBinId) || selection?.bin;
   const ready = hasCapacity(content);
   return <>
+    <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open && !deleting) setDeleteTarget(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {deleteTarget?.rack}?</AlertDialogTitle>
+          <AlertDialogDescription>This removes the empty rack and its bin locations. This cannot be undone. Racks referenced by warehouse tasks cannot be deleted.</AlertDialogDescription>
+        </AlertDialogHeader>
+        {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogAction disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={event => { event.preventDefault(); void confirmDelete(); }}>{deleting ? "Deleting…" : "Delete Rack"}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <div className="grid gap-4 p-4 xl:grid-cols-2">
       {groups.map(bin => {
         const rack = bin.rack_capacity;
@@ -190,6 +218,7 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-indigo-100 pt-4 dark:border-indigo-900">
             <Button size="sm" disabled={!configured} onClick={onAddMaterial}>Add Material</Button>
             <Button size="sm" variant="outline" onClick={() => void openDetails(bin)}>View Details</Button>
+            <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" disabled={!configured || rack.occupied_quantity > 0} onClick={() => { setDeleteError(""); setDeleteTarget(bin); }}><Trash2 className="size-4" />Delete Rack</Button>
           </div>
         </article>;
       })}
@@ -198,24 +227,23 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
       <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-4xl overflow-y-auto p-0">
         <DialogHeader className="border-b bg-slate-50/70 px-6 py-5 pr-12 dark:bg-slate-900">
           <DialogTitle className="text-xl">{selection?.bin.rack} / {actionTitles[selection?.mode || "details"]}</DialogTitle>
-          <DialogDescription>{[zone?.zone_code || selection?.bin.zone_id, zone?.zone_name].filter(Boolean).join(" / ")}</DialogDescription>
+          <DialogDescription className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+            <span>{zone?.zone_code || selection?.bin.zone_id}</span>
+            {zone?.zone_name && <><span>/</span><span>{zone.zone_name}</span></>}
+            {selectedBins.some(b => b.position) && [...new Set(selectedBins.map(b => b.position).filter(Boolean))].map(pos => <span key={pos} className="block text-xs text-muted-foreground">{pos}</span>)}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-6 px-6 pb-6">
           {selection?.mode !== "details" && <Button size="sm" variant="ghost" disabled={saving} onClick={() => manage("details")}><ArrowLeft />Back to Details</Button>}
           {error && <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
           {loading && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Loading persisted rack inventory...</p>}
           {selection?.mode === "details" && <>
-            <section aria-label="Rack and zone information" className="grid gap-5 rounded-xl border bg-muted/20 p-4 sm:grid-cols-2">
-              <div><h3 className="mb-3 text-sm font-semibold">Rack & Zone</h3><dl className="space-y-2 text-sm">
-                <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Rack Code</dt><dd className="font-medium">{selection.bin.rack}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Zone</dt><dd className="text-right font-medium">{zone?.zone_code || selection.bin.zone_id}{zone?.zone_name && <span className="block text-xs text-muted-foreground">{zone.zone_name}</span>}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Shelf / Position</dt><dd className="text-right">{[...new Set(selectedBins.map(b => b.position).filter(Boolean))].join(", ") || "Not specified"}</dd></div>
-              </dl></div>
+            <section aria-label="Rack capacity" className="rounded-xl bg-muted/20 p-4">
               <div>{ready ? <><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold">Capacity</h3><Badge variant="outline">{content.occupancy_status}</Badge></div><CapacitySummary rack={content} label={selection.bin.rack} /></> : !loading && <p className="text-sm text-amber-700">Capacity information is unavailable.</p>}</div>
             </section>
             <section aria-label="Stored materials" className="space-y-3"><h3 className="text-sm font-semibold">Stored Materials</h3>
-              {Array.isArray(content?.materials) ? <div className="overflow-x-auto rounded-xl border"><table className="w-full text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">Material</th><th className="p-3">Batch</th><th className="p-3">Quantity</th><th className="p-3">Source GRN</th><th className="p-3">QR Reference</th></tr></thead><tbody>
-                {content.materials.map(item => <tr key={item.balance_id} className="border-t"><td className="p-3"><p className="font-medium">{item.material_name}</p><p className="mt-1 text-muted-foreground">{item.material_code}</p></td><td className="p-3 font-mono">{item.batch_number}</td><td className="whitespace-nowrap p-3 font-medium">{typeof item.quantity === "number" ? item.quantity.toLocaleString() : "Unavailable"} {item.uom}</td><td className="p-3">{item.grn_number || "Not recorded"}</td><td className="max-w-52 break-all p-3 font-mono">{item.material_qr || "No saved batch QR"}</td></tr>)}
+              {Array.isArray(content?.materials) ? <div className="overflow-x-auto rounded-xl border"><table className="w-full min-w-[600px] table-fixed text-left text-sm"><colgroup><col className="w-[20%]"/><col className="w-[28%]"/><col className="w-[14%]"/><col className="w-[18%]"/><col className="w-[20%]"/></colgroup><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">Material</th><th className="p-3">Batch</th><th className="p-3 text-right">Quantity</th><th className="p-3">Source GRN</th><th className="p-3">QR Reference</th></tr></thead><tbody>
+                {content.materials.map(item => <tr key={item.balance_id} className="border-t"><td className="p-3"><p className="font-medium">{item.material_name}</p><p className="mt-1 text-muted-foreground">{item.material_code}</p></td><td className="break-all p-3 font-mono text-xs">{item.batch_number}</td><td className="whitespace-nowrap p-3 text-right font-medium tabular-nums">{typeof item.quantity === "number" ? item.quantity.toLocaleString() : "Unavailable"} {item.uom}</td><td className="p-3">{item.grn_number || "Not recorded"}</td><td className="max-w-52 break-all p-3 font-mono text-xs">{item.material_qr || "No saved batch QR"}</td></tr>)}
                 {!content.materials.length && <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">Rack is empty. Use Add Material to start QR-based putaway.</td></tr>}
               </tbody></table></div> : <p className="text-sm text-muted-foreground">{loading ? "Loading stored materials..." : "Stored materials could not be loaded."}</p>}
             </section>
@@ -223,12 +251,12 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
               {selectedBins.length > 1 && <div className="space-y-2"><Label htmlFor="rack-qr-location">Storage location</Label><select id="rack-qr-location" className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={qrBinId} onChange={e => setQrBinId(e.target.value)}>{selectedBins.map(b => <option key={b.id} value={b.id}>{b.bin_code}{b.position ? ` / ${b.position}` : ""}</option>)}</select></div>}
               {qrBin && <RackQrTools bin={qrBin} zone={zone} />}
             </section>
-            <section aria-label="Material transaction history" className="space-y-3"><h3 className="text-sm font-semibold">Material Transaction History</h3>
-              {historyError ? <p role="alert" className="text-sm text-destructive">{historyError}</p> : history ? <div className="max-h-64 overflow-y-auto rounded-xl border divide-y">{history.map(row => <div key={row.id} className="flex flex-wrap justify-between gap-2 p-3 text-xs"><div className="min-w-0 flex-1"><p className="break-words font-medium">{row.reason}</p><p className="mt-1 text-muted-foreground">{row.actor} / {new Date(row.created_at).toLocaleString()}</p>{row.balance_id && <p className="mt-1 break-all font-mono text-muted-foreground">Stock reference: {row.balance_id}</p>}</div><span className="font-semibold tabular-nums">{row.quantity_delta > 0 ? "+" : ""}{row.quantity_delta} PCS</span></div>)}{!history.length && <p className="p-4 text-sm text-muted-foreground">No rack transactions have been recorded.</p>}</div> : <p role="status" className="text-sm text-muted-foreground">Loading transaction history...</p>}
-            </section>
+            <details className="space-y-3" open><summary className="cursor-pointer text-sm font-semibold">Material transaction history</summary>
+              {historyError ? <p role="alert" className="text-sm text-destructive">{historyError}</p> : history ? <div className="max-h-64 overflow-y-auto rounded-xl border divide-y">{history.map(row => <div key={row.id} className="flex flex-wrap justify-between gap-2 p-3 text-xs"><div className="min-w-0 flex-1"><p className="break-words font-medium">{row.reason}</p><p className="mt-1 text-muted-foreground">{row.actor} / {new Date(row.created_at).toLocaleString()}</p></div><span className="font-semibold tabular-nums">{row.quantity_delta > 0 ? "+" : ""}{row.quantity_delta} PCS</span></div>)}{!history.length && <p className="p-4 text-sm text-muted-foreground">No rack transactions have been recorded.</p>}</div> : <p role="status" className="text-sm text-muted-foreground">Loading transaction history...</p>}
+            </details>
             <section aria-label="Rack management" className="space-y-3 border-t pt-5"><h3 className="text-sm font-semibold">Management</h3><div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" disabled={!ready || loading} onClick={() => manage("capacity")}>Edit Capacity</Button>
-            </div><p className="text-xs text-muted-foreground">Stock changes require backend authorization and are recorded in the audit history.</p></section>
+            </div></section>
           </>}
           {selection && selection.mode !== "details" && ready && <form onSubmit={submit} className="space-y-4">
             {["pick", "transfer"].includes(selection.mode) && <div className="grid gap-4 sm:grid-cols-2">

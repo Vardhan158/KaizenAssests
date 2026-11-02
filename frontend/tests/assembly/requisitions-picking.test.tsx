@@ -7,7 +7,7 @@ vi.mock("@/lib/api-client", () => ({ api: {
   getAssemblyRequisitions: vi.fn().mockResolvedValue([{
     id: "req-1", requisition_number: "AR-001", status: "PENDING_WAREHOUSE_APPROVAL", items: [],
   }]),
-  getAssemblyMaterialRequests: vi.fn().mockResolvedValue([]), getStores: vi.fn().mockResolvedValue([]),
+  getAssemblyMaterialRequests: vi.fn().mockResolvedValue([]), getWarehouses: vi.fn().mockResolvedValue([]),
   approveAssemblyMaterialRequest: vi.fn().mockResolvedValue({}),
   rejectAssemblyMaterialRequest: vi.fn().mockResolvedValue({}),
   rejectAssemblyRequisition: vi.fn().mockResolvedValue({}),

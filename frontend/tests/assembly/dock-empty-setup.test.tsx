@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-vi.mock("@tanstack/react-router", () => ({ createFileRoute: () => (options: any) => ({ options }) }));
+vi.mock("@tanstack/react-router", () => ({ createFileRoute: () => (options: any) => ({ options }), useSearch: () => ({}) }));
 vi.mock("@/components/wms/app-shell", () => ({
   AppShell: ({ children }: any) => <div>{children}</div>, StatusBadge: () => null,
 }));

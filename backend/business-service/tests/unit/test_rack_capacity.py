@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 from pydantic import ValidationError
 from app.modules.storage.application.rack_capacity import install_rack_capacity
-from app.modules.store.infrastructure.api.location_router import BinCreateRequest, RackCapacityUpdate, EmptyRackRequest, _rack_response
+from app.modules.warehouse.infrastructure.api.location_router import BinCreateRequest, RackCapacityUpdate, EmptyRackRequest, _rack_response
 from types import SimpleNamespace
 
 
@@ -20,13 +20,13 @@ class RackCapacityDatabaseTests(unittest.TestCase):
         self.engine = create_engine("sqlite:///" + str(Path(self.tmp.name) / "test.db"), connect_args={"timeout": 10})
         self.zone, self.bin1, self.bin2, self.loc1, self.loc2 = [str(uuid.uuid4()) for _ in range(5)]
         with self.engine.begin() as c:
-            c.exec_driver_sql("CREATE TABLE store_zone(id varchar(36) PRIMARY KEY)")
-            c.exec_driver_sql("CREATE TABLE store_bin(id varchar(36) PRIMARY KEY, zone_id varchar(36), rack varchar(64), capacity numeric)")
+            c.exec_driver_sql("CREATE TABLE warehouse_zone(id varchar(36) PRIMARY KEY)")
+            c.exec_driver_sql("CREATE TABLE warehouse_bin(id varchar(36) PRIMARY KEY, zone_id varchar(36), rack varchar(64), capacity numeric)")
             c.exec_driver_sql("CREATE TABLE storage_location(id varchar(36) PRIMARY KEY, bin_id varchar(36))")
             c.exec_driver_sql("CREATE TABLE inventory_location_balance(id varchar(36) PRIMARY KEY, storage_location_id varchar(36), material_code text, batch_number text, quantity numeric NOT NULL, available_quantity numeric NOT NULL, uom text)")
-            c.execute(text("INSERT INTO store_zone VALUES(:id)"), {"id":self.zone})
+            c.execute(text("INSERT INTO warehouse_zone VALUES(:id)"), {"id":self.zone})
             for b,l,r in [(self.bin1,self.loc1,"RACK-001"),(self.bin2,self.loc2,"RACK-002")]:
-                c.execute(text("INSERT INTO store_bin VALUES(:b,:z,:r,80)"), {"b":b,"z":self.zone,"r":r})
+                c.execute(text("INSERT INTO warehouse_bin VALUES(:b,:z,:r,80)"), {"b":b,"z":self.zone,"r":r})
                 c.execute(text("INSERT INTO storage_location VALUES(:l,:b)"), {"l":l,"b":b})
             install_rack_capacity(c)
     def tearDown(self):
@@ -40,7 +40,7 @@ class RackCapacityDatabaseTests(unittest.TestCase):
         return values["id"]
     def occupancy(self,rack="RACK-001"):
         with self.engine.connect() as c:
-            return c.execute(text("SELECT occupied_quantity,maximum_capacity FROM store_rack WHERE rack_code=:r"),{"r":rack}).one()
+            return c.execute(text("SELECT occupied_quantity,maximum_capacity FROM warehouse_rack WHERE rack_code=:r"),{"r":rack}).one()
     def change(self,id,q):
         with self.engine.begin() as c: c.execute(text("UPDATE inventory_location_balance SET quantity=:q,available_quantity=:q WHERE id=:id"),{"q":q,"id":id})
     def test_empty_partial_and_full(self):
@@ -65,7 +65,7 @@ class RackCapacityDatabaseTests(unittest.TestCase):
             with self.subTest(q=q),self.assertRaises(DBAPIError):self.add(q,uom=uom)
     def test_capacity_cannot_drop_below_occupancy(self):
         self.add(60)
-        with self.assertRaises(DBAPIError),self.engine.begin() as c:c.exec_driver_sql("UPDATE store_rack SET maximum_capacity=50 WHERE rack_code='RACK-001'")
+        with self.assertRaises(DBAPIError),self.engine.begin() as c:c.exec_driver_sql("UPDATE warehouse_rack SET maximum_capacity=50 WHERE rack_code='RACK-001'")
     def test_transfer_updates_both_racks(self):
         id=self.add(60)
         with self.engine.begin() as c:
@@ -97,7 +97,7 @@ class RackCapacityDatabaseTests(unittest.TestCase):
         self.assertEqual(self.occupancy(),(20,80))
     def test_multiple_legacy_bins_share_one_rack(self):
         with self.engine.begin() as c:
-            c.execute(text("UPDATE store_bin SET rack='RACK-001' WHERE id=:id"),{"id":self.bin2})
+            c.execute(text("UPDATE warehouse_bin SET rack='RACK-001' WHERE id=:id"),{"id":self.bin2})
         self.add(60);self.add(20,self.loc2)
         with self.assertRaises(DBAPIError):self.add(1,self.loc2)
         self.assertEqual(self.occupancy(),(80,80))

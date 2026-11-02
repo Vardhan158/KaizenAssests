@@ -2,9 +2,9 @@
 Inventory Control & Authoritative Stock Ledger API Router.
 
 Provides unified endpoints for:
-- Authoritative warehouse-wide and store-scoped inventory summary (Material -> Store -> Zone).
+- Authoritative warehouse-wide and warehouse-scoped inventory summary (Material -> Warehouse -> Zone).
 - Unified chronological stock ledger combining Receipts, Putaways, Issues, Quarantine, and Dispositions.
-- Strict store-level RBAC & IDOR protection (Store Managers / Keepers are scoped strictly to their assigned store).
+- Strict warehouse-level RBAC & IDOR protection (Warehouse Operators / Keepers are scoped strictly to their assigned warehouse).
 - Authoritative inventory statistics and stock reconciliation.
 """
 from __future__ import annotations
@@ -55,11 +55,11 @@ from app.modules.storage.infrastructure.persistence.models import (
 )
 from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
 from app.modules.storage.application.rack_capacity import validate_rack_capacity
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreManagerUserModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    UserAccountModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 from app.security.dependencies import CurrentUser, get_current_user, require_permission
 
@@ -104,9 +104,9 @@ class BinTransferRequest(BaseModel):
     material_code: str
     batch_number: Optional[str] = None
     source_bin_code: str
-    source_store_id: Optional[str] = None
+    source_warehouse_ref_id: Optional[str] = None
     destination_bin_code: str
-    destination_store_id: Optional[str] = None
+    destination_warehouse_ref_id: Optional[str] = None
     quantity: Decimal
     reason: str
     remarks: Optional[str] = None
@@ -166,56 +166,15 @@ class StockAdjustmentCreateRequest(BaseModel):
 
 
 
-async def _resolve_user_store_context(uow: UnitOfWork, user: CurrentUser) -> tuple[Optional[uuid.UUID], Optional[str]]:
-    """Resolve store_id and store_code for Store Manager or Store Keeper."""
-    claims = getattr(user, "raw_claims", {}) or {}
-    store_id_str = claims.get("store_id")
-    store_code = claims.get("store_code")
-
-    if store_id_str:
-        try:
-            return uuid.UUID(str(store_id_str)), store_code
-        except ValueError:
-            pass
-
-    username = user.username or ""
-    stmt = (
-        select(StoreManagerUserModel)
-        .where(
-            or_(
-                func.lower(StoreManagerUserModel.username) == username.lower(),
-                func.lower(StoreManagerUserModel.employee_id) == username.lower(),
-            )
-        )
-    )
-    res = await uow.session.execute(stmt)
-    mgr = res.scalars().first()
-    if mgr:
-        store_code_val = store_code
-        if not store_code_val and mgr.store_id:
-            store_res = await uow.session.execute(select(StoreModel.store_code).where(StoreModel.id == mgr.store_id))
-            store_code_val = store_res.scalar_one_or_none()
-        return mgr.store_id, store_code_val
-
-    if store_code:
-        store_res = await uow.session.execute(
-            select(StoreModel.id).where(
-                or_(
-                    func.lower(StoreModel.store_code) == store_code.lower(),
-                    func.lower(StoreModel.store_name).like(f"%{store_code.lower()}%"),
-                )
-            )
-        )
-        s_id = store_res.scalar_one_or_none()
-        if s_id:
-            return s_id, store_code
-
-    return None, store_code
+async def _resolve_user_warehouse_context(uow: UnitOfWork, user: CurrentUser):
+    from app.modules.warehouse.context import warehouse_context
+    ids, codes = await warehouse_context(uow.session)
+    return next(iter(ids), None), next(iter(codes), None)
 
 
-def _is_store_scoped_role(user: CurrentUser) -> bool:
+def _is_warehouse_scoped_role(user: CurrentUser) -> bool:
     roles = getattr(user, "roles", []) or []
-    return any(r in ["STORE_MANAGER", "STORE_KEEPER"] for r in roles) and not any(
+    return any(r in ["WAREHOUSE_OPERATOR"] for r in roles) and not any(
         r in ["WAREHOUSE", "ADMIN", "SUPERADMIN", "SUPER_ADMIN"] for r in roles
     )
 
@@ -284,15 +243,15 @@ async def perform_bin_to_bin_transfer(
                 detail=f"Material physical QR validation failed! Scanned '{req.scanned_material_qr}' does not match Material '{req.material_code}'.",
             )
 
-    # 1. Resolve bin codes in store scope. Codes are only unique within a
-    # store, so reject ambiguous legacy requests and accept optional store IDs
+    # 1. Resolve bin codes in warehouse scope. Codes are only unique within a
+    # warehouse, so reject ambiguous legacy requests and accept optional warehouse IDs
     # for installations that reuse bin codes.
-    src_stmt = select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == req.source_bin_code.strip().upper())
-    if req.source_store_id:
+    src_stmt = select(WarehouseBinModel).where(func.upper(WarehouseBinModel.bin_code) == req.source_bin_code.strip().upper())
+    if req.source_warehouse_ref_id:
         try:
-            src_stmt = src_stmt.where(StoreBinModel.store_id == uuid.UUID(req.source_store_id))
+            src_stmt = src_stmt.where(WarehouseBinModel.warehouse_ref_id == uuid.UUID(req.source_warehouse_ref_id))
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail="Invalid source store ID") from exc
+            raise HTTPException(status_code=422, detail="Invalid source warehouse ID") from exc
     src_candidates = (await uow.session.execute(src_stmt)).scalars().all()
     if not src_candidates:
         raise HTTPException(
@@ -300,15 +259,15 @@ async def perform_bin_to_bin_transfer(
             detail=f"Source Bin '{req.source_bin_code}' not found.",
         )
     if len(src_candidates) > 1:
-        raise HTTPException(status_code=422, detail="Source bin code exists in multiple stores; provide source_store_id")
+        raise HTTPException(status_code=422, detail="Source bin code exists in multiple warehouses; provide source_warehouse_ref_id")
 
     # 2. Resolve Destination Bin
-    dest_stmt = select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == req.destination_bin_code.strip().upper())
-    if req.destination_store_id:
+    dest_stmt = select(WarehouseBinModel).where(func.upper(WarehouseBinModel.bin_code) == req.destination_bin_code.strip().upper())
+    if req.destination_warehouse_ref_id:
         try:
-            dest_stmt = dest_stmt.where(StoreBinModel.store_id == uuid.UUID(req.destination_store_id))
+            dest_stmt = dest_stmt.where(WarehouseBinModel.warehouse_ref_id == uuid.UUID(req.destination_warehouse_ref_id))
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail="Invalid destination store ID") from exc
+            raise HTTPException(status_code=422, detail="Invalid destination warehouse ID") from exc
     dest_candidates = (await uow.session.execute(dest_stmt)).scalars().all()
     if not dest_candidates:
         raise HTTPException(
@@ -316,7 +275,7 @@ async def perform_bin_to_bin_transfer(
             detail=f"Destination Bin '{req.destination_bin_code}' not found.",
         )
     if len(dest_candidates) > 1:
-        raise HTTPException(status_code=422, detail="Destination bin code exists in multiple stores; provide destination_store_id")
+        raise HTTPException(status_code=422, detail="Destination bin code exists in multiple warehouses; provide destination_warehouse_ref_id")
 
     src_candidate = src_candidates[0]
     dest_candidate = dest_candidates[0]
@@ -326,9 +285,9 @@ async def perform_bin_to_bin_transfer(
     # Lock both physical bins in a stable order. This prevents capacity races
     # and deadlocks when operators transfer in opposite directions.
     locked_bins = (await uow.session.execute(
-        select(StoreBinModel)
-        .where(StoreBinModel.id.in_([src_candidate.id, dest_candidate.id]))
-        .order_by(StoreBinModel.id)
+        select(WarehouseBinModel)
+        .where(WarehouseBinModel.id.in_([src_candidate.id, dest_candidate.id]))
+        .order_by(WarehouseBinModel.id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )).scalars().all()
@@ -369,19 +328,19 @@ async def perform_bin_to_bin_transfer(
                 "performed_at": prior.performed_at.isoformat(),
             }
 
-    # 3. Resolve Store context & authorization
-    src_store = await uow.session.get(StoreModel, src_bin.store_id)
-    dest_store = await uow.session.get(StoreModel, dest_bin.store_id)
-    if not src_store or not dest_store or not src_store.warehouse_id or not dest_store.warehouse_id:
-        raise HTTPException(status_code=409, detail="Both transfer bins must belong to stores with a configured warehouse")
+    # 3. Resolve Warehouse context & authorization
+    source_config = await uow.session.get(WarehouseModel, src_bin.warehouse_ref_id)
+    destination_config = await uow.session.get(WarehouseModel, dest_bin.warehouse_ref_id)
+    if not source_config or not destination_config or not source_config.warehouse_id or not destination_config.warehouse_id:
+        raise HTTPException(status_code=409, detail="Both transfer bins must belong to warehouses with a configured warehouse")
 
     roles_upper = {r.upper() for r in (user.roles or [])}
-    if ("STORE_MANAGER" in roles_upper or "STORE_KEEPER" in roles_upper) and not bool(roles_upper.intersection({"ADMIN", "SUPERUSER", "WAREHOUSE", "WAREHOUSE_MANAGER"})):
-        user_store_id, _ = await _resolve_user_store_context(uow, user)
-        if user_store_id and user_store_id != src_bin.store_id:
+    if ("WAREHOUSE_OPERATOR" in roles_upper or "WAREHOUSE_OPERATOR" in roles_upper) and not bool(roles_upper.intersection({"ADMIN", "SUPERUSER", "WAREHOUSE", "WAREHOUSE_MANAGER"})):
+        user_warehouse_ref_id, _ = await _resolve_user_warehouse_context(uow, user)
+        if user_warehouse_ref_id and user_warehouse_ref_id != src_bin.warehouse_ref_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access forbidden: You cannot transfer items from store '{src_store.store_code if src_store else 'OTHER'}'.",
+                detail=f"Access forbidden: You cannot transfer items from warehouse '{source_config.warehouse_code if source_config else 'OTHER'}'.",
             )
 
     # 4. Find Source Location Balance
@@ -389,7 +348,7 @@ async def perform_bin_to_bin_transfer(
         select(StorageLocationModel).where(
             or_(
                 StorageLocationModel.bin_id == src_bin.id,
-                (StorageLocationModel.store_id == src_bin.store_id) & (StorageLocationModel.bin == src_bin.bin_code)
+                (StorageLocationModel.warehouse_ref_id == src_bin.warehouse_ref_id) & (StorageLocationModel.bin == src_bin.bin_code)
             )
         ).with_for_update()
     )
@@ -454,10 +413,10 @@ async def perform_bin_to_bin_transfer(
     if dest_bin.occupied_quantity + req.quantity > dest_bin.capacity:
         raise HTTPException(status_code=409, detail=f"Destination Bin '{dest_bin.bin_code}' has insufficient capacity")
 
-    src_warehouse = src_store.warehouse_id
-    dest_warehouse = dest_store.warehouse_id
+    source_warehouse_id = source_config.warehouse_id
+    destination_warehouse_id = destination_config.warehouse_id
     source_stock = destination_stock = None
-    if src_warehouse.strip().casefold() != dest_warehouse.strip().casefold():
+    if source_warehouse_id.strip().casefold() != destination_warehouse_id.strip().casefold():
         material_row = await uow.session.scalar(
             select(MaterialModel)
             .where(MaterialModel.material_code == src_bal.material_code)
@@ -470,7 +429,7 @@ async def perform_bin_to_bin_transfer(
         source_stock = await uow.session.scalar(
             select(MaterialStockModel).where(
                 MaterialStockModel.material_code == src_bal.material_code,
-                func.lower(MaterialStockModel.warehouse_id) == src_warehouse.strip().lower(),
+                func.lower(MaterialStockModel.warehouse_id) == source_warehouse_id.strip().lower(),
             ).with_for_update()
         )
         if not source_stock or source_stock.on_hand < req.quantity or source_stock.available < req.quantity:
@@ -478,14 +437,14 @@ async def perform_bin_to_bin_transfer(
         destination_stock = await uow.session.scalar(
             select(MaterialStockModel).where(
                 MaterialStockModel.material_code == src_bal.material_code,
-                func.lower(MaterialStockModel.warehouse_id) == dest_warehouse.strip().lower(),
+                func.lower(MaterialStockModel.warehouse_id) == destination_warehouse_id.strip().lower(),
             ).with_for_update()
         )
         if destination_stock is None:
             destination_stock = MaterialStockModel(
                 material_id=material_row.id,
                 material_code=src_bal.material_code,
-                warehouse_id=dest_warehouse,
+                warehouse_id=destination_warehouse_id,
                 uom=src_bal.uom,
                 on_hand_quantity=Decimal("0"),
                 allocated_quantity=Decimal("0"),
@@ -498,7 +457,7 @@ async def perform_bin_to_bin_transfer(
         select(StorageLocationModel).where(
             or_(
                 StorageLocationModel.bin_id == dest_bin.id,
-                (StorageLocationModel.store_id == dest_bin.store_id) & (StorageLocationModel.bin == dest_bin.bin_code)
+                (StorageLocationModel.warehouse_ref_id == dest_bin.warehouse_ref_id) & (StorageLocationModel.bin == dest_bin.bin_code)
             )
         ).with_for_update()
     )
@@ -510,18 +469,18 @@ async def perform_bin_to_bin_transfer(
     if not dest_loc:
         if not dest_bin.zone_id:
             raise HTTPException(status_code=409, detail="Destination Bin must belong to a configured Zone")
-        dest_zone = await uow.session.get(StoreZoneModel, dest_bin.zone_id)
+        dest_zone = await uow.session.get(WarehouseZoneModel, dest_bin.zone_id)
         if not dest_zone:
             raise HTTPException(status_code=409, detail="Destination Bin Zone was not found")
         dest_loc = StorageLocationModel(
-            warehouse_id=dest_warehouse,
-            store_id=dest_bin.store_id,
+            warehouse_id=destination_warehouse_id,
+            warehouse_ref_id=dest_bin.warehouse_ref_id,
             zone_id=dest_bin.zone_id,
             bin_id=dest_bin.id,
             zone=dest_zone.zone_code,
             rack=dest_bin.rack or "",
             bin=dest_bin.bin_code,
-            location_code=f"LOC-{dest_store.store_code}-{dest_zone.zone_code}-{dest_bin.bin_code}",
+            location_code=f"LOC-{destination_config.warehouse_code}-{dest_zone.zone_code}-{dest_bin.bin_code}",
             active=True,
             capacity=dest_bin.capacity, occupied_quantity=0,
         )
@@ -541,7 +500,7 @@ async def perform_bin_to_bin_transfer(
             material_code=src_bal.material_code,
             batch_number=src_bal.batch_number,
             material_name=src_bal.material_name,
-            warehouse_id=dest_warehouse,
+            warehouse_id=destination_warehouse_id,
             storage_location_id=dest_loc.id,
             quantity=Decimal("0.0"),
             available_quantity=Decimal("0.0"),
@@ -579,8 +538,8 @@ async def perform_bin_to_bin_transfer(
     dest_bin.updated_at = now_utc
 
     # 7. Record Immutable Movement Audit Entry (Section 25)
-    from_loc_str = f"{src_store.store_code} / {src_bin.bin_code}"
-    to_loc_str = f"{dest_store.store_code} / {dest_bin.bin_code}"
+    from_loc_str = f"{source_config.warehouse_code} / {src_bin.bin_code}"
+    to_loc_str = f"{destination_config.warehouse_code} / {dest_bin.bin_code}"
     remarks_str = f"Reason: {req.reason}. {req.remarks or ''}".strip()
 
     movement_rec = InventoryMovementHistoryModel(
@@ -602,9 +561,9 @@ async def perform_bin_to_bin_transfer(
         stock_after=src_bal.available_quantity,
         performed_by=user.username,
         user_role=",".join(user.roles or []),
-        warehouse_id=src_warehouse,
-        store_id=src_bin.store_id,
-        store_code=src_store.store_code if src_store else None,
+        warehouse_id=source_warehouse_id,
+        warehouse_ref_id=src_bin.warehouse_ref_id,
+        warehouse_code=source_config.warehouse_code if source_config else None,
         reference_document="BIN_TRANSFER",
         remarks=remarks_str,
         performed_at=now_utc,
@@ -665,11 +624,11 @@ async def get_material_inventory_detail(
 
     # 2. Locations & Location Balances
     loc_bal_res = await uow.session.execute(
-        select(InventoryLocationBalanceModel, StorageLocationModel, StoreModel, StoreZoneModel, StoreBinModel)
+        select(InventoryLocationBalanceModel, StorageLocationModel, WarehouseModel, WarehouseZoneModel, WarehouseBinModel)
         .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
-        .outerjoin(StoreModel, StoreModel.id == StorageLocationModel.store_id)
-        .outerjoin(StoreZoneModel, StoreZoneModel.id == StorageLocationModel.zone_id)
-        .outerjoin(StoreBinModel, StoreBinModel.id == StorageLocationModel.bin_id)
+        .outerjoin(WarehouseModel, WarehouseModel.id == StorageLocationModel.warehouse_ref_id)
+        .outerjoin(WarehouseZoneModel, WarehouseZoneModel.id == StorageLocationModel.zone_id)
+        .outerjoin(WarehouseBinModel, WarehouseBinModel.id == StorageLocationModel.bin_id)
         .where(func.lower(InventoryLocationBalanceModel.material_code) == m_code.lower())
     )
     loc_rows = loc_bal_res.all()
@@ -678,15 +637,15 @@ async def get_material_inventory_detail(
     tot_loc_avail = 0.0
     tot_loc_on_hand = 0.0
 
-    for bal, sloc, store, zone, bin_item in loc_rows:
+    for bal, sloc, warehouse, zone, bin_item in loc_rows:
         avail = float(bal.available_quantity)
         tot = float(bal.quantity or bal.available_quantity)
         tot_loc_avail += avail
         tot_loc_on_hand += tot
         locations_list.append({
             "id": str(bal.id),
-            "store_code": store.store_code if store else None,
-            "store_name": store.store_name if store else None,
+            "warehouse_code": warehouse.warehouse_code if warehouse else None,
+            "warehouse_name": warehouse.warehouse_name if warehouse else None,
             "zone_code": zone.zone_code if zone else sloc.zone,
             "zone_name": zone.zone_name if zone else sloc.zone,
             "bin_code": bin_item.bin_code if bin_item else (sloc.bin if sloc.bin and sloc.bin != "DEFAULT" else sloc.location_code),
@@ -722,7 +681,7 @@ async def get_material_inventory_detail(
             "reserved_quantity": r_qty,
             "uom": r.uom,
             "status": r.status,
-            "store_code": r.store_code,
+            "warehouse_code": r.warehouse_code,
             "bin_code": r.bin_code,
             "reserved_by": r.reserved_by,
             "reserved_at": r.reserved_at.isoformat() if r.reserved_at else None,
@@ -870,7 +829,7 @@ async def get_material_inventory_detail(
 @inventory_router.get("/warehouse-summary")
 async def get_warehouse_inventory_summary(
     material_code: Optional[str] = None,
-    store_id: Optional[str] = None,
+    warehouse_ref_id: Optional[str] = None,
     zone_id: Optional[str] = None,
     warehouse_id: Optional[str] = None,
     category: Optional[str] = None,
@@ -894,27 +853,27 @@ async def get_warehouse_inventory_summary(
     - Applies Section 22 Stock Formula: Available Stock = Eligible On-Hand - Reserved Stock
       (Excludes Rejected, Blocked, QC Hold / Quarantine from freely available stock).
     """
-    user_store_id, _ = await _resolve_user_store_context(uow, user)
-    target_store_id = None
-    if _is_store_scoped_role(user) and user_store_id:
-        if store_id and str(user_store_id) != store_id:
+    user_warehouse_ref_id, _ = await _resolve_user_warehouse_context(uow, user)
+    target_warehouse_ref_id = None
+    if _is_warehouse_scoped_role(user) and user_warehouse_ref_id:
+        if warehouse_ref_id and str(user_warehouse_ref_id) != warehouse_ref_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access forbidden: You cannot view inventory belonging to another Store.",
+                detail="Access forbidden: You cannot view inventory belonging to another Warehouse.",
             )
-        target_store_id = user_store_id
-    elif store_id and store_id != "ALL":
+        target_warehouse_ref_id = user_warehouse_ref_id
+    elif warehouse_ref_id and warehouse_ref_id != "ALL":
         try:
-            target_store_id = uuid.UUID(store_id)
+            target_warehouse_ref_id = uuid.UUID(warehouse_ref_id)
         except ValueError:
-            target_store_id = None
+            target_warehouse_ref_id = None
 
-    # 1. Fetch Store, Zone, and Bin lookup maps
-    stores_res = await uow.session.execute(select(StoreModel))
-    store_map = {s.id: s for s in stores_res.scalars().all()}
-    zones_res = await uow.session.execute(select(StoreZoneModel))
+    # 1. Fetch Warehouse, Zone, and Bin lookup maps
+    warehouses_res = await uow.session.execute(select(WarehouseModel))
+    warehouse_map = {s.id: s for s in warehouses_res.scalars().all()}
+    zones_res = await uow.session.execute(select(WarehouseZoneModel))
     zone_map = {z.id: z for z in zones_res.scalars().all()}
-    bins_res = await uow.session.execute(select(StoreBinModel))
+    bins_res = await uow.session.execute(select(WarehouseBinModel))
     bin_map = {b.id: b for b in bins_res.scalars().all()}
 
     # 2. Fetch Material Master lookup
@@ -965,8 +924,8 @@ async def get_warehouse_inventory_summary(
         select(InventoryLocationBalanceModel, StorageLocationModel)
         .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
     )
-    if target_store_id:
-        loc_bal_query = loc_bal_query.where(StorageLocationModel.store_id == target_store_id)
+    if target_warehouse_ref_id:
+        loc_bal_query = loc_bal_query.where(StorageLocationModel.warehouse_ref_id == target_warehouse_ref_id)
     if zone_id:
         try:
             loc_bal_query = loc_bal_query.where(StorageLocationModel.zone_id == uuid.UUID(zone_id))
@@ -990,7 +949,7 @@ async def get_warehouse_inventory_summary(
         seen_mat_codes.add(m_code)
         mat_obj = mat_map.get(m_code)
         stk_obj = stock_map.get(m_code)
-        s_obj = store_map.get(loc.store_id) if loc.store_id else None
+        s_obj = warehouse_map.get(loc.warehouse_ref_id) if loc.warehouse_ref_id else None
         z_obj = zone_map.get(loc.zone_id) if loc.zone_id else None
         b_obj = bin_map.get(loc.bin_id) if loc.bin_id else None
 
@@ -1109,9 +1068,9 @@ async def get_warehouse_inventory_summary(
             "supplier_name": supp_name,
             "grn": grn_num,
             "grn_number": grn_num,
-            "store_id": str(loc.store_id) if loc.store_id else None,
-            "store_code": s_obj.store_code if s_obj else None,
-            "store_name": s_obj.store_name if s_obj else None,
+            "warehouse_ref_id": str(loc.warehouse_ref_id) if loc.warehouse_ref_id else None,
+            "warehouse_code": s_obj.warehouse_code if s_obj else None,
+            "warehouse_name": s_obj.warehouse_name if s_obj else None,
             "zone_id": str(loc.zone_id) if loc.zone_id else None,
             "zone_code": z_obj.zone_code if z_obj else loc.zone,
             "zone_name": z_obj.zone_name if z_obj else loc.zone,
@@ -1144,7 +1103,7 @@ async def get_warehouse_inventory_summary(
         output.append(rec)
 
     # Include unassigned central stock if viewing global summary
-    if not target_store_id:
+    if not target_warehouse_ref_id:
         for m_code, stk in stock_map.items():
             if m_code not in seen_mat_codes:
                 mat_obj = mat_map.get(m_code)
@@ -1170,9 +1129,9 @@ async def get_warehouse_inventory_summary(
                     "supplier_name": supplier_by_mat.get(m_code),
                     "grn": grn_num,
                     "grn_number": grn_num,
-                    "store_id": None,
-                    "store_code": "UNASSIGNED",
-                    "store_name": "Awaiting Putaway / Central",
+                    "warehouse_ref_id": None,
+                    "warehouse_code": "UNASSIGNED",
+                    "warehouse_name": "Awaiting Putaway / Central",
                     "zone_id": None,
                     "zone_code": "RECEIVING_AREA",
                     "zone_name": "Receiving Dock",
@@ -1264,7 +1223,7 @@ async def get_warehouse_inventory_summary(
             r for r in filtered_output
             if s_lower in r["material_code"].lower()
             or s_lower in r["material_name"].lower()
-            or s_lower in (r["store_code"] or "").lower()
+            or s_lower in (r["warehouse_code"] or "").lower()
             or s_lower in (r["zone_code"] or "").lower()
             or s_lower in (r["bin_code"] or "").lower()
             or s_lower in (r["batch"] or "").lower()
@@ -1279,7 +1238,7 @@ async def get_warehouse_inventory_summary(
 @inventory_router.get("/ledger")
 async def get_stock_ledger(
     material_code: Optional[str] = None,
-    store_id: Optional[str] = None,
+    warehouse_ref_id: Optional[str] = None,
     zone_id: Optional[str] = None,
     transaction_type: Optional[str] = None,
     start_date: Optional[str] = None,
@@ -1291,37 +1250,37 @@ async def get_stock_ledger(
     """
     Returns the single authoritative chronological stock ledger across:
     - RECEIPT (GRN Postings)
-    - PUTAWAY (Movements into Stores & Zones)
+    - PUTAWAY (Movements into Warehouses & Zones)
     - ISSUE (Assembly Outbound Handovers)
     - QUARANTINE (QC Damaged Stock Quarantine)
     - SCRAP / ACCEPTED_WITH_DEVIATION (Quarantine Dispositions)
     """
-    user_store_id, _ = await _resolve_user_store_context(uow, user)
-    if _is_store_scoped_role(user):
-        if not user_store_id:
+    user_warehouse_ref_id, _ = await _resolve_user_warehouse_context(uow, user)
+    if _is_warehouse_scoped_role(user):
+        if not user_warehouse_ref_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Store user context not assigned to an active Store.",
+                detail="Warehouse user context not assigned to an active Warehouse.",
             )
-        if store_id and str(user_store_id) != store_id:
+        if warehouse_ref_id and str(user_warehouse_ref_id) != warehouse_ref_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access forbidden: You cannot view stock ledger of another Store.",
+                detail="Access forbidden: You cannot view stock ledger of another Warehouse.",
             )
-        target_store_id = user_store_id
+        target_warehouse_ref_id = user_warehouse_ref_id
     else:
-        target_store_id = uuid.UUID(store_id) if store_id else None
+        target_warehouse_ref_id = uuid.UUID(warehouse_ref_id) if warehouse_ref_id else None
 
-    # Fetch store & zone lookup maps
-    stores_res = await uow.session.execute(select(StoreModel))
-    store_map = {s.id: s for s in stores_res.scalars().all()}
-    zones_res = await uow.session.execute(select(StoreZoneModel))
+    # Fetch warehouse & zone lookup maps
+    warehouses_res = await uow.session.execute(select(WarehouseModel))
+    warehouse_map = {s.id: s for s in warehouses_res.scalars().all()}
+    zones_res = await uow.session.execute(select(WarehouseZoneModel))
     zone_map = {z.id: z for z in zones_res.scalars().all()}
 
     ledger_entries: List[Dict[str, Any]] = []
 
     # 1. GRN Receipt Postings (RECEIPT)
-    if not target_store_id: # GRN receipts occur at central dock before store putaway
+    if not target_warehouse_ref_id: # GRN receipts occur at central dock before warehouse putaway
         rcpt_query = select(InventoryReceiptPostingModel)
         if material_code:
             rcpt_query = rcpt_query.where(
@@ -1337,9 +1296,9 @@ async def get_stock_ledger(
                 "material_name": r.material_name or r.item_code,
                 "quantity": float(r.posted_quantity),
                 "uom": r.uom or "PCS",
-                "store_id": None,
-                "store_code": None,
-                "store_name": "Receiving Dock",
+                "warehouse_ref_id": None,
+                "warehouse_code": None,
+                "warehouse_name": "Receiving Dock",
                 "zone_id": None,
                 "zone_code": "RECEIVING_AREA",
                 "zone_name": "Dock Area",
@@ -1358,11 +1317,11 @@ async def get_stock_ledger(
         .join(PutawayTaskModel, PutawayTaskModel.id == PutawayMovementModel.putaway_task_id)
         .outerjoin(StorageLocationModel, StorageLocationModel.id == PutawayTaskModel.destination_location_id)
     )
-    if target_store_id:
+    if target_warehouse_ref_id:
         put_query = put_query.where(
             or_(
-                PutawayTaskModel.destination_store_id == target_store_id,
-                StorageLocationModel.store_id == target_store_id,
+                PutawayTaskModel.destination_warehouse_ref_id == target_warehouse_ref_id,
+                StorageLocationModel.warehouse_ref_id == target_warehouse_ref_id,
             )
         )
     if material_code:
@@ -1371,9 +1330,9 @@ async def get_stock_ledger(
         )
     put_res = await uow.session.execute(put_query)
     for mov, task, loc in put_res.all():
-        s_id = task.destination_store_id or (loc.store_id if loc else None)
+        s_id = task.destination_warehouse_ref_id or (loc.warehouse_ref_id if loc else None)
         z_id = task.destination_zone_id or (loc.zone_id if loc else None)
-        s_obj = store_map.get(s_id) if s_id else None
+        s_obj = warehouse_map.get(s_id) if s_id else None
         z_obj = zone_map.get(z_id) if z_id else None
 
         ledger_entries.append({
@@ -1384,15 +1343,15 @@ async def get_stock_ledger(
             "material_name": task.material_name,
             "quantity": float(mov.confirmed_quantity),
             "uom": mov.uom,
-            "store_id": str(s_id) if s_id else None,
-            "store_code": s_obj.store_code if s_obj else None,
-            "store_name": s_obj.store_name if s_obj else "Store",
+            "warehouse_ref_id": str(s_id) if s_id else None,
+            "warehouse_code": s_obj.warehouse_code if s_obj else None,
+            "warehouse_name": s_obj.warehouse_name if s_obj else "Warehouse",
             "zone_id": str(z_id) if z_id else None,
             "zone_code": z_obj.zone_code if z_obj else (loc.zone if loc else "ZONE"),
             "zone_name": z_obj.zone_name if z_obj else (loc.zone if loc else "Zone"),
             "reference_number": task.task_number,
             "source": task.source_location,
-            "destination": loc.location_code if loc else (z_obj.zone_code if z_obj else "STORE"),
+            "destination": loc.location_code if loc else (z_obj.zone_code if z_obj else "WAREHOUSE_OPERATOR"),
             "stock_before": float(mov.inventory_available_before),
             "stock_after": float(mov.inventory_available_after),
             "performed_by": mov.confirmed_by,
@@ -1401,15 +1360,15 @@ async def get_stock_ledger(
 
     # 3. Outbound Issue Transactions (ISSUE)
     iss_query = select(InventoryIssueTransactionModel)
-    if target_store_id:
-        iss_query = iss_query.where(InventoryIssueTransactionModel.store_id == target_store_id)
+    if target_warehouse_ref_id:
+        iss_query = iss_query.where(InventoryIssueTransactionModel.warehouse_ref_id == target_warehouse_ref_id)
     if material_code:
         iss_query = iss_query.where(
             func.lower(InventoryIssueTransactionModel.material_code) == material_code.lower()
         )
     iss_res = await uow.session.execute(iss_query)
     for iss in iss_res.scalars().all():
-        s_obj = store_map.get(iss.store_id) if iss.store_id else None
+        s_obj = warehouse_map.get(iss.warehouse_ref_id) if iss.warehouse_ref_id else None
         z_obj = zone_map.get(iss.zone_id) if iss.zone_id else None
 
         ledger_entries.append({
@@ -1420,14 +1379,14 @@ async def get_stock_ledger(
             "material_name": iss.material_name,
             "quantity": -float(iss.quantity),
             "uom": iss.uom,
-            "store_id": str(iss.store_id),
-            "store_code": iss.store_code,
-            "store_name": s_obj.store_name if s_obj else iss.store_code,
+            "warehouse_ref_id": str(iss.warehouse_ref_id),
+            "warehouse_code": iss.warehouse_code,
+            "warehouse_name": s_obj.warehouse_name if s_obj else iss.warehouse_code,
             "zone_id": str(iss.zone_id) if iss.zone_id else None,
             "zone_code": iss.zone_code or (z_obj.zone_code if z_obj else "ZONE"),
             "zone_name": z_obj.zone_name if z_obj else (iss.zone_code or "Zone"),
             "reference_number": iss.issue_number,
-            "source": iss.store_code,
+            "source": iss.warehouse_code,
             "destination": iss.recipient_department,
             "stock_before": float(iss.stock_before),
             "stock_after": float(iss.stock_after),
@@ -1436,7 +1395,7 @@ async def get_stock_ledger(
         })
 
     # 4. Quarantine Records (QUARANTINE)
-    if not target_store_id:
+    if not target_warehouse_ref_id:
         q_query = select(QuarantineRecordModel)
         if material_code:
             q_query = q_query.where(
@@ -1452,9 +1411,9 @@ async def get_stock_ledger(
                 "material_name": q.material_name,
                 "quantity": float(q.damaged_quantity),
                 "uom": q.uom,
-                "store_id": None,
-                "store_code": "QUARANTINE",
-                "store_name": "Quarantine Area",
+                "warehouse_ref_id": None,
+                "warehouse_code": "QUARANTINE",
+                "warehouse_name": "Quarantine Area",
                 "zone_id": None,
                 "zone_code": "QC-HOLD",
                 "zone_name": "QC Hold Area",
@@ -1468,7 +1427,7 @@ async def get_stock_ledger(
             })
 
     # 5. Quarantine Audits / Dispositions (SCRAP / ACCEPTED_WITH_DEVIATION)
-    if not target_store_id:
+    if not target_warehouse_ref_id:
         qa_query = select(QuarantineAuditModel)
         qa_res = await uow.session.execute(qa_query)
         for qa in qa_res.scalars().all():
@@ -1481,15 +1440,15 @@ async def get_stock_ledger(
                 "material_name": f"Disposition: {qa.disposition}",
                 "quantity": 0.0,
                 "uom": "PCS",
-                "store_id": None,
-                "store_code": "QUARANTINE",
-                "store_name": "Quarantine Area",
+                "warehouse_ref_id": None,
+                "warehouse_code": "QUARANTINE",
+                "warehouse_name": "Quarantine Area",
                 "zone_id": None,
                 "zone_code": "QC-DISPOSAL",
                 "zone_name": "QC Disposal",
                 "reference_number": str(qa.quarantine_id),
                 "source": "QUARANTINE",
-                "destination": "SCRAP_DISPOSAL" if tx_type == "SCRAP" else "STORE_AVAILABLE",
+                "destination": "SCRAP_DISPOSAL" if tx_type == "SCRAP" else "WAREHOUSE_AVAILABLE",
                 "stock_before": None,
                 "stock_after": None,
                 "performed_by": qa.performed_by,
@@ -1519,7 +1478,7 @@ async def get_stock_ledger(
             or s_term in (e["performed_by"] or "").lower()
             or s_term in (e["source"] or "").lower()
             or s_term in (e["destination"] or "").lower()
-            or s_term in (e["store_name"] or "").lower()
+            or s_term in (e["warehouse_name"] or "").lower()
             or s_term in (e["zone_name"] or "").lower()
         ]
 
@@ -1536,17 +1495,17 @@ async def get_inventory_stats(
     """
     Returns high-level authoritative inventory statistics.
     """
-    user_store_id, _ = await _resolve_user_store_context(uow, user)
-    is_store_user = _is_store_scoped_role(user)
+    user_warehouse_ref_id, _ = await _resolve_user_warehouse_context(uow, user)
+    is_warehouse_user = _is_warehouse_scoped_role(user)
 
-    if is_store_user:
-        if not user_store_id:
-            raise HTTPException(status_code=403, detail="Store user context not assigned.")
-        # Store level balances
+    if is_warehouse_user:
+        if not user_warehouse_ref_id:
+            raise HTTPException(status_code=403, detail="Warehouse user context not assigned.")
+        # Warehouse level balances
         bal_query = (
             select(InventoryLocationBalanceModel, StorageLocationModel)
             .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
-            .where(StorageLocationModel.store_id == user_store_id)
+            .where(StorageLocationModel.warehouse_ref_id == user_warehouse_ref_id)
         )
         bal_res = await uow.session.execute(bal_query)
         bals = bal_res.all()
@@ -1554,11 +1513,11 @@ async def get_inventory_stats(
         total_skus = len(set(b[0].material_code for b in bals))
         total_available = sum(float(b[0].available_quantity) for b in bals)
         stock_codes = {b[0].material_code for b in bals}
-        store_obj = await uow.session.get(StoreModel, user_store_id)
+        warehouse_obj = await uow.session.get(WarehouseModel, user_warehouse_ref_id)
         stock_res = await uow.session.execute(
             select(MaterialStockModel).where(
                 MaterialStockModel.material_code.in_(stock_codes),
-                MaterialStockModel.warehouse_id == (store_obj.warehouse_id if store_obj else ""),
+                MaterialStockModel.warehouse_id == (warehouse_obj.warehouse_id if warehouse_obj else ""),
             )
         ) if stock_codes else None
         stock_by_code = {s.material_code: s for s in (stock_res.scalars().all() if stock_res else [])}
@@ -1609,10 +1568,10 @@ async def get_warehouse_dashboard_metrics(
 ) -> Dict[str, Any]:
     """
     Returns authoritative real-time warehouse dashboard metrics:
-    - Action Required (Pending putaways, pending store pickups, active quarantine segregations, low stock alerts, unassigned putaway bins)
+    - Action Required (Pending putaways, pending warehouse pickups, active quarantine segregations, low stock alerts, unassigned putaway bins)
     - Inventory Snapshot (Total SKUs, On Hand, Available, Allocated, Quarantined)
     - Putaway Summary (Pending, In Progress, Completed, recent putaways)
-    - Storage Overview (Stores, Zones, Bins, Occupancy)
+    - Storage Overview (Warehouses, Zones, Bins, Occupancy)
     - Recent Warehouse Activity feed
     """
     # 1. Putaway tasks
@@ -1620,17 +1579,17 @@ async def get_warehouse_dashboard_metrics(
         select(PutawayTaskModel).order_by(PutawayTaskModel.created_at.desc())
     )
     all_putaways = pt_res.scalars().all()
-    pending_putaway_list = [p for p in all_putaways if (p.status or "").upper() in ("PUTAWAY_PENDING", "PENDING", "LOCATION_ASSIGNED", "OPEN", "READY_FOR_PUTAWAY", "ASSIGNED_TO_STORE")]
+    pending_putaway_list = [p for p in all_putaways if (p.status or "").upper() in ("PUTAWAY_PENDING", "PENDING", "LOCATION_ASSIGNED", "OPEN", "READY_FOR_PUTAWAY", "ASSIGNED_TO_WAREHOUSE")]
     in_progress_putaway_list = [p for p in all_putaways if (p.status or "").upper() in ("IN_PROGRESS", "PUTAWAY_IN_PROGRESS")]
     completed_putaway_list = [p for p in all_putaways if (p.status or "").upper() in ("PUTAWAY_COMPLETED", "COMPLETED")]
     unassigned_putaway_count = sum(1 for p in pending_putaway_list if not p.destination_bin_id and not p.destination_location_id)
 
-    # 2. Store pickup tasks (from Assembly Requisitions)
+    # 2. Warehouse pickup tasks (from Assembly Requisitions)
     pickup_res = await uow.session.execute(
         select(PickupTaskModel).order_by(PickupTaskModel.created_at.desc())
     )
     all_pickups = pickup_res.scalars().all()
-    pending_pickups = [p for p in all_pickups if (p.status or "").upper() in ("ASSIGNED_TO_STORE", "PENDING", "IN_PROGRESS")]
+    pending_pickups = [p for p in all_pickups if (p.status or "").upper() in ("ASSIGNED_TO_WAREHOUSE", "PENDING", "IN_PROGRESS")]
 
     # 3. Assembly Requisitions
     req_res = await uow.session.execute(
@@ -1661,9 +1620,9 @@ async def get_warehouse_dashboard_metrics(
     total_on_hand = sum(float(s.on_hand) for s in all_stocks)
     total_available = sum(float(s.available) for s in all_stocks)
     total_allocated = sum(float(s.allocated) for s in all_stocks)
-    # Count each affected store/material once. Global MaterialStock is not
+    # Count each affected warehouse/material once. Global MaterialStock is not
     # sufficient because a material can be healthy globally but low in one
-    # store.
+    # warehouse.
     loc_stock_res = await uow.session.execute(
         select(InventoryLocationBalanceModel, StorageLocationModel, MaterialStockModel)
         .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
@@ -1673,23 +1632,23 @@ async def get_warehouse_dashboard_metrics(
             & (MaterialStockModel.warehouse_id == InventoryLocationBalanceModel.warehouse_id),
         )
     )
-    store_material_totals = {}
-    store_material_meta = {}
+    warehouse_material_totals = {}
+    warehouse_material_meta = {}
     for bal, loc, stock in loc_stock_res.all():
-        key = (loc.store_id, bal.material_code)
-        store_material_totals[key] = store_material_totals.get(key, 0.0) + float(bal.available_quantity or 0)
-        store_material_meta[key] = (bal, loc, stock)
-    low_store_items = [key for key, qty in store_material_totals.items() if qty < float(store_material_meta[key][2].reorder_point)]
-    out_store_items = [key for key, qty in store_material_totals.items() if qty <= 0]
+        key = (loc.warehouse_ref_id, bal.material_code)
+        warehouse_material_totals[key] = warehouse_material_totals.get(key, 0.0) + float(bal.available_quantity or 0)
+        warehouse_material_meta[key] = (bal, loc, stock)
+    low_warehouse_items = [key for key, qty in warehouse_material_totals.items() if qty < float(warehouse_material_meta[key][2].reorder_point)]
+    out_warehouse_items = [key for key, qty in warehouse_material_totals.items() if qty <= 0]
 
-    # 7. Stores, Zones, Bins
-    stores_count_res = await uow.session.execute(select(func.count(StoreModel.id)))
-    total_stores = stores_count_res.scalar() or 0
+    # 7. Warehouses, Zones, Bins
+    warehouses_count_res = await uow.session.execute(select(func.count(WarehouseModel.id)))
+    total_warehouses = warehouses_count_res.scalar() or 0
 
-    zones_count_res = await uow.session.execute(select(func.count(StoreZoneModel.id)))
+    zones_count_res = await uow.session.execute(select(func.count(WarehouseZoneModel.id)))
     total_zones = zones_count_res.scalar() or 0
 
-    bins_res = await uow.session.execute(select(StoreBinModel))
+    bins_res = await uow.session.execute(select(WarehouseBinModel))
     all_bins = bins_res.scalars().all()
     total_bins = len(all_bins)
     occupied_bins = sum(1 for b in all_bins if float(b.occupied_quantity or 0) > 0)
@@ -1731,9 +1690,9 @@ async def get_warehouse_dashboard_metrics(
             "id": f"pck-{p.id}",
             "timestamp": p.created_at.isoformat(),
             "type": "PICKUP",
-            "title": f"Store Pickup Â· {p.task_number}",
-            "detail": f"{p.material_name} ({p.material_code}) Â· Qty: {float(p.requested_quantity)} {p.uom} Â· Store: {p.store_name}",
-            "tone": "purple" if (p.status or "").upper() == "ASSIGNED_TO_STORE" else "success",
+            "title": f"Warehouse Pickup Â· {p.task_number}",
+            "detail": f"{p.material_name} ({p.material_code}) Â· Qty: {float(p.requested_quantity)} {p.uom} Â· Warehouse: {p.warehouse_name}",
+            "tone": "purple" if (p.status or "").upper() == "ASSIGNED_TO_WAREHOUSE" else "success",
         })
 
     # Recent Quarantine
@@ -1778,7 +1737,7 @@ async def get_warehouse_dashboard_metrics(
                     "material_name": p.material_name,
                     "quantity": float(p.requested_quantity),
                     "uom": p.uom,
-                    "store_name": p.store_name,
+                    "warehouse_name": p.warehouse_name,
                     "department": p.department,
                     "priority": p.priority,
                     "status": p.status,
@@ -1805,22 +1764,22 @@ async def get_warehouse_dashboard_metrics(
                 }
                 for q in active_quar[:5]
             ],
-            "low_stock_count": len(low_store_items),
+            "low_stock_count": len(low_warehouse_items),
             "low_stock_items": [
                 {
-                    "id": str(store_material_meta[key][0].id),
+                    "id": str(warehouse_material_meta[key][0].id),
                     "material_code": key[1],
-                    "material_name": store_material_meta[key][0].material_name,
-                    "category": store_material_meta[key][2].category,
-                    "on_hand": store_material_totals[key],
-                    "available": store_material_totals[key],
-                    "reorder_point": float(store_material_meta[key][2].reorder_point),
-                    "uom": store_material_meta[key][0].uom,
-                    "store_id": str(key[0]) if key[0] else None,
+                    "material_name": warehouse_material_meta[key][0].material_name,
+                    "category": warehouse_material_meta[key][2].category,
+                    "on_hand": warehouse_material_totals[key],
+                    "available": warehouse_material_totals[key],
+                    "reorder_point": float(warehouse_material_meta[key][2].reorder_point),
+                    "uom": warehouse_material_meta[key][0].uom,
+                    "warehouse_ref_id": str(key[0]) if key[0] else None,
                 }
-                for key in low_store_items[:5]
+                for key in low_warehouse_items[:5]
             ],
-            "out_of_stock_count": len(out_store_items),
+            "out_of_stock_count": len(out_warehouse_items),
             "unassigned_locations_count": unassigned_putaway_count,
         },
         "inventory_snapshot": {
@@ -1829,8 +1788,8 @@ async def get_warehouse_dashboard_metrics(
             "total_available": total_available,
             "total_allocated": total_allocated,
             "total_quarantined": total_quar_qty,
-            "low_stock_count": len(low_store_items),
-            "out_of_stock_count": len(out_store_items),
+            "low_stock_count": len(low_warehouse_items),
+            "out_of_stock_count": len(out_warehouse_items),
         },
         "putaway_summary": {
             "pending_count": len(pending_putaway_list),
@@ -1854,7 +1813,7 @@ async def get_warehouse_dashboard_metrics(
             ],
         },
         "storage_overview": {
-            "total_stores": total_stores,
+            "total_warehouses": total_warehouses,
             "total_zones": total_zones,
             "total_bins": total_bins,
             "occupied_bins": occupied_bins,
@@ -1887,19 +1846,19 @@ async def perform_takeaway(
     uow: UnitOfWork = Depends(get_uow),
 ) -> Dict[str, Any]:
     """
-    Perform authorized material takeaway from a Store Bin.
-    Validates Store Manager / Store Keeper RBAC and Store isolation.
+    Perform authorized material takeaway from a Warehouse Bin.
+    Validates Warehouse Operator / Warehouse Operator RBAC and Warehouse isolation.
     Scans Bin QR & Material QR, decrements bin inventory, updates Material Stock,
     and creates an audit trail entry in InventoryMovementHistoryModel.
     """
     roles_upper = {r.upper() for r in (user.roles or [])}
-    is_store_user = ("STORE_MANAGER" in roles_upper or "STORE_KEEPER" in roles_upper)
+    is_warehouse_user = ("WAREHOUSE_OPERATOR" in roles_upper or "WAREHOUSE_OPERATOR" in roles_upper)
     is_admin = bool(roles_upper.intersection({"ADMIN", "SUPERUSER", "WAREHOUSE", "WAREHOUSE_MANAGER"}))
 
-    if not is_store_user and not is_admin:
+    if not is_warehouse_user and not is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: Only Store Managers or Store Keepers can perform takeaway operations.",
+            detail="Access denied: Only Warehouse Operators or Warehouse Operators can perform takeaway operations.",
         )
 
     if req.quantity <= 0:
@@ -1922,47 +1881,47 @@ async def perform_takeaway(
     bin_obj = None
     try:
         b_uuid = uuid.UUID(str(bin_identifier))
-        bin_obj = await uow.session.get(StoreBinModel, b_uuid)
+        bin_obj = await uow.session.get(WarehouseBinModel, b_uuid)
     except (ValueError, TypeError):
         pass
 
     if bin_obj is None:
         bq = await uow.session.execute(
-            select(StoreBinModel).where(or_(func.upper(StoreBinModel.bin_code) == str(bin_identifier).strip().upper(), func.upper(StoreBinModel.qr_identifier) == str(bin_identifier).strip().upper()))
+            select(WarehouseBinModel).where(or_(func.upper(WarehouseBinModel.bin_code) == str(bin_identifier).strip().upper(), func.upper(WarehouseBinModel.qr_identifier) == str(bin_identifier).strip().upper()))
         )
         bin_obj = bq.scalar_one_or_none()
 
     if bin_obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Scanned Bin '{bin_raw}' not found in any store.",
+            detail=f"Scanned Bin '{bin_raw}' not found in any warehouse.",
         )
 
-    bin_obj = await uow.session.scalar(select(StoreBinModel).where(StoreBinModel.id == bin_obj.id).with_for_update().execution_options(populate_existing=True))
+    bin_obj = await uow.session.scalar(select(WarehouseBinModel).where(WarehouseBinModel.id == bin_obj.id).with_for_update().execution_options(populate_existing=True))
 
-    # 2. Store isolation & RBAC check
-    target_store = await uow.session.get(StoreModel, bin_obj.store_id)
-    if not target_store:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent Store for Bin not found.")
+    # 2. Warehouse isolation & RBAC check
+    target_warehouse = await uow.session.get(WarehouseModel, bin_obj.warehouse_ref_id)
+    if not target_warehouse:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent Warehouse for Bin not found.")
 
-    if is_store_user and not is_admin:
-        user_store_id, user_store_code = await _resolve_user_store_context(uow, user)
-        # Check against user_store_id or store_code or username
-        store_match = False
-        if user_store_id and user_store_id == target_store.id:
-            store_match = True
-        elif user_store_code and user_store_code.strip().upper() == target_store.store_code.strip().upper():
-            store_match = True
-        elif target_store.store_manager_id and (
-            target_store.store_manager_id.lower() == (user.username or "").lower()
-            or target_store.store_manager_id.lower() == (user.subject or "").lower()
+    if is_warehouse_user and not is_admin:
+        user_warehouse_ref_id, user_warehouse_code = await _resolve_user_warehouse_context(uow, user)
+        # Check against user_warehouse_ref_id or warehouse_code or username
+        warehouse_match = False
+        if user_warehouse_ref_id and user_warehouse_ref_id == target_warehouse.id:
+            warehouse_match = True
+        elif user_warehouse_code and user_warehouse_code.strip().upper() == target_warehouse.warehouse_code.strip().upper():
+            warehouse_match = True
+        elif target_warehouse.warehouse_operator_id and (
+            target_warehouse.warehouse_operator_id.lower() == (user.username or "").lower()
+            or target_warehouse.warehouse_operator_id.lower() == (user.subject or "").lower()
         ):
-            store_match = True
+            warehouse_match = True
 
-        if not store_match:
+        if not warehouse_match:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access forbidden: You can only perform takeaway operations for your assigned Store ('{target_store.store_code}').",
+                detail=f"Access forbidden: You can only perform takeaway operations for your assigned Warehouse ('{target_warehouse.warehouse_code}').",
             )
 
     # 3. Resolve Material
@@ -2019,7 +1978,7 @@ async def perform_takeaway(
             or_(
                 StorageLocationModel.bin_id == bin_obj.id,
                 (
-                    (StorageLocationModel.store_id == bin_obj.store_id)
+                    (StorageLocationModel.warehouse_ref_id == bin_obj.warehouse_ref_id)
                     & (StorageLocationModel.bin == bin_obj.bin_code)
                 ),
             )
@@ -2076,12 +2035,12 @@ async def perform_takeaway(
         raise HTTPException(409, "Quantity is reserved for assembly. Use the approved picking task or release the reservation first.")
 
     # 6. Fetch MaterialStockModel
-    if not target_store.warehouse_id:
-        raise HTTPException(status_code=409, detail="Selected Store has no configured warehouse")
+    if not target_warehouse.warehouse_id:
+        raise HTTPException(status_code=409, detail="Selected Warehouse has no configured warehouse")
     stock_res = await uow.session.execute(
         select(MaterialStockModel).where(
             MaterialStockModel.material_code == balance.material_code,
-            MaterialStockModel.warehouse_id == target_store.warehouse_id,
+            MaterialStockModel.warehouse_id == target_warehouse.warehouse_id,
         ).with_for_update()
     )
     stock = stock_res.scalar_one_or_none()
@@ -2115,7 +2074,7 @@ async def perform_takeaway(
         material_qr=req.material_scan.strip(),
         grn_number=balance.last_grn_number,
         batch_lot=balance.batch_number,
-        from_location=f"{target_store.store_code} / {bin_obj.bin_code}",
+        from_location=f"{target_warehouse.warehouse_code} / {bin_obj.bin_code}",
         to_location="OUTBOUND / TAKEAWAY",
         from_bin_id=bin_obj.id,
         to_bin_id=None,
@@ -2125,9 +2084,9 @@ async def perform_takeaway(
         stock_after=stock_after,
         performed_by=user.username,
         user_role=",".join(user.roles or []),
-        warehouse_id=target_store.warehouse_id,
-        store_id=target_store.id,
-        store_code=target_store.store_code,
+        warehouse_id=target_warehouse.warehouse_id,
+        warehouse_ref_id=target_warehouse.id,
+        warehouse_code=target_warehouse.warehouse_code,
         reference_document=req.reference_document or "TAKEAWAY",
         remarks=req.remarks or f"Takeaway {req.quantity} {balance.uom} from Bin {bin_obj.bin_code}",
         performed_at=now_utc,
@@ -2143,7 +2102,7 @@ async def perform_takeaway(
         "batch_number": balance.batch_number,
         "material_name": balance.material_name,
         "bin_code": bin_obj.bin_code,
-        "store_code": target_store.store_code,
+        "warehouse_code": target_warehouse.warehouse_code,
         "takeaway_quantity": float(req.quantity),
         "uom": balance.uom,
         "remaining_bin_quantity": float(balance.available_quantity),
@@ -2157,7 +2116,7 @@ async def perform_takeaway(
 async def get_inventory_movement_history(
     movement_type: Optional[str] = None,
     material_code: Optional[str] = None,
-    store_id: Optional[str] = None,
+    warehouse_ref_id: Optional[str] = None,
     bin_id: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -2167,21 +2126,21 @@ async def get_inventory_movement_history(
 ) -> List[Dict[str, Any]]:
     """
     Query the complete inventory movement history audit trail (PUTAWAY, TAKEAWAY, TRANSFER, etc.).
-    Enforces store-level isolation for Store Managers/Keepers.
+    Enforces warehouse-level isolation for Warehouse Operators/Keepers.
     """
-    user_store_id, _ = await _resolve_user_store_context(uow, user)
-    if _is_store_scoped_role(user):
-        if not user_store_id:
-            raise HTTPException(status_code=403, detail="Store user context not assigned.")
-        if store_id and str(user_store_id) != store_id:
-            raise HTTPException(status_code=403, detail="Access forbidden: You cannot view movement history of another Store.")
-        target_store_id = user_store_id
+    user_warehouse_ref_id, _ = await _resolve_user_warehouse_context(uow, user)
+    if _is_warehouse_scoped_role(user):
+        if not user_warehouse_ref_id:
+            raise HTTPException(status_code=403, detail="Warehouse user context not assigned.")
+        if warehouse_ref_id and str(user_warehouse_ref_id) != warehouse_ref_id:
+            raise HTTPException(status_code=403, detail="Access forbidden: You cannot view movement history of another Warehouse.")
+        target_warehouse_ref_id = user_warehouse_ref_id
     else:
-        target_store_id = uuid.UUID(store_id) if store_id else None
+        target_warehouse_ref_id = uuid.UUID(warehouse_ref_id) if warehouse_ref_id else None
 
     stmt = select(InventoryMovementHistoryModel).order_by(InventoryMovementHistoryModel.performed_at.desc())
-    if target_store_id:
-        stmt = stmt.where(InventoryMovementHistoryModel.store_id == target_store_id)
+    if target_warehouse_ref_id:
+        stmt = stmt.where(InventoryMovementHistoryModel.warehouse_ref_id == target_warehouse_ref_id)
     if movement_type and movement_type.upper() != "ALL":
         stmt = stmt.where(func.upper(InventoryMovementHistoryModel.movement_type) == movement_type.strip().upper())
     if material_code:
@@ -2218,7 +2177,7 @@ async def get_inventory_movement_history(
                 and st not in r.from_location.lower()
                 and st not in r.to_location.lower()
                 and st not in r.performed_by.lower()
-                and st not in (r.store_code or "").lower()
+                and st not in (r.warehouse_code or "").lower()
             ):
                 continue
 
@@ -2331,8 +2290,8 @@ async def create_material_issue(
             issue_number=issue_number,
             requisition_id=req_obj.id,
             requisition_number=req_obj.requisition_number,
-            store_id=req_obj.assigned_store_id or uuid.uuid4(),
-            store_code=req_obj.assigned_store_code or "MAIN",
+            warehouse_ref_id=req_obj.assigned_warehouse_ref_id or uuid.uuid4(),
+            warehouse_code=req_obj.assigned_warehouse_code or "MAIN",
             material_code=m_code,
             material_name=item.material_name,
             quantity=iss_qty,
@@ -2351,7 +2310,7 @@ async def create_material_issue(
                 movement_type="ISSUE",
                 material_code=m_code,
                 material_name=item.material_name,
-                from_location=req_obj.assigned_store_code or "MAIN STORE",
+                from_location=req_obj.assigned_warehouse_code or "MAIN WAREHOUSE_OPERATOR",
                 to_location=req.issued_to,
                 quantity=iss_qty,
                 uom=item.uom,
@@ -2486,7 +2445,7 @@ async def create_material_return(
     """
     Creates & processes Assembly Material Return (Section 39).
     Dispositions:
-    - GOOD -> RETURN_TO_INVENTORY (Adds back to store stock)
+    - GOOD -> RETURN_TO_INVENTORY (Adds back to warehouse stock)
     - DAMAGED -> BLOCKED (Transfers to blocked stock)
     - UNKNOWN -> QC_HOLD (Creates Quarantine Record)
     """
@@ -2512,7 +2471,7 @@ async def create_material_return(
     m_code = req.material_code.strip()
     ret_qty = req.returned_quantity
 
-    # Fetch store balance & material stock
+    # Fetch warehouse balance & material stock
     bal_res = await uow.session.execute(
         select(InventoryLocationBalanceModel)
         .where(func.lower(InventoryLocationBalanceModel.material_code) == m_code.lower())
@@ -2541,7 +2500,7 @@ async def create_material_return(
                 material_code=m_code,
                 material_name=req.material_name,
                 from_location=req.assembly_line,
-                to_location=bal_obj.location_code if bal_obj else "STORE AVAILABLE",
+                to_location=bal_obj.location_code if bal_obj else "WAREHOUSE_OPERATOR AVAILABLE",
                 quantity=ret_qty,
                 uom=req.uom,
                 performed_by=user.username,
@@ -3034,10 +2993,10 @@ async def universal_scan(
     # 1. Location Scan
     if upper_code.startswith("LOC-") or upper_code.startswith("BIN-") or ("-" in code and len(code.split("-")) >= 3):
         loc_res = await uow.session.execute(
-            select(StoreBinModel).where(
+            select(WarehouseBinModel).where(
                 or_(
-                    func.lower(StoreBinModel.bin_code) == code.lower(),
-                    func.lower(StoreBinModel.qr_identifier) == code.lower(),
+                    func.lower(WarehouseBinModel.bin_code) == code.lower(),
+                    func.lower(WarehouseBinModel.qr_identifier) == code.lower(),
                 )
             )
         )
@@ -3320,20 +3279,20 @@ async def get_inventory_traceability(
 async def get_permission_matrix() -> Dict[str, Any]:
     """Role Permission Matrix (Section 48 & 49)."""
     matrix = [
-        {"operation": "View Inventory", "warehouse_manager": True, "store_manager": True, "operator": True, "assembly_manager": "Limited", "inventory_controller": True},
-        {"operation": "Manage Locations", "warehouse_manager": True, "store_manager": "Limited", "operator": False, "assembly_manager": False, "inventory_controller": True},
-        {"operation": "Assign Putaway", "warehouse_manager": True, "store_manager": True, "operator": False, "assembly_manager": False, "inventory_controller": False},
-        {"operation": "Perform Putaway", "warehouse_manager": False, "store_manager": True, "operator": True, "assembly_manager": False, "inventory_controller": False},
-        {"operation": "Transfer Stock", "warehouse_manager": True, "store_manager": True, "operator": True, "assembly_manager": False, "inventory_controller": True},
-        {"operation": "Create Material Request", "warehouse_manager": False, "store_manager": False, "operator": False, "assembly_manager": True, "inventory_controller": False},
-        {"operation": "Approve/Release Request", "warehouse_manager": True, "store_manager": True, "operator": False, "assembly_manager": False, "inventory_controller": False},
-        {"operation": "Reserve Stock", "warehouse_manager": True, "store_manager": True, "operator": False, "assembly_manager": False, "inventory_controller": False},
-        {"operation": "Perform Picking", "warehouse_manager": False, "store_manager": True, "operator": True, "assembly_manager": False, "inventory_controller": False},
-        {"operation": "Issue Material", "warehouse_manager": "Limited", "store_manager": True, "operator": False, "assembly_manager": False, "inventory_controller": False},
-        {"operation": "Confirm Assembly Receipt", "warehouse_manager": False, "store_manager": False, "operator": False, "assembly_manager": True, "inventory_controller": False},
-        {"operation": "Cycle Count", "warehouse_manager": True, "store_manager": True, "operator": True, "assembly_manager": False, "inventory_controller": True},
-        {"operation": "Approve Adjustment", "warehouse_manager": True, "store_manager": "Limited", "operator": False, "assembly_manager": False, "inventory_controller": True},
-        {"operation": "View Ledger", "warehouse_manager": True, "store_manager": True, "operator": "Limited", "assembly_manager": "Limited", "inventory_controller": True},
+        {"operation": "View Inventory", "warehouse_manager": True, "warehouse_operator": True, "operator": True, "assembly_manager": "Limited", "inventory_controller": True},
+        {"operation": "Manage Locations", "warehouse_manager": True, "warehouse_operator": "Limited", "operator": False, "assembly_manager": False, "inventory_controller": True},
+        {"operation": "Assign Putaway", "warehouse_manager": True, "warehouse_operator": True, "operator": False, "assembly_manager": False, "inventory_controller": False},
+        {"operation": "Perform Putaway", "warehouse_manager": False, "warehouse_operator": True, "operator": True, "assembly_manager": False, "inventory_controller": False},
+        {"operation": "Transfer Stock", "warehouse_manager": True, "warehouse_operator": True, "operator": True, "assembly_manager": False, "inventory_controller": True},
+        {"operation": "Create Material Request", "warehouse_manager": False, "warehouse_operator": False, "operator": False, "assembly_manager": True, "inventory_controller": False},
+        {"operation": "Approve/Release Request", "warehouse_manager": True, "warehouse_operator": True, "operator": False, "assembly_manager": False, "inventory_controller": False},
+        {"operation": "Reserve Stock", "warehouse_manager": True, "warehouse_operator": True, "operator": False, "assembly_manager": False, "inventory_controller": False},
+        {"operation": "Perform Picking", "warehouse_manager": False, "warehouse_operator": True, "operator": True, "assembly_manager": False, "inventory_controller": False},
+        {"operation": "Issue Material", "warehouse_manager": "Limited", "warehouse_operator": True, "operator": False, "assembly_manager": False, "inventory_controller": False},
+        {"operation": "Confirm Assembly Receipt", "warehouse_manager": False, "warehouse_operator": False, "operator": False, "assembly_manager": True, "inventory_controller": False},
+        {"operation": "Cycle Count", "warehouse_manager": True, "warehouse_operator": True, "operator": True, "assembly_manager": False, "inventory_controller": True},
+        {"operation": "Approve Adjustment", "warehouse_manager": True, "warehouse_operator": "Limited", "operator": False, "assembly_manager": False, "inventory_controller": True},
+        {"operation": "View Ledger", "warehouse_manager": True, "warehouse_operator": True, "operator": "Limited", "assembly_manager": "Limited", "inventory_controller": True},
     ]
     mobile_restrictions = [
         "Cannot edit GRN",
@@ -3462,14 +3421,14 @@ v1_inventory_router = APIRouter(prefix="/api/v1/inventory", tags=["v1-inventory"
 @v1_inventory_router.get("/warehouse-summary")
 async def get_v1_warehouse_inventory_summary(
     material_code: Optional[str] = None,
-    store_id: Optional[str] = None,
+    warehouse_ref_id: Optional[str] = None,
     zone_id: Optional[str] = None,
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> List[Dict[str, Any]]:
     return await get_warehouse_inventory_summary(
         material_code=material_code,
-        store_id=store_id,
+        warehouse_ref_id=warehouse_ref_id,
         zone_id=zone_id,
         user=user,
         uow=uow,

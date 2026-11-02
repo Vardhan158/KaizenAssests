@@ -1,6 +1,6 @@
 """
-Unit & Access Control Tests for Store Zones & Hierarchy.
-Tests Zone CRUD, Sequential Code Generation, Store Manager Zone Isolation,
+Unit & Access Control Tests for Warehouse Zones & Hierarchy.
+Tests Zone CRUD, Sequential Code Generation, Warehouse Operator Zone Isolation,
 IDOR Defense, and Warehouse Global Hierarchy Visibility.
 """
 import re
@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.database.session import AsyncSessionFactory, engine
 from app.database.base import Base
 from app.main import app
-from app.modules.store.infrastructure.persistence.models import StoreModel, StoreZoneModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel, WarehouseZoneModel
 
 
 @pytest.fixture(autouse=True)
@@ -28,22 +28,22 @@ async def cleanup_engine():
         try:
             test_zones = (
                 await session.execute(
-                    select(StoreZoneModel).where(
-                        StoreZoneModel.zone_name.like("Test %") | StoreZoneModel.zone_name.like("Zone %")
+                    select(WarehouseZoneModel).where(
+                        WarehouseZoneModel.zone_name.like("Test %") | WarehouseZoneModel.zone_name.like("Zone %")
                     )
                 )
             ).scalars().all()
             for z in test_zones:
                 await session.delete(z)
 
-            test_stores = (
+            test_warehouses = (
                 await session.execute(
-                    select(StoreModel).where(
-                        StoreModel.store_name.like("Test Zone %")
+                    select(WarehouseModel).where(
+                        WarehouseModel.warehouse_name.like("Test Zone %")
                     )
                 )
             ).scalars().all()
-            for s in test_stores:
+            for s in test_warehouses:
                 await session.delete(s)
 
             await session.commit()
@@ -61,30 +61,30 @@ async def test_zone_crud_and_code_generation():
             "X-User-Roles": "WAREHOUSE,ADMIN",
         }
 
-        # 1. Create a Test Store
-        store_res = await client.post(
-            "/api/v1/stores",
+        # 1. Create a Test Warehouse
+        warehouse_res = await client.post(
+            "/api/v1/warehouse",
             json={
-                "store_name": "Test Zone Electrical Store",
-                "description": "Store for zone testing",
+                "warehouse_name": "Test Zone Electrical Warehouse",
+                "description": "Warehouse for zone testing",
                 "status": "ACTIVE",
             },
             headers=warehouse_headers,
         )
-        assert store_res.status_code == 201
-        store_data = store_res.json()
-        store_id = store_data["id"]
-        store_code = store_data["store_code"]
+        assert warehouse_res.status_code == 201
+        warehouse_data = warehouse_res.json()
+        warehouse_ref_id = warehouse_data["id"]
+        warehouse_code = warehouse_data["warehouse_code"]
 
         # 2. Check next suggested zone code endpoint
-        next_code_res = await client.get(f"/api/v1/stores/{store_id}/zones/next-code", headers=warehouse_headers)
+        next_code_res = await client.get(f"/api/v1/warehouse/{warehouse_ref_id}/zones/next-code", headers=warehouse_headers)
         assert next_code_res.status_code == 200
         suggested_zone = next_code_res.json()["suggested_zone_code"]
-        assert suggested_zone == f"{store_code}-Z01"
+        assert suggested_zone == f"{warehouse_code}-Z01"
 
         # 3. Create Zone 1 (Auto-generated code)
         z1_res = await client.post(
-            f"/api/v1/stores/{store_id}/zones",
+            f"/api/v1/warehouse/{warehouse_ref_id}/zones",
             json={
                 "zone_name": "Test High Voltage Bay",
                 "description": "Panel and breaker racks",
@@ -93,14 +93,14 @@ async def test_zone_crud_and_code_generation():
         )
         assert z1_res.status_code == 201
         z1_data = z1_res.json()
-        assert z1_data["zone_code"] == f"{store_code}-Z01"
+        assert z1_data["zone_code"] == f"{warehouse_code}-Z01"
         assert z1_data["zone_name"] == "Test High Voltage Bay"
         assert z1_data["status"] == "ACTIVE"
         z1_id = z1_data["id"]
 
         # 4. Create Zone 2 (Next auto-generated code)
         z2_res = await client.post(
-            f"/api/v1/stores/{store_id}/zones",
+            f"/api/v1/warehouse/{warehouse_ref_id}/zones",
             json={
                 "zone_name": "Test Control Relays Area",
                 "description": "Sensors and relays bin",
@@ -109,13 +109,13 @@ async def test_zone_crud_and_code_generation():
         )
         assert z2_res.status_code == 201
         z2_data = z2_res.json()
-        assert z2_data["zone_code"] == f"{store_code}-Z02"
+        assert z2_data["zone_code"] == f"{warehouse_code}-Z02"
 
-        # 5. Duplicate zone_code in same store should return 409 Conflict
+        # 5. Duplicate zone_code in same warehouse should return 409 Conflict
         dup_res = await client.post(
-            f"/api/v1/stores/{store_id}/zones",
+            f"/api/v1/warehouse/{warehouse_ref_id}/zones",
             json={
-                "zone_code": f"{store_code}-Z01",
+                "zone_code": f"{warehouse_code}-Z01",
                 "zone_name": "Duplicate Zone Attempt",
             },
             headers=warehouse_headers,
@@ -125,9 +125,9 @@ async def test_zone_crud_and_code_generation():
         # 6. Get Zone by ID
         get_z1 = await client.get(f"/api/v1/zones/{z1_id}", headers=warehouse_headers)
         assert get_z1.status_code == 200
-        assert get_z1.json()["zone_code"] == f"{store_code}-Z01"
+        assert get_z1.json()["zone_code"] == f"{warehouse_code}-Z01"
 
-        # 7. Update Zone details & verify immutability of store_id and zone_code
+        # 7. Update Zone details & verify immutability of warehouse_ref_id and zone_code
         upd_res = await client.put(
             f"/api/v1/zones/{z1_id}",
             json={
@@ -139,8 +139,8 @@ async def test_zone_crud_and_code_generation():
         assert upd_res.status_code == 200
         upd_data = upd_res.json()
         assert upd_data["zone_name"] == "Test High Voltage Main Bay"
-        assert upd_data["zone_code"] == f"{store_code}-Z01"
-        assert upd_data["store_id"] == store_id
+        assert upd_data["zone_code"] == f"{warehouse_code}-Z01"
+        assert upd_data["warehouse_ref_id"] == warehouse_ref_id
 
         # 8. Toggle Zone Status
         deact_res = await client.patch(
@@ -161,7 +161,7 @@ async def test_zone_crud_and_code_generation():
 
 
 @pytest.mark.asyncio
-async def test_store_manager_zone_isolation_and_idor_defense():
+async def test_warehouse_operator_zone_isolation_and_idor_defense():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         warehouse_headers = {
@@ -169,80 +169,80 @@ async def test_store_manager_zone_isolation_and_idor_defense():
             "X-User-Name": "warehouse_user",
         }
 
-        # 1. Create Store Alpha and Zone Alpha-1
+        # 1. Create Warehouse Alpha and Zone Alpha-1
         res_a = await client.post(
-            "/api/v1/stores",
+            "/api/v1/warehouse",
             json={
-                "store_name": "Test Zone Store Alpha",
-                "store_manager_id": "EMP-MGR-ZONE-A",
-                "store_manager_name": "Alpha Zone Manager",
+                "warehouse_name": "Test Zone Warehouse Alpha",
+                "warehouse_operator_id": "EMP-MGR-ZONE-A",
+                "warehouse_operator_name": "Alpha Zone Manager",
             },
             headers=warehouse_headers,
         )
         assert res_a.status_code == 201
-        store_a = res_a.json()
+        warehouse_a = res_a.json()
 
         z_a_res = await client.post(
-            f"/api/v1/stores/{store_a['id']}/zones",
+            f"/api/v1/warehouse/{warehouse_a['id']}/zones",
             json={"zone_name": "Test Alpha Primary Rack"},
             headers=warehouse_headers,
         )
         assert z_a_res.status_code == 201
         zone_a = z_a_res.json()
 
-        # 2. Create Store Beta and Zone Beta-1
+        # 2. Create Warehouse Beta and Zone Beta-1
         res_b = await client.post(
-            "/api/v1/stores",
+            "/api/v1/warehouse",
             json={
-                "store_name": "Test Zone Store Beta",
-                "store_manager_id": "EMP-MGR-ZONE-B",
-                "store_manager_name": "Beta Zone Manager",
+                "warehouse_name": "Test Zone Warehouse Beta",
+                "warehouse_operator_id": "EMP-MGR-ZONE-B",
+                "warehouse_operator_name": "Beta Zone Manager",
             },
             headers=warehouse_headers,
         )
         assert res_b.status_code == 201
-        store_b = res_b.json()
+        warehouse_b = res_b.json()
 
         z_b_res = await client.post(
-            f"/api/v1/stores/{store_b['id']}/zones",
+            f"/api/v1/warehouse/{warehouse_b['id']}/zones",
             json={"zone_name": "Test Beta Heavy Bay"},
             headers=warehouse_headers,
         )
         assert z_b_res.status_code == 201
         zone_b = z_b_res.json()
 
-        # 3. Authenticate as Store Manager A (assigned to Store Alpha)
+        # 3. Authenticate as Warehouse Operator A (assigned to Warehouse Alpha)
         mgr_a_headers = {
             "X-User-Id": "00000000-0000-0000-0000-000000000010",
-            "X-User-Name": "store_mgr_zone_alpha",
-            "X-User-Roles": "STORE_MANAGER",
+            "X-User-Name": "warehouse_mgr_zone_alpha",
+            "X-User-Roles": "WAREHOUSE_OPERATOR",
             "X-Employee-Id": "EMP-MGR-ZONE-A",
-            "X-Store-Id": store_a["id"],
-            "X-Store-Code": store_a["store_code"],
+            "X-Warehouse-Id": warehouse_a["id"],
+            "X-Warehouse-Code": warehouse_a["warehouse_code"],
         }
 
-        # 4. Manager A lists zones in Store A -> 200 OK
-        list_own = await client.get(f"/api/v1/stores/{store_a['id']}/zones", headers=mgr_a_headers)
+        # 4. Manager A lists zones in Warehouse A -> 200 OK
+        list_own = await client.get(f"/api/v1/warehouse/{warehouse_a['id']}/zones", headers=mgr_a_headers)
         assert list_own.status_code == 200
         own_zone_ids = [z["id"] for z in list_own.json()]
         assert zone_a["id"] in own_zone_ids
 
-        # 5. Manager A creates Zone in Store A -> 201 Created
+        # 5. Manager A creates Zone in Warehouse A -> 201 Created
         create_own_z2 = await client.post(
-            f"/api/v1/stores/{store_a['id']}/zones",
+            f"/api/v1/warehouse/{warehouse_a['id']}/zones",
             json={"zone_name": "Test Alpha Secondary Rack"},
             headers=mgr_a_headers,
         )
         assert create_own_z2.status_code == 201
 
-        # 6. IDOR ATTACK: Manager A attempts to list zones in Store B -> 403 Forbidden
-        list_idor = await client.get(f"/api/v1/stores/{store_b['id']}/zones", headers=mgr_a_headers)
+        # 6. IDOR ATTACK: Manager A attempts to list zones in Warehouse B -> 403 Forbidden
+        list_idor = await client.get(f"/api/v1/warehouse/{warehouse_b['id']}/zones", headers=mgr_a_headers)
         assert list_idor.status_code == 403
         assert "Access denied" in list_idor.json()["detail"]
 
-        # 7. IDOR ATTACK: Manager A attempts to create zone in Store B -> 403 Forbidden
+        # 7. IDOR ATTACK: Manager A attempts to create zone in Warehouse B -> 403 Forbidden
         create_idor = await client.post(
-            f"/api/v1/stores/{store_b['id']}/zones",
+            f"/api/v1/warehouse/{warehouse_b['id']}/zones",
             json={"zone_name": "Unauthorized Injected Zone"},
             headers=mgr_a_headers,
         )
@@ -278,12 +278,12 @@ async def test_warehouse_global_hierarchy_view():
             "X-User-Name": "warehouse_user",
         }
 
-        res = await client.get("/api/v1/stores/hierarchy/all", headers=warehouse_headers)
+        res = await client.get("/api/v1/warehouse/hierarchy/all", headers=warehouse_headers)
         assert res.status_code == 200
         data = res.json()
         assert len(data) >= 1
-        for store in data:
-            assert "id" in store
-            assert "store_code" in store
-            assert "zones" in store
-            assert isinstance(store["zones"], list)
+        for warehouse in data:
+            assert "id" in warehouse
+            assert "warehouse_code" in warehouse
+            assert "zones" in warehouse
+            assert isinstance(warehouse["zones"], list)

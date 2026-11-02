@@ -446,13 +446,12 @@ function VehicleExit() {
       subtitle="Security confirmation for inbound vehicles after GRN receiving and dock release"
       actions={
         <div className="flex items-center gap-2">
-          <Button
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh"
             variant="outline"
             className="rounded-xl shadow-sm"
             onClick={() => void loadQueue()}
           >
-            <RefreshCw className="size-4" /> Refresh Queue
-          </Button>
+            <RefreshCw className="size-4" /></Button>
         </div>
       }
     >

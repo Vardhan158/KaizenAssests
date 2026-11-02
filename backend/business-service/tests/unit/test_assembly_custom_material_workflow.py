@@ -15,9 +15,9 @@ from app.modules.storage.infrastructure.persistence.models import (
     AssemblyRequisitionItemModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 
 
@@ -25,20 +25,20 @@ from app.modules.store.infrastructure.persistence.models import (
 async def test_assembly_custom_material_complete_workflow():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Seed test store & existing material
+        # Seed test warehouse & existing material
         async with session_scope() as session:
-            # 1. Existing Store
-            store_res = await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-TEST-01"))
-            store = store_res.scalar_one_or_none()
-            if not store:
-                store = StoreModel(
+            # 1. Existing Warehouse
+            warehouse_res = await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-TEST-01"))
+            warehouse = warehouse_res.scalar_one_or_none()
+            if not warehouse:
+                warehouse = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-TEST-01",
-                    store_name="Assembly Test Store",
+                    warehouse_code="STR-TEST-01",
+                    warehouse_name="Assembly Test Warehouse",
                     warehouse_id="WH-TEST",
                     status="ACTIVE",
                 )
-                session.add(store)
+                session.add(warehouse)
                 await session.flush()
 
             # 2. Existing Material Master (MAT-1001)

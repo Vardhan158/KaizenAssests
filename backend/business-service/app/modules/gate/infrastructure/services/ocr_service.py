@@ -25,10 +25,14 @@ def normalize_vehicle_registration(value: str) -> str:
     if bharat:
         year, number, series = bharat.groups()
         return f"{year}-BH-{number}-{series}"
-    standard = re.fullmatch(r"([A-Z]{2})(\d{1,2})([A-Z]{1,3})(\d{4})", compact)
+    standard = re.fullmatch(r"([A-Z]{2})(\d{1,2})([A-Z]{0,3})(\d{1,4})", compact)
     if standard:
         state, district, series, number = standard.groups()
-        return f"{state}-{district.zfill(2)}-{series}-{number}"
+        segments = [state, district.zfill(2)]
+        if series:
+            segments.append(series)
+        segments.append(number.zfill(4))
+        return "-".join(segments)
     raise ValueError("Vehicle number must match formats such as MH-12-AB-1234 or 22-BH-1234-AA.")
 
 
@@ -103,7 +107,7 @@ class TesseractAnprService:
             candidates = raw_text.splitlines() + [raw_text]
             for candidate in candidates:
                 compact = re.sub(r"[^A-Z0-9]", "", candidate.upper())
-                match = re.search(r"(?:\d{2}BH\d{4}[A-Z]{2}|[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4})", compact)
+                match = re.search(r"(?:\d{2}BH\d{4}[A-Z]{2}|[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4})", compact)
                 if match:
                     try:
                         plate = normalize_vehicle_registration(match.group(0))

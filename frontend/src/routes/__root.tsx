@@ -91,7 +91,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
     ],
   }),
   beforeLoad: ({ location }) => {
@@ -101,7 +100,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     // List of routes that don't require authentication
     const publicRoutes = new Set(["/login", "/"]);
 
-    if (!publicRoutes.has(location.pathname)) requireRouteAccess(location.pathname);
+    if (!publicRoutes.has(location.pathname))
+      requireRouteAccess(location.pathname, location.searchStr);
   },
   shellComponent: RootShell,
   component: RootComponent,
@@ -115,7 +115,7 @@ function RootShell({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body suppressHydrationWarning>
+      <body className="app-typography" suppressHydrationWarning>
         {children}
         <Scripts />
       </body>

@@ -5,17 +5,17 @@ Inventory Control, Stock Visibility & Authoritative Stock Ledger.
 Validates:
 1. End-to-End Inventory Scenario:
    - Receiving 100 units (95 good, 5 damaged) -> Available = 0 (pre-putaway), Quarantined = 5.
-   - Putaway 95 units to Mechanical Store / MECH-Z01 -> Available = 95, Quarantined = 5, Total = 100.
-   - Assembly requests 20 units -> Store Keeper picks 20 -> Available = 75, Quarantined = 5, Issued = 20.
+   - Putaway 95 units to Mechanical Warehouse / MECH-Z01 -> Available = 95, Quarantined = 5, Total = 100.
+   - Assembly requests 20 units -> Warehouse Operator picks 20 -> Available = 75, Quarantined = 5, Issued = 20.
 2. Negative Stock Protection:
    - Attempting to issue 80 units when Available = 75 is rejected with 400 Bad Request.
 3. Quarantine Isolation & Disposition:
    - Quarantined stock (5 units) is never treated as Available and cannot be picked.
 4. Authoritative Warehouse Matrix View:
-   - GET /api/storage/inventory/warehouse-summary accurately reflects Store/Zone balances.
-5. Store-Scoped Authorization & IDOR Defense:
-   - Store Manager / Keeper can only query own store; cross-store queries return 403 Forbidden.
-   - Warehouse user sees all Stores and Zones.
+   - GET /api/storage/inventory/warehouse-summary accurately reflects Warehouse/Zone balances.
+5. Warehouse-Scoped Authorization & IDOR Defense:
+   - Warehouse Operator / Keeper can only query own warehouse; cross-warehouse queries return 403 Forbidden.
+   - Warehouse user sees all Warehouses and Zones.
 6. Unified Chronological Stock Ledger:
    - Aggregates RECEIPT, PUTAWAY, ISSUE, and QUARANTINE records into an auditable ledger.
 7. Regression:
@@ -57,10 +57,10 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreModel,
-    StoreZoneModel,
-    StoreManagerUserModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseModel,
+    WarehouseZoneModel,
+    UserAccountModel,
 )
 
 
@@ -68,29 +68,29 @@ from app.modules.store.infrastructure.persistence.models import (
 async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Seed test stores, zones, and material
+        # Seed test warehouses, zones, and material
         async with session_scope() as session:
-            # 1. Stores: Mechanical Store (STR-002) and Electrical Store (STR-001)
-            s_mech_res = await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-002"))
+            # 1. Warehouses: Mechanical Warehouse (STR-002) and Electrical Warehouse (STR-001)
+            s_mech_res = await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-002"))
             s_mech = s_mech_res.scalar_one_or_none()
             if not s_mech:
-                s_mech = StoreModel(
+                s_mech = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-002",
-                    store_name="Mechanical Store",
+                    warehouse_code="STR-002",
+                    warehouse_name="Mechanical Warehouse",
                     warehouse_id="WH-001",
                     status="ACTIVE",
                 )
                 session.add(s_mech)
                 await session.flush()
 
-            s_elec_res = await session.execute(select(StoreModel).where(StoreModel.store_code == "STR-001"))
+            s_elec_res = await session.execute(select(WarehouseModel).where(WarehouseModel.warehouse_code == "STR-001"))
             s_elec = s_elec_res.scalar_one_or_none()
             if not s_elec:
-                s_elec = StoreModel(
+                s_elec = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code="STR-001",
-                    store_name="Electrical Store",
+                    warehouse_code="STR-001",
+                    warehouse_name="Electrical Warehouse",
                     warehouse_id="WH-001",
                     status="ACTIVE",
                 )
@@ -98,12 +98,12 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
                 await session.flush()
 
             # 2. Zones
-            z_mech_res = await session.execute(select(StoreZoneModel).where(StoreZoneModel.zone_code == "MECH-Z01"))
+            z_mech_res = await session.execute(select(WarehouseZoneModel).where(WarehouseZoneModel.zone_code == "MECH-Z01"))
             z_mech = z_mech_res.scalar_one_or_none()
             if not z_mech:
-                z_mech = StoreZoneModel(
+                z_mech = WarehouseZoneModel(
                     id=uuid.uuid4(),
-                    store_id=s_mech.id,
+                    warehouse_ref_id=s_mech.id,
                     zone_code="MECH-Z01",
                     zone_name="Mechanical Zone 1",
                     status="ACTIVE",
@@ -111,12 +111,12 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
                 session.add(z_mech)
                 await session.flush()
 
-            z_elec_res = await session.execute(select(StoreZoneModel).where(StoreZoneModel.zone_code == "ELECT-Z01"))
+            z_elec_res = await session.execute(select(WarehouseZoneModel).where(WarehouseZoneModel.zone_code == "ELECT-Z01"))
             z_elec = z_elec_res.scalar_one_or_none()
             if not z_elec:
-                z_elec = StoreZoneModel(
+                z_elec = WarehouseZoneModel(
                     id=uuid.uuid4(),
-                    store_id=s_elec.id,
+                    warehouse_ref_id=s_elec.id,
                     zone_code="ELECT-Z01",
                     zone_name="Electrical Zone 1",
                     status="ACTIVE",
@@ -134,7 +134,7 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
                     id=uuid.uuid4(),
                     location_code="LOC-STR002-MECHZ01-R01-B01",
                     warehouse_id="WH-001",
-                    store_id=s_mech.id,
+                    warehouse_ref_id=s_mech.id,
                     zone_id=z_mech.id,
                     zone="MECH-Z01",
                     rack="R01",
@@ -191,16 +191,16 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
                 delete(QuarantineRecordModel).where(QuarantineRecordModel.item_code == "TEST-MATERIAL-P9")
             )
 
-            store_mech_id = s_mech.id
-            store_elec_id = s_elec.id
+            warehouse_mech_id = s_mech.id
+            warehouse_elec_id = s_elec.id
             zone_mech_id = z_mech.id
             loc_mech_id = loc_mech.id
 
         # Auth headers
         warehouse_headers = {"Authorization": "Bearer mock-jwt-warehouse-token"}
         assembly_headers = {"Authorization": "Bearer mock-jwt-assembly-token"}
-        mech_store_headers = {"Authorization": "Bearer mock-jwt-store-keeper-token"} # Mechanical Store (STR-002)
-        elec_store_headers = {"Authorization": "Bearer mock-jwt-store-manager-token"} # Electrical Store (STR-001)
+        mech_warehouse_headers = {"Authorization": "Bearer mock-jwt-warehouse-operator-token"} # Mechanical Warehouse (STR-002)
+        elec_warehouse_headers = {"Authorization": "Bearer mock-jwt-warehouse-operator-token"} # Electrical Warehouse (STR-001)
 
         # =========================================================================
         # 1. INBOUND RECEIVING: 100 Units (95 Good, 5 Damaged/Quarantined)
@@ -271,7 +271,7 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
             )
             session.add(quar_rec)
 
-            # 1c. Putaway Task for 95 Good Units destined for Mechanical Store
+            # 1c. Putaway Task for 95 Good Units destined for Mechanical Warehouse
             putaway_task = PutawayTaskModel(
                 id=putaway_task_id,
                 task_number=putaway_task_no,
@@ -283,7 +283,7 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
                 uom="PCS",
                 warehouse_id="WH-001",
                 source_location="RECEIVING_AREA",
-                destination_store_id=store_mech_id,
+                destination_warehouse_ref_id=warehouse_mech_id,
                 destination_zone_id=zone_mech_id,
                 destination_location_id=loc_mech_id,
                 destination_zone="MECH-Z01",
@@ -304,16 +304,16 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
         assert p9_summary[0]["quarantined_quantity"] == 5.0
 
         # =========================================================================
-        # 2. PUTAWAY EXECUTION: Putaway 95 Good Units to Mechanical Store
+        # 2. PUTAWAY EXECUTION: Putaway 95 Good Units to Mechanical Warehouse
         # =========================================================================
-        # Store Keeper starts putaway
+        # Warehouse Operator starts putaway
         res_put_start = await client.post(
             f"/api/storage/putaway-tasks/{putaway_task_id}/start",
-            headers=mech_store_headers,
+            headers=mech_warehouse_headers,
         )
         assert res_put_start.status_code == 200
 
-        # Store Keeper completes putaway
+        # Warehouse Operator completes putaway
         res_put_comp = await client.post(
             f"/api/storage/putaway-tasks/{putaway_task_id}/complete",
             json={
@@ -321,7 +321,7 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
                 "location_scan": "LOC-STR002-MECHZ01-R01-B01",
                 "quantity": 95.0,
             },
-            headers=mech_store_headers,
+            headers=mech_warehouse_headers,
         )
         assert res_put_comp.status_code == 200
 
@@ -335,7 +335,7 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
         assert p9_sum_post[0]["total_quantity"] == 100.0
 
         # =========================================================================
-        # 3. ASSEMBLY REQUISITION & STORE KEEPER ISSUE: Pick 20 Units
+        # 3. ASSEMBLY REQUISITION & WAREHOUSE_OPERATOR KEEPER ISSUE: Pick 20 Units
         # =========================================================================
         req_payload = {
             "warehouse_id": "WH-001",
@@ -356,16 +356,16 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
         assert res_create_req.status_code == 201
         req_id = res_create_req.json()["id"]
 
-        # Warehouse assigns Mechanical Store
+        # Warehouse assigns Mechanical Warehouse
         res_assign = await client.post(
-            f"/api/v1/assembly-requisitions/{req_id}/assign-store",
-            json={"store_id": str(store_mech_id)},
+            f"/api/v1/assembly-requisitions/{req_id}/assign-warehouse",
+            json={"warehouse_ref_id": str(warehouse_mech_id)},
             headers=warehouse_headers,
         )
         assert res_assign.status_code == 200
         pickup_task_id = res_assign.json()["tasks"][0]["id"]
 
-        # Store Keeper completes issue of 20 units
+        # Warehouse Operator completes issue of 20 units
         res_pick_comp = await client.post(
             f"/api/storage/pickup-tasks/{pickup_task_id}/complete",
             json={
@@ -373,7 +373,7 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
                 "zone_scan": "MECH-Z01",
                 "quantity": 20.0,
             },
-            headers=mech_store_headers,
+            headers=mech_warehouse_headers,
         )
         assert res_pick_comp.status_code == 200
         pick_data = res_pick_comp.json()
@@ -411,8 +411,8 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
         req_over_id = res_create_over.json()["id"]
 
         res_assign_over = await client.post(
-            f"/api/v1/assembly-requisitions/{req_over_id}/assign-store",
-            json={"store_id": str(store_mech_id)},
+            f"/api/v1/assembly-requisitions/{req_over_id}/assign-warehouse",
+            json={"warehouse_ref_id": str(warehouse_mech_id)},
             headers=warehouse_headers,
         )
         task_over_id = res_assign_over.json()["tasks"][0]["id"]
@@ -425,7 +425,7 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
                 "zone_scan": "MECH-Z01",
                 "quantity": 80.0,
             },
-            headers=mech_store_headers,
+            headers=mech_warehouse_headers,
         )
         assert res_over_pick.status_code == 400
         assert "insufficient" in res_over_pick.json()["detail"].lower()
@@ -438,31 +438,31 @@ async def test_phase9_inventory_control_and_stock_ledger_full_lifecycle():
             assert stk_chk.scalar_one().available == Decimal("75.0")
 
         # =========================================================================
-        # 5. STORE-LEVEL AUTHORIZATION & IDOR DEFENSE
+        # 5. WAREHOUSE_OPERATOR-LEVEL AUTHORIZATION & IDOR DEFENSE
         # =========================================================================
-        # 5a. Store Manager A (Mechanical) can see Mechanical Store inventory
-        res_mech_summary = await client.get("/api/storage/inventory/warehouse-summary", headers=mech_store_headers)
+        # 5a. Warehouse Operator A (Mechanical) can see Mechanical Warehouse inventory
+        res_mech_summary = await client.get("/api/storage/inventory/warehouse-summary", headers=mech_warehouse_headers)
         assert res_mech_summary.status_code == 200
-        assert all(item["store_id"] == str(store_mech_id) or item["store_code"] == "STR-002" for item in res_mech_summary.json())
+        assert all(item["warehouse_ref_id"] == str(warehouse_mech_id) or item["warehouse_code"] == "STR-002" for item in res_mech_summary.json())
 
-        # 5b. IDOR: Store Manager A attempting to query Electrical Store inventory -> 403 Forbidden
+        # 5b. IDOR: Warehouse Operator A attempting to query Electrical Warehouse inventory -> 403 Forbidden
         res_idor_summary = await client.get(
-            f"/api/storage/inventory/warehouse-summary?store_id={store_elec_id}",
-            headers=mech_store_headers,
+            f"/api/storage/inventory/warehouse-summary?warehouse_ref_id={warehouse_elec_id}",
+            headers=mech_warehouse_headers,
         )
         assert res_idor_summary.status_code == 403
 
-        # 5c. IDOR: Store Manager A querying Electrical Store locations -> 403 Forbidden
+        # 5c. IDOR: Warehouse Operator A querying Electrical Warehouse locations -> 403 Forbidden
         res_idor_locs = await client.get(
-            f"/api/storage/putaway-tasks/inventory-locations?store_id={store_elec_id}",
-            headers=mech_store_headers,
+            f"/api/storage/putaway-tasks/inventory-locations?warehouse_ref_id={warehouse_elec_id}",
+            headers=mech_warehouse_headers,
         )
         assert res_idor_locs.status_code == 403
 
-        # 5d. IDOR: Store Manager A querying Electrical Store stock ledger -> 403 Forbidden
+        # 5d. IDOR: Warehouse Operator A querying Electrical Warehouse stock ledger -> 403 Forbidden
         res_idor_ledger = await client.get(
-            f"/api/storage/inventory/ledger?store_id={store_elec_id}",
-            headers=mech_store_headers,
+            f"/api/storage/inventory/ledger?warehouse_ref_id={warehouse_elec_id}",
+            headers=mech_warehouse_headers,
         )
         assert res_idor_ledger.status_code == 403
 

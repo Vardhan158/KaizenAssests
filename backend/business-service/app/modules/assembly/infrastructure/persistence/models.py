@@ -11,6 +11,18 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base, GUID
 
 
+class AssemblyUnitModel(Base):
+    __tablename__ = "assembly_unit"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    unit_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    unit_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
 class AssemblyOrderModel(Base):
     __tablename__ = "assembly_order"
 
@@ -245,8 +257,8 @@ class AssemblyFinishedGoodsModel(Base):
     batch_number: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, unique=True, index=True)
     qr_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     qr_verified_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    store_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True, index=True
+    warehouse_ref_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True, index=True
     )
     posted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

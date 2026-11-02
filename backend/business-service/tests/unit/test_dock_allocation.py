@@ -295,12 +295,21 @@ async def test_dock_notifications_on_allocation(async_session):
     roles_notified = {n.user_role for n in notifs}
     assert "WAREHOUSE" in roles_notified
     assert "QUALITY_INSPECTOR" in roles_notified
+    assert "WAREHOUSE_OPERATOR" in roles_notified
 
     qi_notif = next(n for n in notifs if n.user_role == "QUALITY_INSPECTOR")
     assert qi_notif.title == "DOCK ALLOCATED"
     assert "Dock RM-01" in qi_notif.message
     assert "KA01AB1234" in qi_notif.message
     assert "KA01AB1234" in qi_notif.message
+    assert "Proceed directly to Dock" in qi_notif.message
+    assert qi_notif.dock_code == dock1.dock_code
+    assert qi_notif.gate_pass_number == "GP-2026-00125"
+
+    sm_notif = next(n for n in notifs if n.user_role == "WAREHOUSE_OPERATOR")
+    assert sm_notif.title == "DOCK ALLOCATION CONFIRMED"
+    assert "GP-2026-00125" in sm_notif.message
+    assert "KA01AB1234" in sm_notif.message
 
 
 @pytest.mark.asyncio

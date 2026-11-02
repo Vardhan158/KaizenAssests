@@ -48,10 +48,10 @@ describe("FG transport sections", () => {
         "data:image/png;base64,section",
       ),
     );
-    fireEvent.change(screen.getByLabelText("Verify section QR"), { target: { value: "unique-1" } });
+    fireEvent.change(screen.getByLabelText("Scan or enter the section QR identity"), { target: { value: "unique-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     expect(mocks.success).toHaveBeenCalledWith("Section identity verified");
-    fireEvent.change(screen.getByLabelText("Verify section QR"), {
+    fireEvent.change(screen.getByLabelText("Scan or enter the section QR identity"), {
       target: { value: "material-qr" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
@@ -69,10 +69,9 @@ describe("FG transport sections", () => {
     fireEvent.click(await screen.findByRole("checkbox", { name: /FG-0001-S01/ }));
     fireEvent.click(screen.getByRole("button", { name: /Confirm loading/ }));
     expect(mocks.confirmFgLoading).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("Scan selected section QRs (one per line)"), {
+    fireEvent.change(screen.getByLabelText("Scan or upload a selected section QR"), {
       target: { value: "unique-1" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add verified scan" }));
     fireEvent.click(screen.getByRole("button", { name: /Confirm loading/ }));
     await waitFor(() =>
       expect(mocks.confirmFgLoading).toHaveBeenCalledWith("ABC123", ["unique-1"]),

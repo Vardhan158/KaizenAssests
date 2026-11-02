@@ -13,8 +13,8 @@ async def test_quarantine_full_lifecycle_and_security():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         warehouse_headers = {"Authorization": "Bearer mock-jwt-warehouse-token"}
-        store_manager_headers = {"Authorization": "Bearer mock-jwt-store-manager-token"}
-        store_keeper_headers = {"Authorization": "Bearer mock-jwt-store-keeper-token"}
+        warehouse_operator_headers = {"Authorization": "Bearer mock-jwt-warehouse-operator-token"}
+        warehouse_keeper_headers = {"Authorization": "Bearer mock-jwt-warehouse-operator-token"}
 
         unique_suffix = uuid.uuid4().hex[:6]
         mat_code = f"MAT-DAM-{unique_suffix}"
@@ -117,30 +117,30 @@ async def test_quarantine_full_lifecycle_and_security():
         assert detail["item_code"] == mat_code
         assert "audits" in detail
 
-        # 6. Store Manager gets 403 Forbidden
-        sm_res = await client.get("/api/quarantine", headers=store_manager_headers)
-        assert sm_res.status_code == 403, f"Store manager must get 403, got {sm_res.status_code}"
+        # 6. Warehouse Operator gets 403 Forbidden
+        sm_res = await client.get("/api/quarantine", headers=warehouse_operator_headers)
+        assert sm_res.status_code == 403, f"Warehouse manager must get 403, got {sm_res.status_code}"
 
-        sm_det_res = await client.get(f"/api/quarantine/{q_id}", headers=store_manager_headers)
-        assert sm_det_res.status_code == 403, f"Store manager must get 403, got {sm_det_res.status_code}"
+        sm_det_res = await client.get(f"/api/quarantine/{q_id}", headers=warehouse_operator_headers)
+        assert sm_det_res.status_code == 403, f"Warehouse manager must get 403, got {sm_det_res.status_code}"
 
-        # 7. Store Keeper gets 403 Forbidden
-        sk_res = await client.get("/api/quarantine", headers=store_keeper_headers)
-        assert sk_res.status_code == 403, f"Store keeper must get 403, got {sk_res.status_code}"
+        # 7. Warehouse Operator gets 403 Forbidden
+        sk_res = await client.get("/api/quarantine", headers=warehouse_keeper_headers)
+        assert sk_res.status_code == 403, f"Warehouse keeper must get 403, got {sk_res.status_code}"
 
-        sk_det_res = await client.get(f"/api/quarantine/{q_id}", headers=store_keeper_headers)
-        assert sk_det_res.status_code == 403, f"Store keeper must get 403, got {sk_det_res.status_code}"
+        sk_det_res = await client.get(f"/api/quarantine/{q_id}", headers=warehouse_keeper_headers)
+        assert sk_det_res.status_code == 403, f"Warehouse keeper must get 403, got {sk_det_res.status_code}"
 
         # 8. Non-existent ID returns 404
         fake_id = str(uuid.uuid4())
         fake_res = await client.get(f"/api/quarantine/{fake_id}", headers=warehouse_headers)
         assert fake_res.status_code == 404
 
-        # 9. Store Keeper attempting review gets 403
+        # 9. Warehouse Operator attempting review gets 403
         sk_rev_res = await client.post(
             f"/api/quarantine/{q_id}/review",
             json={"disposition": "ACCEPTED_WITH_DEVIATION", "remarks": "Unauthorized attempt"},
-            headers=store_keeper_headers,
+            headers=warehouse_keeper_headers,
         )
         assert sk_rev_res.status_code == 403
 

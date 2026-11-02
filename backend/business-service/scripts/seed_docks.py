@@ -1,5 +1,5 @@
 """
-Seed 9 standard industrial docks and associated stores into WMS database.
+Seed 9 standard industrial docks and associated warehouses into WMS database.
 """
 import asyncio
 import os
@@ -13,45 +13,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from sqlalchemy import select, text
 from app.database.session import session_scope
 from app.modules.dock.infrastructure.persistence.models import DockMasterModel
-from app.modules.store.infrastructure.persistence.models import StoreModel, StoreZoneModel, StoreBinModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel, WarehouseZoneModel, WarehouseBinModel
 
-STORES = [
-    {
-        "store_code": "STR-RM",
-        "store_name": "Raw Material Store",
-        "description": "Primary storage for metals, steel rods, copper wire, and raw fabrication materials.",
-        "warehouse_id": "Main Warehouse",
-        "zones": ["Aisle A1", "Aisle A2", "Aisle A3"],
-    },
-    {
-        "store_code": "STR-CH",
-        "store_name": "Chemical & Hazardous Store",
-        "description": "Temperature and ventilation-controlled hazardous material storage.",
-        "warehouse_id": "Main Warehouse",
-        "zones": ["HazMat Zone 1", "HazMat Zone 2"],
-    },
-    {
-        "store_code": "STR-EL",
-        "store_name": "Electrical Store",
-        "description": "Enclosed store for electrical wire coils, motors, cables, and switchgear.",
-        "warehouse_id": "Main Warehouse",
-        "zones": ["Electrical Bay 1", "Electrical Bay 2"],
-    },
-    {
-        "store_code": "STR-EC",
-        "store_name": "Electronics Store",
-        "description": "ESD-safe climate-controlled facility for microchips and circuit boards.",
-        "warehouse_id": "Main Warehouse",
-        "zones": ["ESD Cleanroom A", "ESD Cleanroom B"],
-    },
-    {
-        "store_code": "STR-MR",
-        "store_name": "Main Receiving Store",
-        "description": "General receiving store and staging buffer.",
-        "warehouse_id": "Main Warehouse",
-        "zones": ["General Aisle 1", "General Aisle 2"],
-    },
-]
+WAREHOUSE_SETUP = [{
+    "warehouse_code": "WH-001", "warehouse_name": "Main Warehouse",
+    "description": "The application's single warehouse.", "warehouse_id": "Main Warehouse",
+    "zones": ["Receiving", "Raw Materials", "Finished Goods"],
+}]
 
 DOCKS_9 = [
     {
@@ -60,7 +28,7 @@ DOCKS_9 = [
         "type": "RAW_MATERIAL",
         "location": "North Warehouse - Bay 1",
         "description": "Primary inbound dock for raw materials, metals, and standard fabrication items.",
-        "store_code": "STR-RM",
+        "warehouse_code": "WH-001",
     },
     {
         "code": "RM-02",
@@ -68,7 +36,7 @@ DOCKS_9 = [
         "type": "RAW_MATERIAL",
         "location": "East Warehouse - Bay 2",
         "description": "Secondary inbound dock for raw materials and heavy bulk cargo.",
-        "store_code": "STR-RM",
+        "warehouse_code": "WH-001",
     },
     {
         "code": "CH-01",
@@ -76,7 +44,7 @@ DOCKS_9 = [
         "type": "CHEMICAL_HAZARDOUS",
         "location": "South Warehouse - HazMat Bay 1",
         "description": "Ventilated hazardous cargo bay with containment protocol for chemicals and coatings.",
-        "store_code": "STR-CH",
+        "warehouse_code": "WH-001",
     },
     {
         "code": "CH-02",
@@ -84,7 +52,7 @@ DOCKS_9 = [
         "type": "CHEMICAL_HAZARDOUS",
         "location": "South Warehouse - HazMat Bay 2",
         "description": "Secondary hazardous and volatile materials receiving dock.",
-        "store_code": "STR-CH",
+        "warehouse_code": "WH-001",
     },
     {
         "code": "EL-01",
@@ -92,7 +60,7 @@ DOCKS_9 = [
         "type": "ELECTRICAL",
         "location": "North Warehouse - Bay 3",
         "description": "Specialized inbound dock for electrical components, wires, cables, and switchgear.",
-        "store_code": "STR-EL",
+        "warehouse_code": "WH-001",
     },
     {
         "code": "EL-02",
@@ -100,7 +68,7 @@ DOCKS_9 = [
         "type": "ELECTRICAL",
         "location": "North Warehouse - Bay 4",
         "description": "Secondary dock for electrical hardware and sub-assemblies.",
-        "store_code": "STR-EL",
+        "warehouse_code": "WH-001",
     },
     {
         "code": "EC-01",
@@ -108,7 +76,7 @@ DOCKS_9 = [
         "type": "ELECTRONICS",
         "location": "West Warehouse - Bay 1",
         "description": "ESD-controlled dock for sensitive electronic circuits, microcontrollers, and chips.",
-        "store_code": "STR-EC",
+        "warehouse_code": "WH-001",
     },
     {
         "code": "EC-02",
@@ -116,7 +84,7 @@ DOCKS_9 = [
         "type": "ELECTRONICS",
         "location": "West Warehouse - Bay 2",
         "description": "Secondary ESD-compliant dock for electronic devices and sensor components.",
-        "store_code": "STR-EC",
+        "warehouse_code": "WH-001",
     },
     {
         "code": "MR-01",
@@ -124,50 +92,50 @@ DOCKS_9 = [
         "type": "MAIN_RECEIVING",
         "location": "Central Receiving - Main Bay 1",
         "description": "Primary high-throughput receiving dock for general consignments and mixed shipments.",
-        "store_code": "STR-MR",
+        "warehouse_code": "WH-001",
     },
 ]
 
 
-async def seed_stores_and_docks():
+async def seed_warehouses_and_docks():
     print("==================================================")
-    print("SEEDING 9 DOCKS AND STORES INTO POSTGRESQL DATABASE")
+    print("SEEDING 9 DOCKS IN THE SINGLE WAREHOUSE INTO POSTGRESQL DATABASE")
     print("==================================================")
 
     async with session_scope() as session:
-        store_map = {}
+        warehouse_map = {}
         now = datetime.now(timezone.utc)
 
-        # 1. Seed Stores, Zones, and Bins
-        for st_data in STORES:
-            code = st_data["store_code"]
-            stmt = select(StoreModel).where(StoreModel.store_code == code)
+        # 1. Seed Warehouses, Zones, and Bins
+        for st_data in WAREHOUSE_SETUP:
+            code = st_data["warehouse_code"]
+            stmt = select(WarehouseModel).limit(1)
             res = await session.execute(stmt)
-            existing_store = res.scalar_one_or_none()
+            existing_warehouse = res.scalar_one_or_none()
 
-            if not existing_store:
-                new_store = StoreModel(
+            if not existing_warehouse:
+                new_warehouse = WarehouseModel(
                     id=uuid.uuid4(),
-                    store_code=code,
-                    store_name=st_data["store_name"],
+                    warehouse_code=code,
+                    warehouse_name=st_data["warehouse_name"],
                     description=st_data["description"],
                     warehouse_id=st_data["warehouse_id"],
                     status="ACTIVE",
                 )
-                session.add(new_store)
+                session.add(new_warehouse)
                 await session.flush()
-                store_map[code] = new_store
-                print(f"[CREATED STORE] {code} - {st_data['store_name']}")
+                warehouse_map[code] = new_warehouse
+                print(f"[CREATED WAREHOUSE_OPERATOR] {code} - {st_data['warehouse_name']}")
 
                 # Create Zones and Bins
                 for idx, z_name in enumerate(st_data["zones"], start=1):
                     z_code = f"ZN-{code.replace('STR-', '')}-{idx:02d}"
-                    zone = StoreZoneModel(
+                    zone = WarehouseZoneModel(
                         id=uuid.uuid4(),
-                        store_id=new_store.id,
+                        warehouse_ref_id=new_warehouse.id,
                         zone_code=z_code,
                         zone_name=z_name,
-                        description=f"Storage zone {z_name} in {st_data['store_name']}",
+                        description=f"Storage zone {z_name} in {st_data['warehouse_name']}",
                         status="ACTIVE",
                     )
                     session.add(zone)
@@ -176,9 +144,9 @@ async def seed_stores_and_docks():
                     # Create Bins
                     for b_num in range(1, 4):
                         bin_code = f"BIN-{z_code}-{b_num:02d}"
-                        bin_obj = StoreBinModel(
+                        bin_obj = WarehouseBinModel(
                             id=uuid.uuid4(),
-                            store_id=new_store.id,
+                            warehouse_ref_id=new_warehouse.id,
                             zone_id=zone.id,
                             bin_code=bin_code,
                             bin_name=f"Bin {b_num} ({z_name})",
@@ -190,16 +158,16 @@ async def seed_stores_and_docks():
                         )
                         session.add(bin_obj)
             else:
-                store_map[code] = existing_store
+                warehouse_map[code] = existing_warehouse
 
         await session.flush()
 
         # 2. Seed 9 Docks
         for d in DOCKS_9:
             code = d["code"]
-            st_code = d.get("store_code")
-            target_store = store_map.get(st_code)
-            target_store_id = target_store.id if target_store else None
+            st_code = d.get("warehouse_code")
+            target_warehouse = warehouse_map.get(st_code)
+            target_warehouse_ref_id = target_warehouse.id if target_warehouse else None
 
             # Insert into dock_masters
             dock_stmt = select(DockMasterModel).where(DockMasterModel.dock_code == code)
@@ -216,14 +184,14 @@ async def seed_stores_and_docks():
                     description=d["description"],
                     status="AVAILABLE",
                     is_active=True,
-                    store_id=target_store_id,
+                    warehouse_ref_id=target_warehouse_ref_id,
                 )
                 session.add(dock)
-                print(f"[CREATED DOCK] {code} - {d['name']} (Type: {d['type']}, Store: {st_code})")
+                print(f"[CREATED DOCK] {code} - {d['name']} (Type: {d['type']}, Warehouse: {st_code})")
             else:
                 existing_dock.status = "AVAILABLE"
                 existing_dock.is_active = True
-                existing_dock.store_id = target_store_id
+                existing_dock.warehouse_ref_id = target_warehouse_ref_id
 
             # Insert/Update warehouse_dock for legacy compatibility
             wh_dock_stmt = text("SELECT id FROM warehouse_dock WHERE dock_number = :dn")
@@ -246,9 +214,9 @@ async def seed_stores_and_docks():
 
         await session.commit()
         print("==================================================")
-        print("[SUCCESS] ALL 9 DOCKS & STORES CREATED SUCCESSFULLY!")
+        print("[SUCCESS] ALL 9 DOCKS & WAREHOUSE LOCATIONS CREATED SUCCESSFULLY!")
         print("==================================================")
 
 
 if __name__ == "__main__":
-    asyncio.run(seed_stores_and_docks())
+    asyncio.run(seed_warehouses_and_docks())

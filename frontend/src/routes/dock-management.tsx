@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { useSearch, createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -20,6 +20,7 @@ import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -76,12 +77,12 @@ type AllocationRequest = {
   arrived_at?: string | null;
   released_at?: string | null;
   created_at: string;
-  assigned_store_id?: string | null;
-  assigned_store_code?: string | null;
-  assigned_store_name?: string | null;
-  assigned_store_manager_id?: string | null;
-  assigned_store_manager_username?: string | null;
-  assigned_store_manager_name?: string | null;
+  assigned_warehouse_ref_id?: string | null;
+  assigned_warehouse_code?: string | null;
+  assigned_warehouse_name?: string | null;
+  assigned_warehouse_operator_id?: string | null;
+  assigned_warehouse_operator_username?: string | null;
+  assigned_warehouse_operator_name?: string | null;
 };
 
 type Dock = {
@@ -96,27 +97,37 @@ type Dock = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  store_id?: string | null;
-  store_code?: string | null;
-  store_name?: string | null;
-  assigned_store_id?: string | null;
-  assigned_store_code?: string | null;
-  assigned_store_name?: string | null;
-  assigned_store_manager_id?: string | null;
-  assigned_store_manager_username?: string | null;
-  assigned_store_manager_name?: string | null;
+  warehouse_ref_id?: string | null;
+  warehouse_code?: string | null;
+  warehouse_name?: string | null;
+  assigned_warehouse_ref_id?: string | null;
+  assigned_warehouse_code?: string | null;
+  assigned_warehouse_name?: string | null;
+  assigned_warehouse_operator_id?: string | null;
+  assigned_warehouse_operator_username?: string | null;
+  assigned_warehouse_operator_name?: string | null;
   current_allocation?: AllocationRequest | null;
 };
 
-type StoreManager = {
+// SQLite/legacy API responses can omit the UTC suffix even though the service
+// writes these values with datetime.now(timezone.utc). Treat those timestamps
+// as UTC before converting them to the user's local timezone.
+const formatApiDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}Z`).toLocaleString();
+};
+
+type WarehouseManager = {
   id: string;
   employee_id: string;
   username: string;
   full_name: string;
   email?: string;
-  store_id?: string;
-  store_code?: string;
-  store_name?: string;
+  warehouse_ref_id?: string;
+  warehouse_code?: string;
+  warehouse_name?: string;
 };
 
 type DockHistory = {
@@ -230,6 +241,8 @@ function DockManagement() {
 
   // Filter & tab controls
   const [searchTerm, setSearchTerm] = useState("");
+  const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
+  useEffect(() => { if (typeof moduleSearchParams.search === "string") setSearchTerm(moduleSearchParams.search); }, [moduleSearchParams.search]);
   const [activeTab, setActiveTab] = useState<
     "ALL" | "AVAILABLE" | "RESERVED" | "OCCUPIED" | "MAINTENANCE" | "PENDING" | "HISTORY"
   >("ALL");
@@ -272,66 +285,66 @@ function DockManagement() {
     }
   }, [showCreateDock, docks, createDockType]);
 
-  // User Auth & Store Context
+  // User Auth & Warehouse Context
   const userInfo = getUserInfo();
   const userRoles = userInfo?.roles || [];
   const isWarehouseManager = userRoles.includes("WAREHOUSE_MANAGER") || userRoles.includes("WAREHOUSE");
   const isWarehouseOrAdmin = isWarehouseManager || userRoles.includes("ADMIN") || userRoles.includes("SUPERUSER");
-  const isStoreUser =
-    userRoles.includes("STORE_MANAGER") ||
-    userRoles.includes("STORE_KEEPER") ||
-    userRoles.includes("STORE");
+  const isWarehouseUser =
+    userRoles.includes("WAREHOUSE_OPERATOR") ||
+    userRoles.includes("WAREHOUSE_OPERATOR") ||
+    userRoles.includes("WAREHOUSE_OPERATOR");
 
-  const [currentUserStore, setCurrentUserStore] = useState<{ id?: string; code?: string; name?: string } | null>(null);
+  const [currentUserWarehouse, setCurrentUserWarehouse] = useState<{ id?: string; code?: string; name?: string } | null>(null);
 
   useEffect(() => {
-    if (userInfo?.store_id || userInfo?.storeId || userInfo?.store_code || userInfo?.storeCode) {
-      setCurrentUserStore({
-        id: userInfo?.store_id || userInfo?.storeId,
-        code: userInfo?.store_code || userInfo?.storeCode,
+    if (userInfo?.warehouse_ref_id || userInfo?.warehouseRefId || userInfo?.warehouse_code || userInfo?.warehouseCode) {
+      setCurrentUserWarehouse({
+        id: userInfo?.warehouse_ref_id || userInfo?.warehouseRefId,
+        code: userInfo?.warehouse_code || userInfo?.warehouseCode,
       });
-    } else if (isStoreUser) {
-      api.getMyStore().then((res) => {
+    } else if (isWarehouseUser) {
+      api.getMyWarehouse().then((res) => {
         if (res) {
-          setCurrentUserStore({
+          setCurrentUserWarehouse({
             id: res.id,
-            code: res.store_code,
-            name: res.store_name,
+            code: res.warehouse_code,
+            name: res.warehouse_name,
           });
         }
       }).catch(() => {
         // ignore if not configured
       });
     } else {
-      setCurrentUserStore(null);
+      setCurrentUserWarehouse(null);
     }
-  }, [isStoreUser, userInfo?.store_id, userInfo?.storeId, userInfo?.store_code, userInfo?.storeCode]);
+  }, [isWarehouseUser, userInfo?.warehouse_ref_id, userInfo?.warehouseRefId, userInfo?.warehouse_code, userInfo?.warehouseCode]);
 
   const canReleaseDock = useCallback((dock: Dock | null | undefined): boolean => {
     if (!dock) return false;
-    // Warehouse managers without Store role are strictly forbidden from releasing docks
-    if (isWarehouseManager && !isStoreUser) return false;
-    // Only assigned store managers / keepers can release docks
-    if (!isStoreUser) return false;
+    // Warehouse managers without Warehouse role are strictly forbidden from releasing docks
+    if (isWarehouseManager && !isWarehouseUser) return false;
+    // Only assigned warehouse operators / keepers can release docks
+    if (!isWarehouseUser) return false;
 
-    const userStoreId = currentUserStore?.id || userInfo?.store_id || userInfo?.storeId;
-    const userStoreCode = (currentUserStore?.code || userInfo?.store_code || userInfo?.storeCode || "").toUpperCase();
+    const userWarehouseRefId = currentUserWarehouse?.id || userInfo?.warehouse_ref_id || userInfo?.warehouseRefId;
+    const userWarehouseCode = (currentUserWarehouse?.code || userInfo?.warehouse_code || userInfo?.warehouseCode || "").toUpperCase();
 
-    if (!userStoreId && !userStoreCode) return false;
+    if (!userWarehouseRefId && !userWarehouseCode) return false;
 
-    const dockStoreId = dock.assigned_store_id || dock.store_id;
-    const dockStoreCode = (dock.assigned_store_code || dock.store_code || "").toUpperCase();
+    const dockWarehouseRefId = dock.assigned_warehouse_ref_id || dock.warehouse_ref_id;
+    const dockWarehouseCode = (dock.assigned_warehouse_code || dock.warehouse_code || "").toUpperCase();
 
-    const matchesId = Boolean(userStoreId && dockStoreId && userStoreId === dockStoreId);
-    const matchesCode = Boolean(userStoreCode && dockStoreCode && userStoreCode === dockStoreCode);
+    const matchesId = Boolean(userWarehouseRefId && dockWarehouseRefId && userWarehouseRefId === dockWarehouseRefId);
+    const matchesCode = Boolean(userWarehouseCode && dockWarehouseCode && userWarehouseCode === dockWarehouseCode);
 
     return matchesId || matchesCode;
-  }, [currentUserStore, isStoreUser, isWarehouseManager, userInfo]);
+  }, [currentUserWarehouse, isWarehouseUser, isWarehouseManager, userInfo]);
 
-  const [storeManagers, setStoreManagers] = useState<StoreManager[]>([]);
-  const [stores, setStores] = useState<any[]>([]);
-  const [selectedStoreId, setSelectedStoreId] = useState<string>("");
-  const [selectedStoreManagerId, setSelectedStoreManagerId] = useState<string>("");
+  const [warehouseManagers, setWarehouseManagers] = useState<WarehouseManager[]>([]);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
+  const [selectedWarehouseRefId, setSelectedWarehouseRefId] = useState<string>("");
+  const [selectedWarehouseManagerId, setSelectedWarehouseManagerId] = useState<string>("");
 
   // Edit & Maintenance Modals
   const [editDockModalDock, setEditDockModalDock] = useState<Dock | null>(null);
@@ -542,7 +555,7 @@ function DockManagement() {
 
     if (pendingRequest) {
       reqId = pendingRequest.id;
-      dockId = docks.find((item) => item.is_active && item.status === "AVAILABLE")?.id || "";
+      dockId = selectedDockIdToAllocate || docks.find((item) => item.is_active && item.status === "AVAILABLE" && isDockCompatible(pendingRequest, item))?.id || "";
       const d = docks.find((item) => item.id === dockId);
       dockCode = d ? d.dock_code : "Dock";
     } else if (allocateModalDock) {
@@ -574,8 +587,8 @@ function DockManagement() {
       setAllocateModalDock(null);
       setSelectedDockIdToAllocate("");
       setSelectedRequestIdToAllocate("");
-      setSelectedStoreManagerId("");
-      setSelectedStoreId("");
+      setSelectedWarehouseManagerId("");
+      setSelectedWarehouseRefId("");
       await loadAll(true);
     } catch (error) {
       toast.error("Allocation failed", {
@@ -620,7 +633,7 @@ function DockManagement() {
   async function handleReleaseDock() {
     if (!releaseConfirmDock) return;
     if (!canReleaseDock(releaseConfirmDock)) {
-      toast.error("Unauthorized: Only the assigned Store Manager can release this dock.");
+      toast.error("Unauthorized: Only the assigned Warehouse Operator can release this dock.");
       setReleaseConfirmDock(null);
       return;
     }
@@ -688,7 +701,7 @@ function DockManagement() {
 
   const warehouseDock = docks.find((dock) => dock.is_active) || docks[0];
 
-  if (mounted && isStoreUser && !isWarehouseOrAdmin) {
+  if (mounted && isWarehouseUser && !isWarehouseOrAdmin) {
     return (
       <AppShell
         title="Dock Management"
@@ -702,13 +715,13 @@ function DockManagement() {
             <div className="space-y-2">
               <h2 className="text-lg font-bold text-foreground">Global Dock Management Restricted</h2>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Global dock configuration, allocation, and store assignment are managed exclusively by the Warehouse Manager. Store Managers view and release docks assigned to their specific store from the Assigned Docks portal.
+                Global dock configuration, allocation, and warehouse assignment are managed exclusively by the Warehouse Manager. Warehouse Operators view and release docks assigned to their specific warehouse from the Assigned Docks portal.
               </p>
             </div>
             <div className="pt-2">
               <Button
                 className="rounded-xl font-bold text-xs h-10 px-5 shadow-glow gap-2"
-                onClick={() => { window.location.href = "/my-store?tab=docks"; }}
+                onClick={() => { window.location.href = "/inventory?tab=docks"; }}
               >
                 <Truck className="size-4" /> Go to My Assigned Docks
               </Button>
@@ -720,53 +733,76 @@ function DockManagement() {
   }
 
   return (
-    <AppShell
-      title="Dock Management"
-      subtitle="One receiving dock. Allocate an approved vehicle, then GRN releases it when receiving is complete."
-      actions={
-        <div className="flex items-center gap-2.5">
+    <AppShell activeItem="/dock-management">
+      <div className="dock-management-workspace space-y-4">
+        <div className="dock-management-header flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-3"><Warehouse className="size-6 shrink-0 text-primary" />Dock Management<InformationTooltip help="dock" placement="title" /></h1>
+            <p className="mt-2 text-sm text-muted-foreground">Allocate approved vehicles and monitor receiving dock availability.</p>
+          </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button disabled={actionBusy} onClick={() => setShowCreateDock(true)} className="gap-2 rounded-xl"><Plus className="size-4" />Add Dock</Button>
           <Button
-            variant="ghost"
-            className="h-9 rounded-full px-4 text-xs font-semibold"
+            variant="outline"
+            className="h-10 rounded-xl border-emerald-600 bg-emerald-600 px-4 text-sm font-semibold text-white hover:border-emerald-700 hover:bg-emerald-700 hover:text-white"
             onClick={() => setActiveTab(activeTab === "HISTORY" ? "ALL" : "HISTORY")}
           >
             {activeTab === "HISTORY" ? "Current dock" : "Allocation history"}
           </Button>
-          <Button
+          <Button data-refresh-control="true"
             variant="outline"
-            className="h-9 rounded-full px-4 text-xs font-semibold border-border/80 bg-card hover:bg-muted/60 shadow-2xs text-muted-foreground hover:text-foreground gap-1.5"
+            size="icon"
+            className="size-11 rounded-xl border-border bg-card text-primary shadow-none hover:bg-muted"
+            aria-label="Refresh dock management"
+            title="Refresh dock management"
             onClick={() => void loadAll()}
           >
-            <RefreshCw className={cn("size-3.5", loading && "animate-spin text-primary")} />
-            Refresh
+            <RefreshCw className={cn("size-4", loading && "animate-spin text-primary")} />
           </Button>
         </div>
-      }
-    >
+        </div>
       {loading ? (
         <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground"><Loader2 className="size-6 animate-spin text-primary" /><p className="text-sm">Loading dock status...</p></div>
       ) : activeTab === "HISTORY" ? (
-        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Gate Pass</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Performed By</th></tr></thead><tbody className="divide-y divide-border/60">{history.length ? history.map((item) => <tr key={item.id}><td className="px-4 py-3 text-xs">{new Date(item.performed_at).toLocaleString()}</td><td className="px-4 py-3 font-mono">{item.existing_gate_pass_id || "—"}</td><td className="px-4 py-3 font-mono">{item.vehicle_number || "—"}</td><td className="px-4 py-3">{item.action}</td><td className="px-4 py-3">{item.previous_status || "—"} → {item.new_status}</td><td className="px-4 py-3">{item.performed_by}</td></tr>) : <tr><td colSpan={6} className="py-12 text-center text-sm text-muted-foreground">No dock activity yet.</td></tr>}</tbody></table></div></Card>
+        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Gate Pass</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Performed By</th></tr></thead><tbody className="divide-y divide-border/60">{history.length ? history.map((item) => <tr key={item.id}><td className="px-4 py-3 text-xs">{formatApiDateTime(item.performed_at)}</td><td className="px-4 py-3 font-mono font-semibold text-emerald-700 dark:text-emerald-400">{item.existing_gate_pass_id || "—"}</td><td className="px-4 py-3 font-mono">{item.vehicle_number || "—"}</td><td className="px-4 py-3">{item.action}</td><td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">
+          {item.previous_status && <StatusBadge status={item.previous_status} />}
+          {item.previous_status && <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" aria-label="changed to" />}
+          <StatusBadge status={item.new_status} />
+        </div></td><td className="px-4 py-3">{item.performed_by}</td></tr>) : <tr><td colSpan={6} className="py-12 text-center text-sm text-muted-foreground">No dock activity yet.</td></tr>}</tbody></table></div></Card>
       ) : (
-        <div className="space-y-6">
-          <Card className={cn("overflow-hidden rounded-3xl border shadow-soft", warehouseDock?.status === "AVAILABLE" ? "border-emerald-200" : warehouseDock?.status === "MAINTENANCE" ? "border-amber-200" : "border-blue-200")}>
-            <div className="flex flex-col gap-6 p-6 lg:flex-row lg:items-center lg:justify-between lg:p-8">
-              <div className="min-w-0 flex-1 space-y-3"><div className="flex flex-wrap items-center gap-3"><span className={cn("size-3 rounded-full", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-500" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-500" : "bg-blue-600")} /><span className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Single receiving dock</span><span className={cn("rounded-full px-3 py-1 text-xs font-bold", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-100 text-emerald-800" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800")}>{warehouseDock?.status === "OCCUPIED" || warehouseDock?.status === "RESERVED" ? "ALLOCATED" : warehouseDock?.status || "NOT CONFIGURED"}</span></div><div><h2 className="text-3xl font-black tracking-tight">{warehouseDock?.dock_code || "Receiving dock"}</h2><p className="mt-1 text-sm text-muted-foreground">{warehouseDock?.dock_name || "The warehouse dock has not been configured yet."}</p></div></div>
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-3">
+            {[
+              { label: "Receiving docks", value: docks.length, Icon: Warehouse, tone: "blue" },
+              { label: "Available docks", value: docks.filter((dock) => dock.is_active && dock.status === "AVAILABLE").length, Icon: CheckCircle2, tone: "green" },
+              { label: "Vehicles waiting", value: pendingRequests.length, Icon: Truck, tone: "amber" },
+            ].map(({ label, value, Icon, tone }) => (
+              <div key={label} className="inventory-stock-summary" data-tone={tone}>
+                <div className="inventory-stock-summary-icon"><Icon className="size-6" /></div>
+                <div><p className="text-sm font-medium text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-bold tabular-nums">{value}</p></div>
+              </div>
+            ))}
+          </div>
+          {(docks.length ? filteredDocks : [undefined]).map((warehouseDock) => (
+          <Card key={warehouseDock?.id || "unconfigured"} className={cn("dock-management-receiving overflow-hidden rounded-3xl border shadow-soft", warehouseDock?.status === "AVAILABLE" ? "border-emerald-200" : warehouseDock?.status === "MAINTENANCE" ? "border-amber-200" : "border-blue-200")}>
+            <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_auto_minmax(280px,360px)] lg:items-center">
+              <div className="min-w-0 flex-1 space-y-3"><div className="flex flex-wrap items-center gap-3"><span className={cn("size-3 rounded-full", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-500" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-500" : "bg-blue-600")} /><span className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Receiving dock</span><span className={cn("rounded-full px-3 py-1 text-xs font-bold", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-100 text-emerald-800" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800")}>{warehouseDock?.status === "OCCUPIED" || warehouseDock?.status === "RESERVED" ? "ALLOCATED" : warehouseDock?.status || "NOT CONFIGURED"}</span></div><div><h2 className="text-3xl font-black tracking-tight">{warehouseDock?.dock_code || "Receiving dock"}</h2><p className="mt-1 text-sm text-muted-foreground">{warehouseDock?.dock_name || "The warehouse dock has not been configured yet."}</p></div></div>
             <Button type="button" variant="outline" disabled={actionBusy} onClick={() => warehouseDock ? openEditDock(warehouseDock) : setShowCreateDock(true)} className="shrink-0 gap-2 rounded-xl border-blue-200 bg-white/80 text-blue-800 hover:bg-blue-50 dark:border-blue-900/60 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/40"><SquarePen className="size-4" />{warehouseDock ? "Edit dock" : "Configure dock"}</Button>
               <div className="grid min-w-[280px] grid-cols-2 gap-3 rounded-2xl bg-muted/40 p-4 text-sm"><div><p className="text-xs font-semibold uppercase text-muted-foreground">Dock status</p><p className="mt-1 font-bold">{warehouseDock?.status || "Unavailable"}</p></div><div><p className="text-xs font-semibold uppercase text-muted-foreground">Waiting vehicles</p><p className="mt-1 font-bold">{pendingRequests.length}</p></div>{warehouseDock?.current_allocation ? <><div><p className="text-xs font-semibold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{warehouseDock.current_allocation.vehicle_number}</p></div><div><p className="text-xs font-semibold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold">{warehouseDock.current_allocation.existing_gate_pass_id}</p></div></> : <div className="col-span-2 text-xs text-muted-foreground">GRN releases the dock automatically after receiving is complete.</div>}</div>
             </div>
             {warehouseDock?.current_allocation && <div className="border-t bg-blue-50/70 px-6 py-4 text-sm text-blue-900"><span className="font-semibold">Receiving in progress.</span> GRN releases this dock when receiving is completed. Status refreshes automatically.</div>}
           </Card>
-          <section className="space-y-3"><div className="flex items-end justify-between gap-3"><div><h3 className="text-lg font-bold">Approved vehicles waiting</h3><p className="text-sm text-muted-foreground">Allocate the available dock to an approved gate entry.</p></div><span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">{pendingRequests.length} waiting</span></div>
-            {pendingRequests.length === 0 ? <Card className="rounded-2xl border-dashed p-8 text-center text-sm text-muted-foreground">No approved vehicles are waiting for dock allocation.</Card> : <div className="space-y-3">{pendingRequests.map((req) => <Card key={req.id} className="rounded-2xl p-4 shadow-2xs"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold text-primary">{req.existing_gate_pass_id}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{req.vehicle_number}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vendor / material</p><p className="mt-1 text-sm font-semibold">{req.vendor_reference || req.material_reference || req.material_description || "—"}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Approved</p><p className="mt-1 text-sm">{req.security_approved_at ? new Date(req.security_approved_at).toLocaleString() : "—"}</p></div></div><Button disabled={!warehouseDock || warehouseDock.status !== "AVAILABLE" || actionBusy} onClick={() => void handleAllocateDock(req)} className="shrink-0 rounded-xl"><ArrowRight className="mr-2 size-4" />{warehouseDock?.status === "AVAILABLE" ? "Allocate dock" : "Dock unavailable"}</Button></div></Card>)}</div>}
+          ))}
+          <section className="dock-management-waiting space-y-3"><div className="flex items-end justify-between gap-3"><div><h3 className="text-lg font-bold">Approved vehicles waiting</h3><p className="text-sm text-muted-foreground">Allocate the available dock to an approved gate entry.</p></div><span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">{pendingRequests.length} waiting</span></div>
+            {pendingRequests.length === 0 ? <Card className="rounded-2xl border-dashed p-8 text-center text-sm text-muted-foreground">No approved vehicles are waiting for dock allocation.</Card> : <div className="space-y-3">{pendingRequests.map((req) => <Card key={req.id} className="rounded-2xl p-4 shadow-2xs"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold text-primary">{req.existing_gate_pass_id}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{req.vehicle_number}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vendor / material</p><p className="mt-1 text-sm font-semibold">{req.vendor_reference || req.material_reference || req.material_description || "—"}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Approved</p><p className="mt-1 text-sm">{formatApiDateTime(req.security_approved_at)}</p></div></div><Button disabled={actionBusy || !docks.some((dock) => dock.is_active && dock.status === "AVAILABLE" && isDockCompatible(req, dock))} onClick={() => { setSelectedDockIdToAllocate(""); setAllocateModalPendingReq(req); }} className="shrink-0 rounded-xl"><ArrowRight className="mr-2 size-4" />{docks.some((dock) => dock.is_active && dock.status === "AVAILABLE" && isDockCompatible(req, dock)) ? "Allocate dock" : "Dock unavailable"}</Button></div></Card>)}</div>}
           </section>
         </div>
       )}
       <Dialog open={showCreateDock} onOpenChange={(open) => !actionBusy && setShowCreateDock(open)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Configure receiving dock</DialogTitle>
-            <DialogDescription>Create the receiving dock before allocating an approved vehicle.</DialogDescription>
+            <DialogTitle>Add receiving dock</DialogTitle>
+            <DialogDescription>Create another receiving dock for approved vehicle allocations.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateDock} className="space-y-4">
             <div className="space-y-2">
@@ -867,11 +903,11 @@ function DockManagement() {
                     </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground block text-[11px]">Assigned Store</span>
+                    <span className="text-muted-foreground block text-[11px]">Assigned Warehouse</span>
                     <span className="font-semibold text-foreground">
-                      {selectedDetailsDock.assigned_store_name
-                        ? `${selectedDetailsDock.assigned_store_name} (${selectedDetailsDock.assigned_store_code || selectedDetailsDock.store_code})`
-                        : (selectedDetailsDock.store_name || selectedDetailsDock.assigned_store_code || selectedDetailsDock.store_code || "Central Warehouse")}
+                      {selectedDetailsDock.assigned_warehouse_name
+                        ? `${selectedDetailsDock.assigned_warehouse_name} (${selectedDetailsDock.assigned_warehouse_code || selectedDetailsDock.warehouse_code})`
+                        : (selectedDetailsDock.warehouse_name || selectedDetailsDock.assigned_warehouse_code || selectedDetailsDock.warehouse_code || "Central Warehouse")}
                     </span>
                   </div>
                   <div>
@@ -881,10 +917,10 @@ function DockManagement() {
                     </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground block text-[11px]">Assigned Store Manager</span>
+                    <span className="text-muted-foreground block text-[11px]">Assigned Warehouse Operator</span>
                     <span className="font-semibold text-indigo-600 dark:text-indigo-400">
-                      {selectedDetailsDock.assigned_store_manager_name ||
-                        selectedDetailsDock.current_allocation?.assigned_store_manager_name ||
+                      {selectedDetailsDock.assigned_warehouse_operator_name ||
+                        selectedDetailsDock.current_allocation?.assigned_warehouse_operator_name ||
                         "Not assigned"}
                     </span>
                   </div>
@@ -933,9 +969,7 @@ function DockManagement() {
                         <span className="text-muted-foreground block text-[11px]">Approved At</span>
                         <span className="font-mono text-muted-foreground">
                           {selectedDetailsDock.current_allocation?.security_approved_at
-                            ? new Date(
-                              selectedDetailsDock.current_allocation.security_approved_at,
-                            ).toLocaleString()
+                            ? formatApiDateTime(selectedDetailsDock.current_allocation.security_approved_at)
                             : "—"}
                         </span>
                       </div>
@@ -1026,9 +1060,9 @@ function DockManagement() {
                 <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl px-3 py-2 text-left">
                   <Info className="size-4 shrink-0" />
                   <span>
-                    Dock release must be performed by the assigned <strong>Store Manager</strong> (
-                    {selectedDetailsDock.assigned_store_name || selectedDetailsDock.store_name || "Chemical Store"}
-                    ) from their Store Portal.
+                    Dock release must be performed by the assigned <strong>Warehouse Operator</strong> (
+                    {selectedDetailsDock.assigned_warehouse_name || selectedDetailsDock.warehouse_name || "Chemical Warehouse"}
+                    ) from their Warehouse Portal.
                   </span>
                 </div>
               )}
@@ -1095,39 +1129,26 @@ function DockManagement() {
                   ))}
                 </div>
               )}
-              {/* Assigned Store Selection */}
+              {/* Warehouse Operator Selection */}
               <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
-                  <span>Assign Available Store:</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">Required</span>
-                </Label>
-                <select value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)} className="mt-1.5 w-full h-9 rounded-xl border border-input bg-background px-3 text-xs font-medium">
-                  <option value="">-- Select Active Store --</option>
-                  {stores.filter((s) => (s.status || "").toUpperCase() === "ACTIVE").map((s) => (
-                    <option key={s.id} value={s.id}>{s.store_code} · {s.store_name}</option>
-                  ))}
-                </select>
-              </div>
-              {/* Store Manager Selection */}
-              <div className="hidden">
-                <Label className="text-xs font-semibold flex items-center justify-between">
-                  <span>Assign Responsible Store Manager:</span>
+                  <span>Assign Responsible Warehouse Operator:</span>
                   <span className="text-[10px] text-muted-foreground font-normal">Required</span>
                 </Label>
                 <select
-                  value={selectedStoreManagerId}
-                  onChange={(e) => setSelectedStoreManagerId(e.target.value)}
+                  value={selectedWarehouseManagerId}
+                  onChange={(e) => setSelectedWarehouseManagerId(e.target.value)}
                   className="mt-1.5 w-full h-9 rounded-xl border border-input bg-background px-3 text-xs font-medium focus:ring-2 focus:ring-primary/20"
                 >
-                  <option value="">-- Select Store Manager --</option>
-                  {storeManagers.map((sm) => (
+                  <option value="">-- Select Warehouse Operator --</option>
+                  {warehouseManagers.map((sm) => (
                     <option key={sm.id || sm.employee_id} value={sm.employee_id || sm.id}>
-                      {sm.full_name} ({sm.employee_id || sm.username}) {sm.store_name ? `· ${sm.store_name}` : ""}
+                      {sm.full_name} ({sm.employee_id || sm.username}) {sm.warehouse_name ? `· ${sm.warehouse_name}` : ""}
                     </option>
                   ))}
                 </select>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  The designated Store Manager will be authorized to inspect materials and release this dock.
+                  The designated Warehouse Operator will be authorized to inspect materials and release this dock.
                 </p>
               </div>
             </div>
@@ -1214,35 +1235,21 @@ function DockManagement() {
                   </div>
                 ) : null;
               })()}
-
-              {/* Assigned Store Selection */}
+              {/* Warehouse Operator Selection */}
               <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
-                  <span>Assign Available Store:</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">Required</span>
-                </Label>
-                <select value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)} className="mt-1.5 w-full h-9 rounded-xl border border-input bg-background px-3 text-xs font-medium">
-                  <option value="">-- Select Active Store --</option>
-                  {stores.filter((s) => (s.status || "").toUpperCase() === "ACTIVE").map((s) => (
-                    <option key={s.id} value={s.id}>{s.store_code} · {s.store_name}</option>
-                  ))}
-                </select>
-              </div>
-              {/* Store Manager Selection */}
-              <div className="hidden">
-                <Label className="text-xs font-semibold flex items-center justify-between">
-                  <span>Assign Responsible Store Manager:</span>
+                  <span>Assign Responsible Warehouse Operator:</span>
                   <span className="text-[10px] text-muted-foreground font-normal">Required</span>
                 </Label>
                 <select
-                  value={selectedStoreManagerId}
-                  onChange={(e) => setSelectedStoreManagerId(e.target.value)}
+                  value={selectedWarehouseManagerId}
+                  onChange={(e) => setSelectedWarehouseManagerId(e.target.value)}
                   className="mt-1.5 w-full h-9 rounded-xl border border-input bg-background px-3 text-xs font-medium focus:ring-2 focus:ring-primary/20"
                 >
-                  <option value="">-- Select Store Manager --</option>
-                  {storeManagers.map((sm) => (
+                  <option value="">-- Select Warehouse Operator --</option>
+                  {warehouseManagers.map((sm) => (
                     <option key={sm.id || sm.employee_id} value={sm.employee_id || sm.id}>
-                      {sm.full_name} ({sm.employee_id || sm.username}) {sm.store_name ? `· ${sm.store_name}` : ""}
+                      {sm.full_name} ({sm.employee_id || sm.username}) {sm.warehouse_name ? `· ${sm.warehouse_name}` : ""}
                     </option>
                   ))}
                 </select>
@@ -1483,6 +1490,7 @@ function DockManagement() {
         </AlertDialogContent>
       </AlertDialog>
 
+      </div>
     </AppShell>
   );
 }
@@ -1638,9 +1646,9 @@ function DockCard({
           <span className="inline-block rounded-full bg-slate-100 dark:bg-slate-800/80 px-2.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
             {getCategoryLabel(dock.dock_type)}
           </span>
-          {(dock.assigned_store_code || dock.store_code) && (
+          {(dock.assigned_warehouse_code || dock.warehouse_code) && (
             <span className="inline-block rounded-full bg-blue-50 dark:bg-blue-950/50 border border-blue-200/60 dark:border-blue-800/40 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
-              {dock.assigned_store_name ? `${dock.assigned_store_name} (${dock.assigned_store_code || dock.store_code})` : (dock.store_name || dock.assigned_store_code || dock.store_code)}
+              {dock.assigned_warehouse_name ? `${dock.assigned_warehouse_name} (${dock.assigned_warehouse_code || dock.warehouse_code})` : (dock.warehouse_name || dock.assigned_warehouse_code || dock.warehouse_code)}
             </span>
           )}
           {dock.location && (
@@ -1665,13 +1673,13 @@ function DockCard({
                 {gatePassNo || "—"}
               </span>
             </div>
-            {(dock.assigned_store_manager_name || dock.current_allocation?.assigned_store_manager_name) && (
+            {(dock.assigned_warehouse_operator_name || dock.current_allocation?.assigned_warehouse_operator_name) && (
               <div className="flex items-center justify-between text-xs pt-1.5 border-t border-border/40">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  STORE MGR
+                  WAREHOUSE_OPERATOR MGR
                 </span>
                 <span className="font-semibold text-xs text-indigo-600 dark:text-indigo-400">
-                  {dock.assigned_store_manager_name || dock.current_allocation?.assigned_store_manager_name}
+                  {dock.assigned_warehouse_operator_name || dock.current_allocation?.assigned_warehouse_operator_name}
                 </span>
               </div>
             )}
@@ -1731,7 +1739,7 @@ function DockCard({
         {isOccupied && !canRelease && (
           <div className="w-full rounded-full bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 px-3 py-1.5 text-center text-[10px] font-semibold text-muted-foreground flex items-center justify-center gap-1.5">
             <ShieldAlert className="size-3.5 text-amber-500 shrink-0" />
-            <span>Release: Assigned Store Manager only</span>
+            <span>Release: Assigned Warehouse Operator only</span>
           </div>
         )}
       </div>

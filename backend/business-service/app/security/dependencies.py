@@ -1,10 +1,11 @@
 """
 FastAPI dependency-injection helpers for authentication and RBAC authorization.
-Supports local dev mock user fallback when running in environment=local.
+Supports explicit test-only mock identities and persisted local sessions.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 
 from fastapi import Depends, HTTPException, Request, status
@@ -25,25 +26,11 @@ class CurrentUser:
     raw_claims: dict
 
 
-async def get_current_user(
+async def _resolve_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> CurrentUser:
     settings = get_settings()
-
-    # Local supplier login tokens carry the supplier's persisted identity.
-    # The browser also sends role/name headers; those must not replace the
-    # token's supplier UUID with the display username used by the FG filter.
-    if (credentials is not None
-            and settings.environment.lower() in ("local", "test", "development")
-            and credentials.credentials.startswith("supplier-mock-token-")):
-        token_payload = credentials.credentials.removeprefix("supplier-mock-token-")
-        user_id = token_payload[:36]
-        supplier_id = token_payload[37:] if len(token_payload) > 37 else None
-        if supplier_id == "None":
-            supplier_id = None
-        return CurrentUser(subject=user_id or "supplier", username="supplier", roles=["SUPPLIER"],
-            permissions=[], raw_claims={"supplier_id": supplier_id} if supplier_id else {})
 
     # 1. Check custom proxy/test headers (X-User-Roles, X-User-Role, X-User-Name, X-User-Id)
     roles_hdr = (
@@ -52,33 +39,33 @@ async def get_current_user(
         or request.headers.get("X-User-Role")
         or request.headers.get("x-user-role")
     )
-    if roles_hdr:
+    if roles_hdr and settings.environment.lower() == "test":
         roles = [r.strip() for r in roles_hdr.split(",") if r.strip()]
         user_name = request.headers.get("X-User-Name") or request.headers.get("x-user-name") or request.headers.get("X-User-Username") or request.headers.get("x-user-username") or "test_user"
         user_id = request.headers.get("X-User-Id") or request.headers.get("x-user-id") or request.headers.get("X-User-Subject") or request.headers.get("x-user-subject") or user_name
-        store_code = request.headers.get("X-Store-Code") or request.headers.get("x-store-code") or request.headers.get("X-User-Store-Code") or request.headers.get("x-user-store-code")
-        store_id = request.headers.get("X-Store-Id") or request.headers.get("x-store-id") or request.headers.get("X-User-Store-Id") or request.headers.get("x-user-store-id")
+        warehouse_code = request.headers.get("X-Warehouse-Code") or request.headers.get("x-warehouse-code") or request.headers.get("X-User-Warehouse-Code") or request.headers.get("x-user-warehouse-code")
+        warehouse_ref_id = request.headers.get("X-Warehouse-Id") or request.headers.get("x-warehouse-id") or request.headers.get("X-User-Warehouse-Id") or request.headers.get("x-user-warehouse-id")
         emp_id = request.headers.get("X-Employee-Id") or request.headers.get("x-employee-id") or request.headers.get("X-User-Employee-Id") or request.headers.get("x-user-employee-id") or user_id
         claims = {}
-        if store_code:
-            claims["store_code"] = store_code
-        if store_id:
-            claims["store_id"] = store_id
+        if warehouse_code:
+            claims["warehouse_code"] = warehouse_code
+        if warehouse_ref_id:
+            claims["warehouse_ref_id"] = warehouse_ref_id
         if emp_id:
             claims["employee_id"] = emp_id
         roles_upper = {r.upper() for r in roles}
         perms = []
         if "WAREHOUSE" in roles_upper or "WAREHOUSE_MANAGER" in roles_upper:
-            perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "store:read", "store:write"])
+            perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write"])
         if "GATE_SECURITY" in roles_upper:
             # Gate security also operates the outbound gate queue.  These are
             # read/execute permissions for dispatches that have already passed
             # warehouse loading and final verification.
             perms.extend(["gate:read", "gate:write", "gate:entry:read", "gate:entry:create", "gate:entry:verify", "dispatch:read", "dispatch:execute"])
-        if "STORE_MANAGER" in roles_upper:
-            perms.extend(["store:read", "store:write", "storage:read", "putaway:execute", "pickup:execute"])
-        if "STORE_KEEPER" in roles_upper:
-            perms.extend(["store:read", "storage:read", "putaway:execute", "pickup:execute"])
+        if "WAREHOUSE_OPERATOR" in roles_upper:
+            perms.extend(["warehouse:read", "warehouse:write", "storage:read", "putaway:execute", "pickup:execute"])
+        if "WAREHOUSE_OPERATOR" in roles_upper:
+            perms.extend(["warehouse:read", "storage:read", "putaway:execute", "pickup:execute"])
         if "ASSEMBLY" in roles_upper:
             perms.extend(["material_request:create", "material_request:read"])
 
@@ -91,19 +78,37 @@ async def get_current_user(
         )
 
     if credentials is None:
-        if settings.environment.lower() in ("local", "test", "development"):
-            return CurrentUser(
-                subject="local_security_officer",
-                username="local_security_officer",
-                roles=["WAREHOUSE"],
-                permissions=["gate:entry:create", "gate:entry:read", "gate:entry:verify"],
-                raw_claims={},
-            )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
 
     token = credentials.credentials
-    if settings.environment.lower() in ("local", "test", "development"):
-        if token == "mock-jwt-manager-token":
+    if token.startswith("supplier-db-token-"):
+        from sqlalchemy import select
+        from app.common.persistence.models import SupplierUserModel
+        from app.database.session import AsyncSessionFactory
+
+        session_token = token.removeprefix("supplier-db-token-")
+        token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+        async with AsyncSessionFactory() as session:
+            supplier_account = (
+                await session.execute(
+                    select(SupplierUserModel).where(
+                        SupplierUserModel.auth_token_hash == token_hash,
+                        SupplierUserModel.auth_token_expires_at > datetime.now(timezone.utc),
+                    )
+                )
+            ).scalar_one_or_none()
+        if supplier_account is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
+        return CurrentUser(
+            subject=str(supplier_account.id),
+            username=supplier_account.username,
+            roles=["SUPPLIER"],
+            permissions=[],
+            raw_claims={"supplier_id": str(supplier_account.supplier_id)},
+        )
+
+    if settings.environment.lower() in ("local", "dev", "test", "development"):
+        if token == "mock-jwt-manager-token" and settings.environment.lower() == "test":
             return CurrentUser(
                 subject="manager",
                 username="manager",
@@ -116,15 +121,16 @@ async def get_current_user(
             from sqlalchemy import select
             from sqlalchemy.orm import selectinload
             from app.database.session import AsyncSessionFactory
-            from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel
+            from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
 
             async with AsyncSessionFactory() as session:
                 result = await session.execute(
-                    select(StoreManagerUserModel)
-                    .options(selectinload(StoreManagerUserModel.store))
+                    select(UserAccountModel)
+                    .options(selectinload(UserAccountModel.warehouse))
                     .where(
-                        StoreManagerUserModel.auth_token_hash == hashlib.sha256(session_token.encode()).hexdigest(),
-                        StoreManagerUserModel.status == "ACTIVE",
+                        UserAccountModel.auth_token_hash == hashlib.sha256(session_token.encode()).hexdigest(),
+                        UserAccountModel.status == "ACTIVE",
+                        UserAccountModel.auth_token_expires_at > datetime.now(timezone.utc),
                     )
                 )
                 account = result.scalar_one_or_none()
@@ -136,17 +142,17 @@ async def get_current_user(
                     "PROCUREMENT_MANAGER": "MANAGER",
                     "PROCUREMENT_OFFICER": "PROCUREMENT",
                     "WAREHOUSE_MANAGER": "WAREHOUSE_MANAGER",
-                    "STORE_OPERATOR": "STORE_KEEPER",
-                    "STORE_MANAGER": "STORE_MANAGER",
+                    "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
+                    "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
                 }.get(role_key, role_key)
 
                 perms = []
                 if role in ("ADMIN", "WAREHOUSE_MANAGER", "WAREHOUSE"):
-                    perms = ["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "store:read", "store:write", "dispatch:read", "dispatch:write", "dispatch:execute"]
-                elif role == "STORE_MANAGER":
-                    perms = ["store:read", "store:write", "storage:read", "putaway:execute", "pickup:execute"]
-                elif role == "STORE_KEEPER":
-                    perms = ["store:read", "storage:read", "putaway:execute", "pickup:execute"]
+                    perms = ["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write", "dispatch:read", "dispatch:write", "dispatch:execute"]
+                elif role == "WAREHOUSE_OPERATOR":
+                    perms = ["warehouse:read", "warehouse:write", "storage:read", "putaway:execute", "pickup:execute"]
+                elif role == "WAREHOUSE_OPERATOR":
+                    perms = ["warehouse:read", "storage:read", "putaway:execute", "pickup:execute"]
                 elif role in ("ASSEMBLY", "ASSEMBLY_MANAGER"):
                     perms = ["material_request:create", "material_request:read", "assembly:read", "assembly:write"]
                 elif role in ("DISPATCH", "DISPATCH_MANAGER"):
@@ -155,9 +161,9 @@ async def get_current_user(
                 claims = {
                     "employee_id": account.employee_id,
                     "applications": account.applications or [],
-                    "store_id": str(account.store_id) if account.store_id else None,
-                    "store_code": account.store.store_code if account.store else None,
-                    "store_name": account.store.store_name if account.store else None,
+                    "warehouse_ref_id": str(account.warehouse_ref_id) if account.warehouse_ref_id else None,
+                    "warehouse_code": account.warehouse.warehouse_code if account.warehouse else None,
+                    "warehouse_name": account.warehouse.warehouse_name if account.warehouse else None,
                 }
                 return CurrentUser(
                     subject=account.employee_id,
@@ -167,7 +173,7 @@ async def get_current_user(
                     raw_claims=claims,
                 )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
-        if token == "mock-jwt-supplier-token":
+        if token == "mock-jwt-supplier-token" and settings.environment.lower() == "test":
             return CurrentUser(
                 subject="supplier",
                 username="supplier_partner",
@@ -175,6 +181,8 @@ async def get_current_user(
                 permissions=[],
                 raw_claims={"supplier_id": "sup-00001"},
             )
+        if settings.environment.lower() != "test":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
         elif token == "mock-jwt-warehouse-token":
             return CurrentUser(
                 subject="warehouse_manager",
@@ -233,8 +241,8 @@ async def get_current_user(
                     "receiving:write",
                     "returns:read",
                     "returns:write",
-                    "store:read",
-                    "store:write",
+                    "warehouse:read",
+                    "warehouse:write",
                 ],
                 raw_claims={},
             )
@@ -260,102 +268,102 @@ async def get_current_user(
                 permissions=["gate:read", "gate:write", "gate:verify", "receiving:read"],
                 raw_claims={},
             )
-        elif token == "mock-jwt-store-keeper-token":
+        elif token == "mock-jwt-warehouse-operator-token":
             return CurrentUser(
                 subject="EMP-KEEPER-001",
-                username="store_keeper_mech",
-                roles=["STORE_KEEPER"],
-                permissions=["store:read", "storage:read", "putaway:execute", "pickup:execute"],
-                raw_claims={"store_code": "STR-002", "employee_id": "EMP-KEEPER-001"},
+                username="warehouse_keeper_mech",
+                roles=["WAREHOUSE_OPERATOR"],
+                permissions=["warehouse:read", "storage:read", "putaway:execute", "pickup:execute"],
+                raw_claims={"warehouse_code": "WH-001", "employee_id": "EMP-KEEPER-001"},
             )
-        elif token == "mock-jwt-store-manager-token":
-            claims = {"store_code": "STR-001", "employee_id": "EMP-STORE-001", "username": "store_manager_elec"}
+        elif token == "mock-jwt-warehouse-operator-token":
+            claims = {"warehouse_code": "WH-001", "employee_id": "EMP-WAREHOUSE_OPERATOR-001", "username": "warehouse_operator_elec"}
             try:
                 from sqlalchemy import select, or_, func
                 from sqlalchemy.orm import selectinload
                 from app.database.session import AsyncSessionFactory
-                from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel
+                from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
 
                 async with AsyncSessionFactory() as session:
                     stmt = (
-                        select(StoreManagerUserModel)
-                        .options(selectinload(StoreManagerUserModel.store))
+                        select(UserAccountModel)
+                        .options(selectinload(UserAccountModel.warehouse))
                         .where(
                             or_(
-                                StoreManagerUserModel.employee_id == "EMP-STORE-001",
-                                StoreManagerUserModel.username == "store_manager_elec",
+                                UserAccountModel.employee_id == "EMP-WAREHOUSE_OPERATOR-001",
+                                UserAccountModel.username == "warehouse_operator_elec",
                             )
                         )
                     )
                     res = await session.execute(stmt)
                     mgr = res.scalars().first()
                     if mgr:
-                        claims["store_id"] = str(mgr.store_id)
+                        claims["warehouse_ref_id"] = str(mgr.warehouse_ref_id)
                         claims["employee_id"] = mgr.employee_id
                         claims["full_name"] = mgr.full_name
-                        if mgr.store:
-                            claims["store_code"] = mgr.store.store_code
+                        if mgr.warehouse:
+                            claims["warehouse_code"] = mgr.warehouse.warehouse_code
             except Exception:
                 pass
 
             return CurrentUser(
-                subject=claims.get("employee_id", "EMP-STORE-001"),
-                username="store_manager_elec",
-                roles=["STORE_MANAGER"],
-                permissions=["store:read", "store:write", "storage:read", "putaway:execute", "pickup:execute"],
+                subject=claims.get("employee_id", "EMP-WAREHOUSE_OPERATOR-001"),
+                username="warehouse_operator_elec",
+                roles=["WAREHOUSE_OPERATOR"],
+                permissions=["warehouse:read", "warehouse:write", "storage:read", "putaway:execute", "pickup:execute"],
                 raw_claims=claims,
             )
-        elif token.startswith("mock-jwt-store-keeper-") or token.startswith("mock-jwt-store-manager-"):
-            is_keeper = token.startswith("mock-jwt-store-keeper-")
-            prefix = "mock-jwt-store-keeper-" if is_keeper else "mock-jwt-store-manager-"
+        elif token.startswith("mock-jwt-warehouse-operator-") or token.startswith("mock-jwt-warehouse-operator-"):
+            is_keeper = token.startswith("mock-jwt-warehouse-operator-")
+            prefix = "mock-jwt-warehouse-operator-" if is_keeper else "mock-jwt-warehouse-operator-"
             mgr_key = token.removeprefix(prefix)
             claims = {"employee_id": mgr_key}
-            role_name = "STORE_KEEPER" if is_keeper else "STORE_MANAGER"
+            role_name = "WAREHOUSE_OPERATOR" if is_keeper else "WAREHOUSE_OPERATOR"
             username = f"{role_name.lower()}_{mgr_key.lower()}"
             roles = [role_name]
-            permissions = ["store:read", "storage:read", "putaway:execute", "pickup:execute"]
+            permissions = ["warehouse:read", "storage:read", "putaway:execute", "pickup:execute"]
             if not is_keeper:
-                permissions.append("store:write")
+                permissions.append("warehouse:write")
 
             try:
                 from sqlalchemy import select, or_, func
                 from sqlalchemy.orm import selectinload
                 from app.database.session import AsyncSessionFactory
-                from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel
+                from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
 
                 async with AsyncSessionFactory() as session:
                     key_lower = mgr_key.strip().lower()
                     stmt = (
-                        select(StoreManagerUserModel)
-                        .options(selectinload(StoreManagerUserModel.store))
+                        select(UserAccountModel)
+                        .options(selectinload(UserAccountModel.warehouse))
                         .where(
                             or_(
-                                func.lower(StoreManagerUserModel.employee_id) == key_lower,
-                                func.lower(StoreManagerUserModel.username) == key_lower,
-                                func.lower(StoreManagerUserModel.full_name) == key_lower,
-                                func.lower(StoreManagerUserModel.email) == key_lower,
-                                func.lower(StoreManagerUserModel.username) == f"store_manager_{key_lower}",
-                                func.lower(StoreManagerUserModel.username) == f"store_keeper_{key_lower}",
-                                func.lower(StoreManagerUserModel.username) == f"store_mgr_{key_lower}",
+                                func.lower(UserAccountModel.employee_id) == key_lower,
+                                func.lower(UserAccountModel.username) == key_lower,
+                                func.lower(UserAccountModel.full_name) == key_lower,
+                                func.lower(UserAccountModel.email) == key_lower,
+                                func.lower(UserAccountModel.username) == f"warehouse_operator_{key_lower}",
+                                func.lower(UserAccountModel.username) == f"warehouse_keeper_{key_lower}",
+                                func.lower(UserAccountModel.username) == f"warehouse_mgr_{key_lower}",
                             )
                         )
-                        .order_by(StoreManagerUserModel.created_at.desc())
+                        .order_by(UserAccountModel.created_at.desc())
                     )
                     res = await session.execute(stmt)
                     mgr = res.scalars().first()
                     if mgr:
                         username = mgr.username
-                        claims["store_id"] = str(mgr.store_id)
+                        claims["warehouse_ref_id"] = str(mgr.warehouse_ref_id)
                         claims["employee_id"] = mgr.employee_id
                         claims["full_name"] = mgr.full_name
-                        if mgr.store:
-                            claims["store_code"] = mgr.store.store_code
+                        if mgr.warehouse:
+                            claims["warehouse_code"] = mgr.warehouse.warehouse_code
             except Exception as e:
                 pass
 
-            if "store_code" not in claims:
-                code_map = {"elec": "STR-001", "mech": "STR-002", "inst": "STR-003", "spare": "STR-004", "raw": "STR-005"}
-                claims["store_code"] = code_map.get(mgr_key.lower(), f"STR-{mgr_key.upper()}")
+            if "warehouse_code" not in claims:
+                code_map = {"elec": "WH-001", "mech": "WH-001", "inst": "STR-003", "spare": "STR-004", "raw": "STR-005"}
+                claims["warehouse_code"] = code_map.get(mgr_key.lower(), f"STR-{mgr_key.upper()}")
 
             return CurrentUser(
                 subject=claims.get("employee_id", mgr_key),
@@ -390,30 +398,30 @@ async def get_current_user(
             permissions=claims.get("permissions", []),
             raw_claims=claims,
         )
-        if roles_hdr and settings.environment.lower() in {"local", "test", "development"}:
+        if roles_hdr and settings.environment.lower() == "test":
             roles = [r.strip() for r in roles_hdr.split(",") if r.strip()]
             user_name = request.headers.get("X-User-Name") or request.headers.get("x-user-name") or request.headers.get("X-User-Username") or request.headers.get("x-user-username") or user.username
             user_id = request.headers.get("X-User-Id") or request.headers.get("x-user-id") or request.headers.get("X-User-Subject") or request.headers.get("x-user-subject") or user.subject
-            store_code = request.headers.get("X-Store-Code") or request.headers.get("x-store-code") or request.headers.get("X-User-Store-Code") or request.headers.get("x-user-store-code")
-            store_id = request.headers.get("X-Store-Id") or request.headers.get("x-store-id") or request.headers.get("X-User-Store-Id") or request.headers.get("x-user-store-id")
+            warehouse_code = request.headers.get("X-Warehouse-Code") or request.headers.get("x-warehouse-code") or request.headers.get("X-User-Warehouse-Code") or request.headers.get("x-user-warehouse-code")
+            warehouse_ref_id = request.headers.get("X-Warehouse-Id") or request.headers.get("x-warehouse-id") or request.headers.get("X-User-Warehouse-Id") or request.headers.get("x-user-warehouse-id")
             emp_id = request.headers.get("X-Employee-Id") or request.headers.get("x-employee-id") or request.headers.get("X-User-Employee-Id") or request.headers.get("x-user-employee-id") or user.subject
             claims_override = dict(claims)
-            if store_code:
-                claims_override["store_code"] = store_code
-            if store_id:
-                claims_override["store_id"] = store_id
+            if warehouse_code:
+                claims_override["warehouse_code"] = warehouse_code
+            if warehouse_ref_id:
+                claims_override["warehouse_ref_id"] = warehouse_ref_id
             if emp_id:
                 claims_override["employee_id"] = emp_id
             roles_upper = {r.upper() for r in roles}
             perms = list(user.permissions)
             if "WAREHOUSE" in roles_upper or "WAREHOUSE_MANAGER" in roles_upper:
-                perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "store:read", "store:write"])
+                perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write"])
             if "GATE_SECURITY" in roles_upper:
                 perms.extend(["gate:read", "gate:write", "gate:entry:read", "gate:entry:create", "gate:entry:verify"])
-            if "STORE_MANAGER" in roles_upper:
-                perms.extend(["store:read", "store:write", "storage:read", "putaway:execute", "pickup:execute"])
-            if "STORE_KEEPER" in roles_upper:
-                perms.extend(["store:read", "storage:read", "putaway:execute", "pickup:execute"])
+            if "WAREHOUSE_OPERATOR" in roles_upper:
+                perms.extend(["warehouse:read", "warehouse:write", "storage:read", "putaway:execute", "pickup:execute"])
+            if "WAREHOUSE_OPERATOR" in roles_upper:
+                perms.extend(["warehouse:read", "storage:read", "putaway:execute", "pickup:execute"])
             if "ASSEMBLY" in roles_upper:
                 perms.extend(["material_request:create", "material_request:read"])
             user = CurrentUser(
@@ -425,17 +433,22 @@ async def get_current_user(
             )
         return user
     except Exception as exc:
-        if settings.environment.lower() in ("local", "test", "development"):
-            return CurrentUser(
-                subject="local_security_officer",
-                username="local_security_officer",
-                roles=["WAREHOUSE"],
-                permissions=["gate:entry:create", "gate:entry:read", "gate:entry:verify", "gate:write", "warehouse:write", "dispatch:read", "dispatch:write", "dispatch:execute"],
-                raw_claims={},
-            )
         if isinstance(exc, TokenValidationError):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired or invalid",
+        ) from exc
+
+
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> CurrentUser:
+    """Resolve the request user and expose it to request-scoped middleware."""
+    user = await _resolve_current_user(request, credentials)
+    request.state.audit_user = user
+    return user
 
 
 def require_permission(*permissions: str):

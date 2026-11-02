@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from fastapi import HTTPException
 from app.main import app
 from app.common.persistence.models import PickTaskModel, MaterialStockModel
-from app.modules.store.infrastructure.persistence.models import StoreBinModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseBinModel
 from app.modules.storage.infrastructure.persistence.models import InventoryLocationBalanceModel, StorageLocationModel
 from app.modules.assembly.infrastructure.api.router import complete_assembly_picking_task, AssemblyPickConfirmationPayload
 
@@ -37,7 +37,7 @@ async def verify(database):
                 item = task.items[0]
                 code = item["material_code"]
                 quantity = Decimal(str(item["requested_quantity"]))
-                balance, bin = (await session.execute(select(InventoryLocationBalanceModel,StoreBinModel).join(StorageLocationModel, StorageLocationModel.id==InventoryLocationBalanceModel.storage_location_id).join(StoreBinModel,StoreBinModel.id==StorageLocationModel.bin_id).where(InventoryLocationBalanceModel.material_code==code,InventoryLocationBalanceModel.available_quantity>=quantity).limit(1))).one()
+                balance, bin = (await session.execute(select(InventoryLocationBalanceModel,WarehouseBinModel).join(StorageLocationModel, StorageLocationModel.id==InventoryLocationBalanceModel.storage_location_id).join(WarehouseBinModel,WarehouseBinModel.id==StorageLocationModel.bin_id).where(InventoryLocationBalanceModel.material_code==code,InventoryLocationBalanceModel.available_quantity>=quantity).limit(1))).one()
                 # Recreate a pending pick only inside the disposable copy if
                 # the operator has already completed the source task.
                 if task.status == "COMPLETED":
@@ -59,7 +59,7 @@ async def verify(database):
                 except HTTPException as exc:
                     assert exc.status_code==409
                 # Rollback expires ORM objects; keep the printed label as a plain value.
-                bin = (await session.execute(select(StoreBinModel).where(StoreBinModel.id==StorageLocationModel.bin_id,StorageLocationModel.id==InventoryLocationBalanceModel.storage_location_id,InventoryLocationBalanceModel.id==balance_id))).scalar_one()
+                bin = (await session.execute(select(WarehouseBinModel).where(WarehouseBinModel.id==StorageLocationModel.bin_id,StorageLocationModel.id==InventoryLocationBalanceModel.storage_location_id,InventoryLocationBalanceModel.id==balance_id))).scalar_one()
                 response = await complete_assembly_picking_task(task_id, AssemblyPickConfirmationPayload(zone_scan=bin.qr_identifier,**payload),uow=uow,current_user=user)
                 assert response["status"]=="COMPLETED"
                 balance = await session.get(InventoryLocationBalanceModel,balance_id)

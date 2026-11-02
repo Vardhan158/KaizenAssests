@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import func, or_, select
@@ -25,107 +26,65 @@ from app.common.persistence.models import (
     SupplierUserModel,
 )
 from app.config.settings import get_settings
-from app.modules.assembly.infrastructure.persistence.models import AssemblyOrderModel
+from app.modules.assembly.infrastructure.persistence.models import AssemblyOrderModel, AssemblyUnitModel
+from app.modules.admin.infrastructure.persistence.models import SystemAuditLogModel
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel
 from app.modules.gate.infrastructure.persistence.models import GateEntryModel
-from app.modules.gate.infrastructure.persistence.models import DockModel
+from app.modules.dock.infrastructure.persistence.models import DockMasterModel
 from app.modules.storage.infrastructure.persistence.models import (
     InventoryLocationBalanceModel,
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreManagerUserModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    UserAccountModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 from app.security.dependencies import CurrentUser
+from app.modules.assistant.application.role_policy import canonical_roles, can_access_category, unauthorized_reply
 
 logger = logging.getLogger("ams.assistant.data_retriever")
+
+
+def relative_date_filter(query: str) -> tuple[Optional[datetime], Optional[datetime], Optional[str]]:
+    """Translate common relative-date phrases into an inclusive/exclusive time window."""
+    q = query.lower()
+    now = datetime.now()
+    today = datetime.combine(date.today(), time.min)
+    if re.search(r"\bthis\s+week\b", q):
+        return today - timedelta(days=today.weekday()), today + timedelta(days=1), "this week"
+    if re.search(r"\blast\s+week\b", q):
+        end = today - timedelta(days=today.weekday())
+        return end - timedelta(days=7), end, "last week"
+    if re.search(r"\bthis\s+month\b", q):
+        return today.replace(day=1), today + timedelta(days=1), "this month"
+    if re.search(r"\blast\s+month\b", q):
+        end = today.replace(day=1)
+        return (end - timedelta(days=1)).replace(day=1), end, "last month"
+    if re.search(r"\byesterday\b", q):
+        return today - timedelta(days=1), today, "yesterday"
+    if re.search(r"\btoday\b", q):
+        return today, today + timedelta(days=1), "today"
+    days_match = re.search(r"\b(?:last|past|previous)\s+(\d+)\s+days?\b", q)
+    if days_match:
+        days = max(1, min(int(days_match.group(1)), 365))
+        return now - timedelta(days=days), now, f"the last {days} days"
+    if re.search(r"\b(?:last|past|previous)\s+(?:one|1)\s+weeks?\b|\b(?:last|past)\s+weeks?\b", q):
+        return now - timedelta(days=7), now, "the last 7 days"
+    if re.search(r"\b(?:last|past|previous)\s+(?:one|1)\s+months?\b|\b(?:last|past)\s+months?\b", q):
+        return now - timedelta(days=30), now, "the last 30 days"
+    return None, None, None
 
 
 # ==============================================================================
 # Helper Functions for Context & Tenant Identification
 # ==============================================================================
 
-async def resolve_user_store_context(
-    user: CurrentUser, session: AsyncSession
-) -> Tuple[Set[uuid.UUID], Set[str]]:
-    """
-    Resolve store IDs and store codes assigned to a store manager / store keeper.
-    Returns (set(), set()) if the user has global admin/warehouse privileges.
-    """
-    roles_upper = {r.upper() for r in (user.roles or [])}
-    if "ADMIN" in roles_upper or "SUPERUSER" in roles_upper:
-        return set(), set()
-
-    store_ids: Set[uuid.UUID] = set()
-    store_codes: Set[str] = set()
-
-    # 1. From raw claims
-    raw_id = (user.raw_claims or {}).get("store_id")
-    if raw_id:
-        try:
-            store_ids.add(uuid.UUID(str(raw_id)))
-        except (ValueError, TypeError):
-            pass
-
-    raw_code = (user.raw_claims or {}).get("store_code")
-    if raw_code:
-        store_codes.add(str(raw_code).strip().upper())
-
-    # 2. Lookup StoreManagerUserModel by username or employee_id
-    identifiers = {
-        str(user.username).strip().lower() if user.username else "",
-        str(user.subject).strip().lower() if user.subject else "",
-        str((user.raw_claims or {}).get("employee_id") or "").strip().lower(),
-    }
-    identifiers.discard("")
-
-    if identifiers:
-        stmt = select(StoreManagerUserModel).where(
-            or_(
-                func.lower(StoreManagerUserModel.employee_id).in_(identifiers),
-                func.lower(StoreManagerUserModel.username).in_(identifiers),
-                func.lower(StoreManagerUserModel.email).in_(identifiers),
-            )
-        )
-        res = await session.execute(stmt)
-        for sm in res.scalars().all():
-            if sm.store_id:
-                store_ids.add(sm.store_id)
-            if getattr(sm, "store_code", None):
-                store_codes.add(str(sm.store_code).strip().upper())
-
-        # 3. Lookup store table directly
-        stmt2 = select(StoreModel).where(
-            or_(
-                func.lower(StoreModel.store_manager_id).in_(identifiers),
-                func.lower(StoreModel.store_manager_name).in_(identifiers),
-            )
-        )
-        res2 = await session.execute(stmt2)
-        for s in res2.scalars().all():
-            store_ids.add(s.id)
-            if s.store_code:
-                store_codes.add(s.store_code.strip().upper())
-
-    # 4. Cross-populate missing codes or IDs
-    if store_ids and not store_codes:
-        s_res = await session.execute(select(StoreModel).where(StoreModel.id.in_(store_ids)))
-        for s in s_res.scalars().all():
-            if s.store_code:
-                store_codes.add(s.store_code.strip().upper())
-
-    if store_codes and not store_ids:
-        s_res2 = await session.execute(
-            select(StoreModel).where(func.upper(StoreModel.store_code).in_(store_codes))
-        )
-        for s in s_res2.scalars().all():
-            store_ids.add(s.id)
-
-    return store_ids, store_codes
+async def resolve_user_warehouse_context(user: CurrentUser, session: AsyncSession):
+    from app.modules.warehouse.context import warehouse_context
+    return await warehouse_context(session)
 
 
 async def resolve_supplier_id(
@@ -192,14 +151,106 @@ def extract_identifier(query: str, pattern: str) -> Optional[str]:
 class AssistantDataRetriever:
     """Service providing authorized, read-only data queries for Kaizen AMS Assistant."""
 
+    @staticmethod
+    def _filter_records(stmt, model, query: str, date_column=None):
+        """Apply explicit status and creation-date filters before limits and counts."""
+        statuses = {
+            "cancelled": ("CANCELLED", "CANCELED"), "canceled": ("CANCELLED", "CANCELED"),
+            "completed": ("COMPLETED", "CLOSED"), "closed": ("CLOSED",),
+            "draft": ("DRAFT",), "approved": ("APPROVED",), "rejected": ("REJECTED",),
+            "shipped": ("SHIPPED", "DISPATCHED"), "dispatched": ("DISPATCHED",),
+            "delivered": ("DELIVERED",), "in transit": ("IN_TRANSIT",),
+            "ready for gate out": ("READY_FOR_GATE_EXIT",),
+            "ready for gate exit": ("READY_FOR_GATE_EXIT",),
+            "ready to ship": ("READY_FOR_GATE_EXIT", "LOADING_VERIFIED"),
+            "packed": ("PACKED",), "picked": ("PICKED",),
+            "awaiting qc": ("QC_PENDING",), "rework": ("REWORK_REQUIRED",),
+            "in progress": ("IN_PROGRESS", "IN_PRODUCTION", "PICKING_IN_PROGRESS", "PACKING_IN_PROGRESS"),
+            "pending": ("PENDING", "OPEN", "ASSIGNED", "PLANNED", "MATERIAL_PENDING", "QC_PENDING"),
+            "open": ("OPEN", "PENDING", "APPROVED", "PARTIALLY_RECEIVED", "PLANNED", "MATERIAL_PENDING", "IN_PROGRESS"),
+        }
+        excluded = [values for phrase, values in statuses.items()
+                    if re.search(rf"\b(?:not|exclude|excluding|except)\s+{phrase}\b", query, re.I)]
+        positive_query = re.sub(
+            r"\b(?:not|exclude|excluding|except)\s+(?:" + "|".join(statuses) + r")\b", "", query, flags=re.I
+        )
+        if excluded:
+            stmt = stmt.where(func.upper(model.status).notin_({v for values in excluded for v in values}))
+        matches = [values for phrase, values in statuses.items()
+                   if re.search(rf"\b{phrase}\b", positive_query, re.I)]
+        if matches:
+            stmt = stmt.where(func.upper(model.status).in_({value for values in matches for value in values}))
+        elif re.search(r"\bactive\b", positive_query, re.I):
+            stmt = stmt.where(func.upper(model.status).notin_(["CANCELLED", "CANCELED", "COMPLETED", "CLOSED", "DISPATCHED"]))
+        start, end, _ = relative_date_filter(query)
+        if start and date_column is not None:
+            stmt = stmt.where(date_column >= start, date_column < end)
+        return stmt
+
+    @staticmethod
+    async def _read_page(session: AsyncSession, stmt, limit: int = 10, *, rows: bool = False):
+        total = int((await session.execute(select(func.count()).select_from(
+            stmt.order_by(None).subquery()
+        ))).scalar_one())
+        result = await session.execute(stmt.limit(limit))
+        records = result.all() if rows else result.scalars().all()
+        return records, total
+
+    async def retrieve_admin_metrics(
+        self, query: str, user: CurrentUser, session: AsyncSession
+    ) -> Dict[str, Any]:
+        if not can_access_category(user.roles, "admin"):
+            return {"category": "admin", "authorized": False, "reason": unauthorized_reply(user.roles, "admin")}
+        roles_upper = canonical_roles(user.roles)
+        if not roles_upper.intersection({"ADMIN", "SUPERUSER", "SUPER_ADMIN"}):
+            return {
+                "category": "admin",
+                "authorized": False,
+                "reason": "Administrator access is required to view user and audit KPIs.",
+            }
+
+        total = int((await session.execute(
+            select(func.count()).select_from(UserAccountModel)
+        )).scalar_one())
+        active = int((await session.execute(
+            select(func.count()).select_from(UserAccountModel).where(
+                func.upper(UserAccountModel.status) == "ACTIVE"
+            )
+        )).scalar_one())
+        role_rows = (await session.execute(
+            select(UserAccountModel.role, func.count(UserAccountModel.id))
+            .group_by(UserAccountModel.role)
+            .order_by(UserAccountModel.role)
+        )).all()
+        assembly_units = int((await session.execute(
+            select(func.count()).select_from(AssemblyUnitModel)
+        )).scalar_one())
+        audit_logs = int((await session.execute(
+            select(func.count()).select_from(SystemAuditLogModel)
+        )).scalar_one())
+        return {
+            "category": "admin",
+            "authorized": True,
+            "found": True,
+            "users": {"total": total, "active": active, "inactive": total - active},
+            "roles": [
+                {"role": str(role).strip().upper().replace(" ", "_"), "count": int(count)}
+                for role, count in role_rows
+            ],
+            "assembly_units": assembly_units,
+            "audit_logs": audit_logs,
+        }
+
     async def retrieve_inventory(
         self, query: str, user: CurrentUser, session: AsyncSession
     ) -> Dict[str, Any]:
         """
-        Query inventory stock availability by material or store.
-        Restricts Store Users to their assigned store; denies Suppliers and Gate Security.
+        Query inventory stock availability by material or warehouse.
+        Restricts Warehouse Users to their assigned warehouse; denies Suppliers and Gate Security.
         """
-        roles_upper = {r.upper() for r in (user.roles or [])}
+        if not can_access_category(user.roles, "inventory"):
+            return {"category": "inventory", "authorized": False, "reason": unauthorized_reply(user.roles, "inventory")}
+        roles_upper = canonical_roles(user.roles)
 
         # Role restrictions: Suppliers and Gate Security cannot view warehouse inventory
         if "SUPPLIER" in roles_upper:
@@ -216,20 +267,20 @@ class AssistantDataRetriever:
             }
 
         # Extract material code if mentioned (e.g., MAT-001, RM-101)
-        material_code = extract_identifier(query, r"\b(MAT|RM|PKG|FG|ITEM)-[A-Z0-9-]+\b")
+        material_code = extract_identifier(query, r"\b(MAT|RM|PKG|FG|ITEM|SKU)-[A-Z0-9-]+\b")
 
-        # Store users: restrict strictly to their assigned store
-        is_store_user = "STORE_MANAGER" in roles_upper or "STORE_KEEPER" in roles_upper
-        if is_store_user and "ADMIN" not in roles_upper and "WAREHOUSE" not in roles_upper:
-            store_ids, store_codes = await resolve_user_store_context(user, session)
-            if not store_ids:
+        # Warehouse users: restrict strictly to their assigned warehouse
+        is_warehouse_user = "WAREHOUSE_OPERATOR" in roles_upper
+        if is_warehouse_user and "ADMIN" not in roles_upper and "WAREHOUSE" not in roles_upper:
+            warehouse_ref_ids, warehouse_codes = await resolve_user_warehouse_context(user, session)
+            if not warehouse_ref_ids:
                 return {
                     "category": "inventory",
                     "authorized": False,
-                    "reason": "You are assigned as a Store user, but no valid store assignment was found for your account.",
+                    "reason": "You are assigned as a Warehouse user, but no valid warehouse assignment was found for your account.",
                 }
 
-            # Query inventory location balances for the user's store
+            # Query inventory location balances for the user's warehouse
             stmt = (
                 select(
                     InventoryLocationBalanceModel.material_code,
@@ -245,22 +296,33 @@ class AssistantDataRetriever:
                     StorageLocationModel,
                     InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id,
                 )
-                .where(StorageLocationModel.store_id.in_(store_ids))
+                .where(StorageLocationModel.warehouse_ref_id.in_(warehouse_ref_ids))
             )
             if material_code:
                 stmt = stmt.where(
                     func.upper(InventoryLocationBalanceModel.material_code) == material_code
                 )
-            stmt = stmt.limit(10)
-            res = await session.execute(stmt)
-            rows = res.all()
+            if not material_code:
+                name = re.search(r"\b(?:stock|inventory|availability|quantity)\s+(?:of|for)\s+([\w ]+?)(?:[?.!]|$)", query, re.I)
+                if name:
+                    term = name.group(1).strip().replace("%", "\\%").replace("_", "\\_")
+                    stmt = stmt.where(InventoryLocationBalanceModel.material_name.ilike(f"%{term}%", escape="\\"))
+            if re.search(r"\b(?:out[ -]of[ -]stock|zero stock|no stock)\b", query, re.I):
+                stmt = stmt.where(InventoryLocationBalanceModel.available_quantity <= 0)
+            elif re.search(r"\b(?:available|availability)\b", query, re.I):
+                stmt = stmt.where(InventoryLocationBalanceModel.available_quantity > 0)
+            elif re.search(r"\b(?:low[ -]stock|shortages?|reorder)\b", query, re.I):
+                return {"category": "inventory", "found": False,
+                        "message": "Warehouse balances do not include reorder thresholds. Review replenishment in the warehouse workflow."}
+            stmt = stmt.order_by(InventoryLocationBalanceModel.material_code)
+            rows, total = await self._read_page(session, stmt, rows=True)
 
             if not rows:
                 return {
                     "category": "inventory",
                     "authorized": True,
                     "found": False,
-                    "message": f"No inventory records found in your assigned store ({', '.join(store_codes)})"
+                    "message": f"No inventory records found in your assigned warehouse ({', '.join(warehouse_codes)})"
                     + (f" for material {material_code}." if material_code else "."),
                 }
 
@@ -281,18 +343,32 @@ class AssistantDataRetriever:
                 "category": "inventory",
                 "authorized": True,
                 "found": True,
-                "store_codes": list(store_codes),
+                "total": total,
+                "limited": total > len(rows),
+                "warehouse_codes": list(warehouse_codes),
                 "items": items,
             }
 
         # Warehouse / Admin / Procurement / Assembly / Finance global inventory query
-        stmt = select(MaterialStockModel)
+        stmt = select(MaterialStockModel).options(selectinload(MaterialStockModel.material))
         if material_code:
             stmt = stmt.where(func.upper(MaterialStockModel.material_code) == material_code)
-        stmt = stmt.order_by(MaterialStockModel.material_code).limit(10)
-
-        res = await session.execute(stmt)
-        stocks = res.scalars().all()
+        if not material_code:
+            name = re.search(r"\b(?:stock|inventory|availability|quantity)\s+(?:of|for)\s+([\w ]+?)(?:[?.!]|$)", query, re.I)
+            if name:
+                term = name.group(1).strip().replace("%", "\\%").replace("_", "\\_")
+                stmt = stmt.where(MaterialStockModel.material.has(
+                    MaterialModel.material_name.ilike(f"%{term}%", escape="\\")
+                ))
+        if re.search(r"\b(?:out[ -]of[ -]stock|zero stock|no stock)\b", query, re.I):
+            stmt = stmt.where(MaterialStockModel.available <= 0)
+        elif re.search(r"\b(?:low[ -]stock|shortages?|reorder)\b", query, re.I):
+            return {"category": "inventory", "found": False,
+                    "message": "Persisted reorder thresholds are not available in this stock lookup. Ask for out-of-stock materials or check replenishment in the inventory workflow."}
+        elif re.search(r"\b(?:available|availability)\b", query, re.I):
+            stmt = stmt.where(MaterialStockModel.available > 0)
+        stmt = stmt.order_by(MaterialStockModel.material_code)
+        stocks, total = await self._read_page(session, stmt)
 
         if not stocks:
             return {
@@ -324,6 +400,8 @@ class AssistantDataRetriever:
             "category": "inventory",
             "authorized": True,
             "found": True,
+            "total": total,
+            "limited": total > len(stocks),
             "items": items,
         }
 
@@ -334,11 +412,13 @@ class AssistantDataRetriever:
         Query purchase order status and fulfillment.
         Suppliers see ONLY their own POs; Gate & Warehouse staff see operational details with pricing masked.
         """
-        roles_upper = {r.upper() for r in (user.roles or [])}
+        if not can_access_category(user.roles, "purchase_orders"):
+            return {"category": "purchase_orders", "authorized": False, "reason": unauthorized_reply(user.roles, "purchase_orders")}
+        roles_upper = canonical_roles(user.roles)
         is_supplier = "SUPPLIER" in roles_upper
         is_gate = "GATE_SECURITY" in roles_upper
         is_warehouse = "WAREHOUSE" in roles_upper or "WAREHOUSE_MANAGER" in roles_upper
-        is_store = "STORE_MANAGER" in roles_upper or "STORE_KEEPER" in roles_upper
+        is_operator = "WAREHOUSE_OPERATOR" in roles_upper
 
         po_number = extract_identifier(query, r"\bPO-[A-Z0-9-]+\b")
 
@@ -357,12 +437,13 @@ class AssistantDataRetriever:
         if po_number:
             stmt = stmt.where(func.upper(PurchaseOrderModel.po_number) == po_number)
 
-        stmt = stmt.order_by(PurchaseOrderModel.po_date.desc()).limit(5)
-        res = await session.execute(stmt)
-        orders = res.scalars().all()
+        stmt = self._filter_records(stmt, PurchaseOrderModel, query, PurchaseOrderModel.po_date)
+        stmt = stmt.order_by(PurchaseOrderModel.po_date.desc())
+        orders, total = await self._read_page(session, stmt, 5)
 
         if not orders:
             return {
+                "total": total,
                 "category": "purchase_orders",
                 "authorized": True,
                 "found": False,
@@ -372,8 +453,8 @@ class AssistantDataRetriever:
             }
 
         # Role-based field masking:
-        # Hide unit prices, totals, and financial margins from Gate Security, Warehouse, and Store staff
-        mask_financials = (is_gate or is_warehouse or is_store) and "ADMIN" not in roles_upper and "FINANCE" not in roles_upper and "PROCUREMENT" not in roles_upper
+        # Hide unit prices, totals, and financial margins from Gate Security, Warehouse, and Warehouse staff
+        mask_financials = (is_gate or is_warehouse or is_operator) and "ADMIN" not in roles_upper and "FINANCE" not in roles_upper and "PROCUREMENT" not in roles_upper
 
         order_list = []
         for po in orders:
@@ -421,6 +502,9 @@ class AssistantDataRetriever:
             "category": "purchase_orders",
             "authorized": True,
             "found": True,
+            "total": total,
+            "limited": total > len(orders),
+            "period_label": relative_date_filter(query)[2],
             "orders": order_list,
         }
 
@@ -429,9 +513,11 @@ class AssistantDataRetriever:
     ) -> Dict[str, Any]:
         """
         Query pending putaway tasks.
-        Store users are restricted to their assigned store; Suppliers/Gate/Finance denied.
+        Warehouse users are restricted to their assigned warehouse; Suppliers/Gate/Finance denied.
         """
-        roles_upper = {r.upper() for r in (user.roles or [])}
+        if not can_access_category(user.roles, "putaway"):
+            return {"category": "putaway", "authorized": False, "reason": unauthorized_reply(user.roles, "putaway")}
+        roles_upper = canonical_roles(user.roles)
 
         if "SUPPLIER" in roles_upper or "GATE_SECURITY" in roles_upper or "FINANCE" in roles_upper:
             return {
@@ -444,34 +530,35 @@ class AssistantDataRetriever:
 
         stmt = select(PutawayTaskModel)
 
-        is_store_user = "STORE_MANAGER" in roles_upper or "STORE_KEEPER" in roles_upper
-        if is_store_user and "ADMIN" not in roles_upper and "WAREHOUSE" not in roles_upper:
-            store_ids, store_codes = await resolve_user_store_context(user, session)
-            if not store_ids:
+        is_warehouse_user = "WAREHOUSE_OPERATOR" in roles_upper
+        if is_warehouse_user and "ADMIN" not in roles_upper and "WAREHOUSE" not in roles_upper:
+            warehouse_ref_ids, warehouse_codes = await resolve_user_warehouse_context(user, session)
+            if not warehouse_ref_ids:
                 return {
                     "category": "putaway",
                     "authorized": False,
-                    "reason": "No assigned store found for your store user account.",
+                    "reason": "No assigned warehouse found for your warehouse user account.",
                 }
-            stmt = stmt.where(PutawayTaskModel.destination_store_id.in_(store_ids))
+            stmt = stmt.where(PutawayTaskModel.destination_warehouse_ref_id.in_(warehouse_ref_ids))
 
         if task_number:
             stmt = stmt.where(func.upper(PutawayTaskModel.task_number) == task_number)
-        else:
+        elif not re.search(r"\b(completed|closed|cancelled|canceled|all|draft|rejected)\b", query, re.I):
             # Show open / active tasks by default
             stmt = stmt.where(
                 PutawayTaskModel.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS", "PENDING"])
             )
 
-        stmt = stmt.order_by(PutawayTaskModel.task_number.desc()).limit(10)
-        res = await session.execute(stmt)
-        tasks = res.scalars().all()
+        stmt = self._filter_records(stmt, PutawayTaskModel, query, PutawayTaskModel.created_at)
+        stmt = stmt.order_by(PutawayTaskModel.task_number.desc())
+        tasks, total = await self._read_page(session, stmt)
 
         if not tasks:
             return {
                 "category": "putaway",
                 "authorized": True,
                 "found": False,
+                "total": total,
                 "message": f"No pending putaway tasks found"
                 + (f" matching '{task_number}'." if task_number else " in the active queue."),
             }
@@ -496,6 +583,9 @@ class AssistantDataRetriever:
             "category": "putaway",
             "authorized": True,
             "found": True,
+            "total": total,
+            "limited": total > len(tasks),
+            "period_label": relative_date_filter(query)[2],
             "tasks": task_list,
         }
 
@@ -508,12 +598,15 @@ class AssistantDataRetriever:
         Finance role is denied physical gate entries and physical dock details.
         Warehouse and Gate Security have financial amounts masked.
         """
-        roles_upper = {r.upper() for r in (user.roles or [])}
+        if not can_access_category(user.roles, "gate_entries"):
+            return {"category": "gate_entries", "authorized": False, "reason": unauthorized_reply(user.roles, "gate_entries")}
+        roles_upper = canonical_roles(user.roles)
         is_supplier = "SUPPLIER" in roles_upper
 
         asn_number = extract_identifier(query, r"\bASN-[A-Z0-9-]+\b")
         entry_number = extract_identifier(query, r"\b(GE|GATE)-[A-Z0-9-]+\b")
         vehicle_number = extract_identifier(query, r"\b[A-Z]{2}[0-9]{1,2}[A-Z]{1,2}[0-9]{4}\b")
+        period_start, period_end, period_label = relative_date_filter(query)
 
         is_asn_inquiry = bool(
             asn_number
@@ -547,18 +640,24 @@ class AssistantDataRetriever:
                 asn_stmt = asn_stmt.where(func.upper(AsnModel.asn_number) == asn_number)
             elif vehicle_number:
                 asn_stmt = asn_stmt.where(func.upper(AsnModel.vehicle_number) == vehicle_number)
+            if period_start is not None:
+                asn_stmt = asn_stmt.where(AsnModel.created_at >= period_start)
+            if period_end is not None:
+                asn_stmt = asn_stmt.where(AsnModel.created_at < period_end)
 
-            asn_stmt = asn_stmt.order_by(AsnModel.created_at.desc()).limit(10)
-            res = await session.execute(asn_stmt)
-            asns = res.scalars().all()
+            asn_stmt = self._filter_records(asn_stmt, AsnModel, query)
+            asn_stmt = asn_stmt.order_by(AsnModel.created_at.desc())
+            asns, total = await self._read_page(session, asn_stmt)
 
             if not asns:
                 return {
                     "category": "gate_entries",
                     "authorized": True,
                     "found": False,
+                    "total": total,
                     "message": f"No Advance Shipping Notice (ASN) records found"
                     + (f" matching '{asn_number or vehicle_number}'" if (asn_number or vehicle_number) else "")
+                    + (f" from {period_label}" if period_label else "")
                     + (" for your supplier account." if is_supplier else " in the database."),
                 }
 
@@ -599,6 +698,9 @@ class AssistantDataRetriever:
                 "category": "gate_entries",
                 "authorized": True,
                 "found": True,
+                "total": total,
+                "limited": total > len(asns),
+                "period_label": period_label,
                 "asns": asn_list,
             }
 
@@ -633,12 +735,12 @@ class AssistantDataRetriever:
         elif vehicle_number:
             stmt = stmt.where(func.upper(GateEntryModel.vehicle_number) == vehicle_number)
 
-        stmt = stmt.order_by(GateEntryModel.gate_entry_number.desc()).limit(10)
-        res = await session.execute(stmt)
-        entries = res.scalars().all()
+        stmt = self._filter_records(stmt, GateEntryModel, query, GateEntryModel.created_at)
+        stmt = stmt.order_by(GateEntryModel.gate_entry_number.desc())
+        entries, total = await self._read_page(session, stmt)
 
         # If vehicle_number was searched and no gate entry found, check if an ASN exists for that vehicle
-        if not entries and vehicle_number and not entry_number:
+        if not entries and vehicle_number and not entry_number and not period_start and not re.search(r"\b(pending|open|completed|cancelled|active)\b", query, re.I):
             asn_fallback_stmt = select(AsnModel).options(
                 selectinload(AsnModel.lines),
                 selectinload(AsnModel.supplier),
@@ -713,6 +815,9 @@ class AssistantDataRetriever:
             "category": "gate_entries",
             "authorized": True,
             "found": True,
+            "total": total,
+            "limited": total > len(entries),
+            "period_label": period_label,
             "entries": entry_list,
         }
 
@@ -723,7 +828,9 @@ class AssistantDataRetriever:
         Query manufacturing assembly orders and statuses.
         Suppliers, Gate Security, and Finance are restricted.
         """
-        roles_upper = {r.upper() for r in (user.roles or [])}
+        if not can_access_category(user.roles, "assembly"):
+            return {"category": "assembly", "authorized": False, "reason": unauthorized_reply(user.roles, "assembly")}
+        roles_upper = canonical_roles(user.roles)
 
         if "SUPPLIER" in roles_upper or "GATE_SECURITY" in roles_upper or "FINANCE" in roles_upper:
             return {
@@ -738,12 +845,13 @@ class AssistantDataRetriever:
         if order_number:
             stmt = stmt.where(func.upper(AssemblyOrderModel.order_number) == order_number)
 
-        stmt = stmt.order_by(AssemblyOrderModel.created_at.desc()).limit(10)
-        res = await session.execute(stmt)
-        orders = res.scalars().all()
+        stmt = self._filter_records(stmt, AssemblyOrderModel, query, AssemblyOrderModel.created_at)
+        stmt = stmt.order_by(AssemblyOrderModel.created_at.desc())
+        orders, total = await self._read_page(session, stmt, 10)
 
         if not orders:
             return {
+                "total": total,
                 "category": "assembly",
                 "authorized": True,
                 "found": False,
@@ -772,6 +880,9 @@ class AssistantDataRetriever:
             "category": "assembly",
             "authorized": True,
             "found": True,
+            "total": total,
+            "limited": total > len(orders),
+            "period_label": relative_date_filter(query)[2],
             "orders": order_list,
         }
 
@@ -782,7 +893,9 @@ class AssistantDataRetriever:
         Query customer outbound dispatch status and shipments.
         Suppliers and Finance are restricted. Gate Security receives sanitized vehicle/driver info.
         """
-        roles_upper = {r.upper() for r in (user.roles or [])}
+        if not can_access_category(user.roles, "dispatch"):
+            return {"category": "dispatch", "authorized": False, "reason": unauthorized_reply(user.roles, "dispatch")}
+        roles_upper = canonical_roles(user.roles)
 
         if "SUPPLIER" in roles_upper or "FINANCE" in roles_upper:
             return {
@@ -791,18 +904,19 @@ class AssistantDataRetriever:
                 "reason": "Your role does not have authorization to view outbound customer dispatch orders.",
             }
 
-        dispatch_number = extract_identifier(query, r"\b(DISP|DO|ORD)-[A-Z0-9-]+\b")
+        dispatch_number = extract_identifier(query, r"\b(DISP|DSP|DO|ORD)-[A-Z0-9-]+\b")
 
         stmt = select(DispatchModel)
         if dispatch_number:
             stmt = stmt.where(func.upper(DispatchModel.dispatch_number) == dispatch_number)
 
-        stmt = stmt.order_by(DispatchModel.created_at.desc()).limit(10)
-        res = await session.execute(stmt)
-        dispatches = res.scalars().all()
+        stmt = self._filter_records(stmt, DispatchModel, query, DispatchModel.created_at)
+        stmt = stmt.order_by(DispatchModel.created_at.desc())
+        dispatches, total = await self._read_page(session, stmt, 10)
 
         if not dispatches:
             return {
+                "total": total,
                 "category": "dispatch",
                 "authorized": True,
                 "found": False,
@@ -837,14 +951,19 @@ class AssistantDataRetriever:
             "category": "dispatch",
             "authorized": True,
             "found": True,
+            "total": total,
+            "limited": total > len(dispatches),
+            "period_label": relative_date_filter(query)[2],
             "dispatches": dispatch_list,
         }
 
     async def retrieve_warehouse_locations(
         self, query: str, user: CurrentUser, session: AsyncSession
     ) -> Dict[str, Any]:
-        """Read the configured zone/bin hierarchy, respecting store-user assignment."""
-        roles_upper = {role.upper() for role in (user.roles or [])}
+        """Read the configured zone/bin hierarchy, respecting warehouse-user assignment."""
+        if not can_access_category(user.roles, "locations"):
+            return {"category": "locations", "authorized": False, "reason": unauthorized_reply(user.roles, "locations")}
+        roles_upper = canonical_roles(user.roles)
         if roles_upper.intersection({"SUPPLIER", "GATE_SECURITY", "FINANCE"}):
             return {
                 "category": "locations",
@@ -852,18 +971,18 @@ class AssistantDataRetriever:
                 "reason": "Your role does not have authorization to view warehouse storage locations.",
             }
 
-        stmt = select(StoreZoneModel).order_by(StoreZoneModel.zone_code.asc())
-        store_ids: Set[uuid.UUID] = set()
-        is_store_user = bool(roles_upper.intersection({"STORE_MANAGER", "STORE_KEEPER"}))
-        if is_store_user and not roles_upper.intersection({"ADMIN", "WAREHOUSE", "WAREHOUSE_MANAGER"}):
-            store_ids, _ = await resolve_user_store_context(user, session)
-            if not store_ids:
+        stmt = select(WarehouseZoneModel).order_by(WarehouseZoneModel.zone_code.asc())
+        warehouse_ref_ids: Set[uuid.UUID] = set()
+        is_warehouse_user = bool(roles_upper.intersection({"WAREHOUSE_OPERATOR"}))
+        if is_warehouse_user and not roles_upper.intersection({"ADMIN", "WAREHOUSE", "WAREHOUSE_MANAGER"}):
+            warehouse_ref_ids, _ = await resolve_user_warehouse_context(user, session)
+            if not warehouse_ref_ids:
                 return {
                     "category": "locations",
                     "authorized": False,
                     "reason": "No assigned warehouse location scope was found for your account.",
                 }
-            stmt = stmt.where(StoreZoneModel.store_id.in_(store_ids))
+            stmt = stmt.where(WarehouseZoneModel.warehouse_ref_id.in_(warehouse_ref_ids))
 
         zones_result = await session.execute(stmt)
         zone_models = zones_result.scalars().all()
@@ -878,9 +997,9 @@ class AssistantDataRetriever:
 
         zone_ids = [zone.id for zone in zone_models]
         bins_result = await session.execute(
-            select(StoreBinModel)
-            .where(StoreBinModel.zone_id.in_(zone_ids))
-            .order_by(StoreBinModel.bin_code.asc())
+            select(WarehouseBinModel)
+            .where(WarehouseBinModel.zone_id.in_(zone_ids))
+            .order_by(WarehouseBinModel.bin_code.asc())
         )
         bins_by_zone: Dict[uuid.UUID, List[Dict[str, Any]]] = {zone_id: [] for zone_id in zone_ids}
         for bin_model in bins_result.scalars().all():
@@ -912,7 +1031,9 @@ class AssistantDataRetriever:
         self, query: str, user: CurrentUser, session: AsyncSession
     ) -> Dict[str, Any]:
         """Read configured warehouse docks and their current operational status."""
-        roles_upper = {role.upper() for role in (user.roles or [])}
+        if not can_access_category(user.roles, "docks"):
+            return {"category": "docks", "authorized": False, "reason": unauthorized_reply(user.roles, "docks")}
+        roles_upper = canonical_roles(user.roles)
         if roles_upper.intersection({"SUPPLIER", "FINANCE"}):
             return {
                 "category": "docks",
@@ -920,7 +1041,11 @@ class AssistantDataRetriever:
                 "reason": "Your role does not have authorization to view warehouse dock details.",
             }
 
-        stmt = select(DockModel).order_by(DockModel.dock_number.asc())
+        stmt = (
+            select(DockMasterModel)
+            .where(DockMasterModel.is_active.is_(True))
+            .order_by(DockMasterModel.dock_code.asc())
+        )
         status_filter = None
         if re.search(r"\bavailable\b", query, re.IGNORECASE):
             status_filter = "AVAILABLE"
@@ -929,7 +1054,7 @@ class AssistantDataRetriever:
         elif re.search(r"\bmaintenance|out\s+of\s+service\b", query, re.IGNORECASE):
             status_filter = "MAINTENANCE"
         if status_filter:
-            stmt = stmt.where(func.upper(DockModel.status) == status_filter)
+            stmt = stmt.where(func.upper(DockMasterModel.status) == status_filter)
 
         result = await session.execute(stmt)
         docks = result.scalars().all()
@@ -949,61 +1074,17 @@ class AssistantDataRetriever:
             "status_filter": status_filter,
             "docks": [
                 {
-                    "dock_number": dock.dock_number,
-                    "warehouse": dock.warehouse_id,
+                    "dock_number": dock.dock_code,
+                    "dock_name": dock.dock_name,
+                    "warehouse": str(dock.warehouse_ref_id) if dock.warehouse_ref_id else None,
                     "dock_type": dock.dock_type,
                     "status": dock.status,
-                    "capacity": dock.capacity,
+                    "direction": dock.direction,
                 }
                 for dock in docks
             ],
         }
 
     def detect_category(self, query: str) -> Optional[str]:
-        """
-        Determine if the user query asks about a supported live operational category.
-        Returns category key or None for general warehouse knowledge questions.
-        """
-        q = query.lower()
-
-        # Exclude direct write commands without blocking read questions about statuses/actions.
-        if re.match(
-            r"\s*(?:(?:please|can you|could you|would you)\s+)*(?:approve|create|delete|"
-            r"update|drop|cancel|execute|issue|reserve|modify|remove|edit|allocate)\b",
-            q,
-        ):
-            return None
-
-        # 1. Purchase orders
-        if re.search(r"\b(pos|po|purchase[\s_-]?orders?|po[\s_-]?numbers?|rfqs?|vendor[\s_-]?orders?)\b", q) or extract_identifier(query, r"\bPO-[A-Z0-9-]+\b"):
-            return "purchase_orders"
-
-        # 2. Putaway
-        if re.search(r"\b(putaways?|put[\s_-]?aways?|bin[\s_-]?placements?)\b", q) or extract_identifier(query, r"\b(TASK|PUT|PT)-[A-Z0-9-]+\b"):
-            return "putaway"
-
-        # 3. Gate entries / Inbound
-        if re.search(r"\b(gate|gates|gate[\s_-]?entries|gate[\s_-]?entry|gate[\s_-]?passes|gate[\s_-]?pass|inbound|arriv(al|als|ed|ing)|truck|asns?|dock[\s_-]?arrivals?)\b", q) or extract_identifier(query, r"\b(GE|GATE|ASN)-[A-Z0-9-]+\b"):
-            return "gate_entries"
-
-        # 4. Assembly
-        if re.search(r"\b(assembly|assemblies|assembly[\s_-]?orders?|work[\s_-]?orders?|boms?|production[\s_-]?orders?|production[\s_-]?lines?|assembly[\s_-]?builds?)\b", q) or extract_identifier(query, r"\b(AO|ASSY|WO)-[A-Z0-9-]+\b"):
-            return "assembly"
-
-        # 5. Dispatch
-        if re.search(r"\b(dispatches|dispatch|customer[\s_-]?orders?|outbound|shipments?|shipment[\s_-]?status|delivery[\s_-]?routes?|consignment)\b", q) or extract_identifier(query, r"\b(DISP|DO)-[A-Z0-9-]+\b"):
-            return "dispatch"
-
-        # 6. Inventory & Stock
-        if re.search(r"\b(stocks?|inventory|on[\s_-]?hands?|available|availability|reorders?|material[\s_-]?stocks?|bin[\s_-]?balances?)\b", q) or extract_identifier(query, r"\b(MAT|RM|PKG|FG)-[A-Z0-9-]+\b"):
-            return "inventory"
-
-        # 7. Warehouse layout / zone and bin master
-        if re.search(r"\b(zones?|bins?|storage[\s_-]?locations?|location[\s_-]?hierarchy|warehouse[\s_-]?layout)\b", q):
-            return "locations"
-
-        # 8. Dock master and operational availability
-        if re.search(r"\bdocks?\b", q):
-            return "docks"
-
-        return None
+        from app.modules.assistant.application.intents import detect_category
+        return detect_category(query)

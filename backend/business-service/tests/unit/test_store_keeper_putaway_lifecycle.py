@@ -20,10 +20,10 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreManagerUserModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    UserAccountModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 
 
@@ -63,8 +63,8 @@ async def cleanup_sk_test():
         po_id = created.get("po_id")
         zone_a1_id = created.get("zone_a1_id")
         zone_b1_id = created.get("zone_b1_id")
-        store_a_id = created.get("store_a_id")
-        store_b_id = created.get("store_b_id")
+        warehouse_a_id = created.get("warehouse_a_id")
+        warehouse_b_id = created.get("warehouse_b_id")
         dock_id = created.get("dock_id")
 
         if uid_sfx:
@@ -109,14 +109,14 @@ async def cleanup_sk_test():
         if po_id:
             await session.execute(text("DELETE FROM purchase_order WHERE id = :po;"), {"po": po_id})
 
-        if zone_a1_id and zone_b1_id and store_a_id and store_b_id:
-            await session.execute(text("DELETE FROM store_bin WHERE store_id IN (:sa, :sb) OR zone_id IN (:za, :zb);"), {"sa": uuid.UUID(store_a_id), "sb": uuid.UUID(store_b_id), "za": uuid.UUID(zone_a1_id), "zb": uuid.UUID(zone_b1_id)})
+        if zone_a1_id and zone_b1_id and warehouse_a_id and warehouse_b_id:
+            await session.execute(text("DELETE FROM warehouse_bin WHERE warehouse_ref_id IN (:sa, :sb) OR zone_id IN (:za, :zb);"), {"sa": uuid.UUID(warehouse_a_id), "sb": uuid.UUID(warehouse_b_id), "za": uuid.UUID(zone_a1_id), "zb": uuid.UUID(zone_b1_id)})
 
         if zone_a1_id and zone_b1_id:
-            await session.execute(text("DELETE FROM store_zone WHERE id IN (:za, :zb);"), {"za": uuid.UUID(zone_a1_id), "zb": uuid.UUID(zone_b1_id)})
+            await session.execute(text("DELETE FROM warehouse_zone WHERE id IN (:za, :zb);"), {"za": uuid.UUID(zone_a1_id), "zb": uuid.UUID(zone_b1_id)})
 
-        if store_a_id and store_b_id:
-            await session.execute(text("DELETE FROM store WHERE id IN (:sa, :sb);"), {"sa": uuid.UUID(store_a_id), "sb": uuid.UUID(store_b_id)})
+        if warehouse_a_id and warehouse_b_id:
+            await session.execute(text("DELETE FROM warehouse WHERE id IN (:sa, :sb);"), {"sa": uuid.UUID(warehouse_a_id), "sb": uuid.UUID(warehouse_b_id)})
 
         if dock_id:
             await session.execute(text("DELETE FROM warehouse_dock WHERE id = :dk;"), {"dk": dock_id})
@@ -125,20 +125,20 @@ async def cleanup_sk_test():
 
 
 @pytest.mark.asyncio
-async def test_complete_store_keeper_putaway_lifecycle_and_security(client: AsyncClient, cleanup_sk_test):
+async def test_complete_warehouse_keeper_putaway_lifecycle_and_security(client: AsyncClient, cleanup_sk_test):
     """
     Comprehensive test suite verifying:
-    1. Warehouse assigns Putaway to Store A (status ASSIGNED_TO_STORE).
-    2. Warehouse assigns Putaway to Store B.
-    3. Targeted notification generated for Store A.
-    4. Store Keeper A sees Store A tasks.
-    5. Store Keeper A cannot see Store B tasks.
-    6. Store Keeper A completes Store A Putaway.
-    7. Store Keeper A attempts Store B Putaway -> 403.
-    8. Store Keeper selects Zone belonging to own Store -> allowed.
-    9. Store Keeper selects Zone belonging to another Store -> 422.
-    10. Warehouse cannot directly mark physical Store Putaway as completed -> 403.
-    11. Inventory location / Material Stock available is updated ONLY after Store Keeper confirmation.
+    1. Warehouse assigns Putaway to Warehouse A (status ASSIGNED_TO_WAREHOUSE).
+    2. Warehouse assigns Putaway to Warehouse B.
+    3. Targeted notification generated for Warehouse A.
+    4. Warehouse Operator A sees Warehouse A tasks.
+    5. Warehouse Operator A cannot see Warehouse B tasks.
+    6. Warehouse Operator A completes Warehouse A Putaway.
+    7. Warehouse Operator A attempts Warehouse B Putaway -> 403.
+    8. Warehouse Operator selects Zone belonging to own Warehouse -> allowed.
+    9. Warehouse Operator selects Zone belonging to another Warehouse -> 422.
+    10. Warehouse cannot directly mark physical Warehouse Putaway as completed -> 403.
+    11. Inventory location / Material Stock available is updated ONLY after Warehouse Operator confirmation.
     12. Duplicate completion rejected -> 409.
     13. Material QR remains valid.
     14. Zone QR remains valid.
@@ -213,31 +213,31 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         )
 
     async with AsyncSessionFactory() as session:
-        # 1. Seed Store A (Mechanical) & Store B (Electrical)
-        store_a = StoreModel(
-            store_code=f"STR-SKA-{uid_sfx}",
-            store_name="Mechanical Store",
+        # 1. Seed Warehouse A (Mechanical) & Warehouse B (Electrical)
+        warehouse_a = WarehouseModel(
+            warehouse_code=f"STR-SKA-{uid_sfx}",
+            warehouse_name="Mechanical Warehouse",
             warehouse_id="Main Warehouse",
             status="ACTIVE",
         )
-        store_b = StoreModel(
-            store_code=f"STR-SKB-{uid_sfx}",
-            store_name="Electrical Store",
+        warehouse_b = WarehouseModel(
+            warehouse_code=f"STR-SKB-{uid_sfx}",
+            warehouse_name="Electrical Warehouse",
             warehouse_id="Main Warehouse",
             status="ACTIVE",
         )
-        session.add_all([store_a, store_b])
+        session.add_all([warehouse_a, warehouse_b])
         await session.flush()
 
-        # 2. Seed Zones for Store A & Store B
-        zone_a1 = StoreZoneModel(
-            store_id=store_a.id,
+        # 2. Seed Zones for Warehouse A & Warehouse B
+        zone_a1 = WarehouseZoneModel(
+            warehouse_ref_id=warehouse_a.id,
             zone_code=f"MEC-Z01-{uid_sfx}",
             zone_name="Heavy Motors Bay",
             status="ACTIVE",
         )
-        zone_b1 = StoreZoneModel(
-            store_id=store_b.id,
+        zone_b1 = WarehouseZoneModel(
+            warehouse_ref_id=warehouse_b.id,
             zone_code=f"ELE-Z01-{uid_sfx}",
             zone_name="Transformer Section",
             status="ACTIVE",
@@ -354,10 +354,10 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         session.add_all([task_a, task_b])
         await session.commit()
 
-    store_a_id = str(store_a.id)
-    store_b_id = str(store_b.id)
-    store_a_code = store_a.store_code
-    store_b_code = store_b.store_code
+    warehouse_a_id = str(warehouse_a.id)
+    warehouse_b_id = str(warehouse_b.id)
+    warehouse_a_code = warehouse_a.warehouse_code
+    warehouse_b_code = warehouse_b.warehouse_code
     zone_a1_id = str(zone_a1.id)
     zone_a1_code = zone_a1.zone_code
     zone_b1_id = str(zone_b1.id)
@@ -386,8 +386,8 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         "po_id": po_id,
         "zone_a1_id": zone_a1_id,
         "zone_b1_id": zone_b1_id,
-        "store_a_id": store_a_id,
-        "store_b_id": store_b_id,
+        "warehouse_a_id": warehouse_a_id,
+        "warehouse_b_id": warehouse_b_id,
         "dock_id": dock_id,
     })
 
@@ -397,38 +397,38 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         "X-User-Permissions": "gate:read,gate:verify,gate:approve,storage:write",
     }
     headers_keeper_a = {
-        "Authorization": "Bearer mock-jwt-store-keeper-token",
-        "X-User-Roles": "STORE_KEEPER",
-        "X-User-Permissions": "store:read,storage:read,putaway:execute",
-        "X-Store-Id": store_a_id,
-        "X-Store-Code": store_a_code,
+        "Authorization": "Bearer mock-jwt-warehouse-operator-token",
+        "X-User-Roles": "WAREHOUSE_OPERATOR",
+        "X-User-Permissions": "warehouse:read,storage:read,putaway:execute",
+        "X-Warehouse-Id": warehouse_a_id,
+        "X-Warehouse-Code": warehouse_a_code,
     }
     headers_keeper_b = {
-        "Authorization": "Bearer mock-jwt-store-keeper-token",
-        "X-User-Roles": "STORE_KEEPER",
-        "X-User-Permissions": "store:read,storage:read,putaway:execute",
-        "X-Store-Id": store_b_id,
-        "X-Store-Code": store_b_code,
+        "Authorization": "Bearer mock-jwt-warehouse-operator-token",
+        "X-User-Roles": "WAREHOUSE_OPERATOR",
+        "X-User-Permissions": "warehouse:read,storage:read,putaway:execute",
+        "X-Warehouse-Id": warehouse_b_id,
+        "X-Warehouse-Code": warehouse_b_code,
     }
 
-    # Scenario 1 & 2: Warehouse assigns Putaway Task A to Store A and Task B to Store B
+    # Scenario 1 & 2: Warehouse assigns Putaway Task A to Warehouse A and Task B to Warehouse B
     resp_assign_a = await client.put(
         f"/api/storage/putaway-tasks/{task_a_id}/location",
-        json={"store_id": store_a_id},
+        json={"warehouse_ref_id": warehouse_a_id},
         headers=headers_wh,
     )
     assert resp_assign_a.status_code == 200, resp_assign_a.text
-    assert resp_assign_a.json()["destination_store_id"] == store_a_id
-    assert resp_assign_a.json()["status"] == "ASSIGNED"
+    assert resp_assign_a.json()["destination_warehouse_ref_id"] == warehouse_a_id
+    assert resp_assign_a.json()["status"] == "ASSIGNED_TO_WAREHOUSE"
 
     resp_assign_b = await client.put(
         f"/api/storage/putaway-tasks/{task_b_id}/location",
-        json={"store_id": store_b_id},
+        json={"warehouse_ref_id": warehouse_b_id},
         headers=headers_wh,
     )
     assert resp_assign_b.status_code == 200, resp_assign_b.text
-    assert resp_assign_b.json()["destination_store_id"] == store_b_id
-    assert resp_assign_b.json()["status"] == "ASSIGNED"
+    assert resp_assign_b.json()["destination_warehouse_ref_id"] == warehouse_b_id
+    assert resp_assign_b.json()["status"] == "ASSIGNED_TO_WAREHOUSE"
 
     # Scenario 11: Inventory available is NOT updated merely on assignment
     async with AsyncSessionFactory() as session:
@@ -438,18 +438,18 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         current_stock = st_check.scalar_one()
         assert current_stock.available == Decimal("0.0")
 
-    # Scenario 3: Store A notification is generated specifically for Store A
+    # Scenario 3: Warehouse A notification is generated specifically for Warehouse A
     async with AsyncSessionFactory() as session:
         notif_res = await session.execute(
             select(NotificationModel).where(
-                NotificationModel.user_role == f"STR:{store_a_code}"
+                NotificationModel.user_role == f"WH:{warehouse_a_code}"
             )
         )
-        store_a_notifs = notif_res.scalars().all()
-        assert len(store_a_notifs) >= 1
-        assert "Mechanical Store" in store_a_notifs[0].message
+        warehouse_a_notifs = notif_res.scalars().all()
+        assert len(warehouse_a_notifs) >= 1
+        assert "Mechanical Warehouse" in warehouse_a_notifs[0].message
 
-    # Scenario 4 & 5: Store Keeper A sees Store A tasks, but CANNOT see Store B tasks
+    # Scenario 4 & 5: Warehouse Operator A sees Warehouse A tasks, but CANNOT see Warehouse B tasks
     resp_list_keeper_a = await client.get("/api/storage/putaway-tasks", headers=headers_keeper_a)
     assert resp_list_keeper_a.status_code == 200, resp_list_keeper_a.text
     keeper_a_tasks = resp_list_keeper_a.json()
@@ -457,13 +457,13 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
     assert task_a_id in task_ids_a
     assert task_b_id not in task_ids_a
 
-    # Scenario 10: Warehouse CANNOT directly mark the physical Store Putaway as completed
+    # Scenario 10: Warehouse CANNOT directly mark the physical Warehouse Putaway as completed
     zone_qr_a = json.dumps({
         "type": "ZONE_QR",
         "zone_id": zone_a1_id,
         "zone_code": zone_a1_code,
-        "store_id": store_a_id,
-        "store_code": store_a_code,
+        "warehouse_ref_id": warehouse_a_id,
+        "warehouse_code": warehouse_a_code,
         "status": "ACTIVE",
     })
     resp_wh_complete = await client.post(
@@ -476,9 +476,9 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         headers=headers_wh,
     )
     assert resp_wh_complete.status_code == 403
-    assert "Store Keeper" in resp_wh_complete.json()["detail"]
+    assert "Warehouse Operator" in resp_wh_complete.json()["detail"]
 
-    # Scenario 7: Store Keeper B attempts Store A Putaway -> 403 Forbidden (IDOR Defense)
+    # Scenario 7: Warehouse Operator B attempts Warehouse A Putaway -> 403 Forbidden (IDOR Defense)
     resp_keeper_b_on_a = await client.post(
         f"/api/storage/putaway-tasks/{task_a_id}/complete",
         json={
@@ -489,15 +489,15 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         headers=headers_keeper_b,
     )
     assert resp_keeper_b_on_a.status_code == 403
-    assert "Cannot complete Putaway tasks belonging to another Store" in resp_keeper_b_on_a.json()["detail"]
+    assert "Cannot complete Putaway tasks belonging to another Warehouse" in resp_keeper_b_on_a.json()["detail"]
 
-    # Scenario 9: Store Keeper A selects/scans Zone belonging to Store B -> 422 Rejected
+    # Scenario 9: Warehouse Operator A selects/scans Zone belonging to Warehouse B -> 422 Rejected
     zone_qr_b = json.dumps({
         "type": "ZONE_QR",
         "zone_id": zone_b1_id,
         "zone_code": zone_b1_code,
-        "store_id": store_b_id,
-        "store_code": store_b_code,
+        "warehouse_ref_id": warehouse_b_id,
+        "warehouse_code": warehouse_b_code,
         "status": "ACTIVE",
     })
     resp_cross_zone = await client.post(
@@ -510,9 +510,9 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         headers=headers_keeper_a,
     )
     assert resp_cross_zone.status_code == 422
-    assert "does not belong to assigned destination Store" in resp_cross_zone.json()["detail"]
+    assert "does not belong to assigned destination Warehouse" in resp_cross_zone.json()["detail"]
 
-    # Scenario 6 & 8 & 13 & 14: Store Keeper A completes Store A Putaway with valid Material QR and own Store Zone QR
+    # Scenario 6 & 8 & 13 & 14: Warehouse Operator A completes Warehouse A Putaway with valid Material QR and own Warehouse Zone QR
     # Start task
     resp_start_a = await client.post(
         f"/api/storage/putaway-tasks/{task_a_id}/start",

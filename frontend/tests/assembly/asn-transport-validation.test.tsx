@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   isValidAsnVehicleNumber, normalizeAsnVehicleNumber,
   isValidAsnDriverName, isValidAsnDriverMobileNumber, sanitizeAsnDriverName,
@@ -62,10 +62,11 @@ describe("ASN transport validation", () => {
     const Page = Route.options.component as any;
     render(<Page />);
     fireEvent.click(await screen.findByRole("button", { name: /create asn/i }));
-    const vehicle = await screen.findByLabelText("Vehicle Number *");
-    const driver = screen.getByLabelText("Driver Name *");
-    const contact = screen.getByLabelText("Driver Contact *");
-    const next = screen.getByRole("button", { name: "Next" });
+    const dialog = screen.getByRole("dialog");
+    const vehicle = await within(dialog).findByLabelText("Vehicle Number *");
+    const driver = within(dialog).getByLabelText("Driver Name *");
+    const contact = within(dialog).getByLabelText("Driver Contact *");
+    const next = within(dialog).getByRole("button", { name: "Next" });
     expect(next).toBeDisabled();
     fireEvent.change(driver, { target: { value: "123" } });
     fireEvent.blur(driver);

@@ -9,7 +9,7 @@ Tests curated parameterized live data retrieval across 6 categories:
 6. Dispatch status
 
 Verifies strict RBAC & tenant boundaries:
-- Store user isolation to assigned store
+- Warehouse user isolation to assigned warehouse
 - Supplier isolation to authenticated supplier ID
 - Sensitive field masking (financials hidden from Gate/Warehouse, operational bins hidden from Finance)
 - Prompt injection resistance (cannot bypass RBAC or inject unauthorized lookups)
@@ -49,10 +49,10 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 from app.security.dependencies import CurrentUser
 
@@ -102,41 +102,41 @@ def test_category_detection():
 
 
 # ==============================================================================
-# 2. Inventory Retrieval & Store Isolation Tests
+# 2. Inventory Retrieval & Warehouse Isolation Tests
 # ==============================================================================
 
 @pytest.mark.asyncio
-async def test_inventory_store_user_isolation_and_supplier_denial():
+async def test_inventory_warehouse_user_isolation_and_supplier_denial():
     retriever = AssistantDataRetriever()
 
     async with session_scope() as session:
         tag = uuid.uuid4().hex[:6]
-        # Create store A and store B
-        store_a_id = uuid.uuid4()
-        store_b_id = uuid.uuid4()
+        # Create warehouse A and warehouse B
+        warehouse_a_id = uuid.uuid4()
+        warehouse_b_id = uuid.uuid4()
         code_a = f"STR-A-{tag}".upper()
         code_b = f"STR-B-{tag}".upper()
-        store_a = StoreModel(
-            id=store_a_id,
-            store_code=code_a,
-            store_name=f"Store Unit A {tag}",
+        warehouse_a = WarehouseModel(
+            id=warehouse_a_id,
+            warehouse_code=code_a,
+            warehouse_name=f"Warehouse Unit A {tag}",
             status="ACTIVE",
         )
-        store_b = StoreModel(
-            id=store_b_id,
-            store_code=code_b,
-            store_name=f"Store Unit B {tag}",
+        warehouse_b = WarehouseModel(
+            id=warehouse_b_id,
+            warehouse_code=code_b,
+            warehouse_name=f"Warehouse Unit B {tag}",
             status="ACTIVE",
         )
-        session.add_all([store_a, store_b])
+        session.add_all([warehouse_a, warehouse_b])
         await session.flush()
 
-        # Create storage locations in each store
+        # Create storage locations in each warehouse
         loc_a = StorageLocationModel(
             id=uuid.uuid4(),
             location_code=f"LOC-A-{tag}",
             warehouse_id="WH-01",
-            store_id=store_a_id,
+            warehouse_ref_id=warehouse_a_id,
             zone=f"ZA-{tag}",
             rack=f"RA-{tag}",
             bin=f"BA-{tag}",
@@ -148,7 +148,7 @@ async def test_inventory_store_user_isolation_and_supplier_denial():
             id=uuid.uuid4(),
             location_code=f"LOC-B-{tag}",
             warehouse_id="WH-01",
-            store_id=store_b_id,
+            warehouse_ref_id=warehouse_b_id,
             zone=f"ZB-{tag}",
             rack=f"RB-{tag}",
             bin=f"BB-{tag}",
@@ -217,19 +217,19 @@ async def test_inventory_store_user_isolation_and_supplier_denial():
         session.add_all([bal_a, bal_b])
         await session.flush()
 
-        # 1. Store Manager assigned to Store A
-        user_store_a = CurrentUser(
+        # 1. Warehouse Operator assigned to Warehouse A
+        user_warehouse_a = CurrentUser(
             subject="mgr_a",
             username="mgr_a",
-            roles=["STORE_MANAGER"],
-            permissions=["store:read"],
-            raw_claims={"store_id": str(store_a_id), "store_code": code_a},
+            roles=["WAREHOUSE_OPERATOR"],
+            permissions=["warehouse:read"],
+            raw_claims={"warehouse_ref_id": str(warehouse_a_id), "warehouse_code": code_a},
         )
-        res_a = await retriever.retrieve_inventory(f"What is the stock of MAT-BOLT-{tag}?", user_store_a, session)
+        res_a = await retriever.retrieve_inventory(f"What is the stock of MAT-BOLT-{tag}?", user_warehouse_a, session)
         assert res_a["authorized"] is True
         assert res_a["found"] is True
         assert any(item["material_code"] == f"MAT-BOLT-{tag}" for item in res_a["items"])
-        # Store Manager A MUST NOT see Store B's materials
+        # Warehouse Operator A MUST NOT see Warehouse B's materials
         assert not any(item["material_code"] == f"MAT-NUT-{tag}" for item in res_a["items"])
 
         # 2. Supplier User is strictly denied inventory lookups
@@ -417,7 +417,7 @@ async def test_putaway_tasks_rbac():
             quantity=Decimal("15.0"),
             uom="COILS",
             warehouse_id="WH-01",
-            destination_store_id=None,
+            destination_warehouse_ref_id=None,
             status="OPEN",
             created_by="system",
             created_at=datetime.now(timezone.utc),

@@ -23,10 +23,10 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayTaskModel,
     StorageLocationModel,
 )
-from app.modules.store.infrastructure.persistence.models import (
-    StoreBinModel,
-    StoreModel,
-    StoreZoneModel,
+from app.modules.warehouse.infrastructure.persistence.models import (
+    WarehouseBinModel,
+    WarehouseModel,
+    WarehouseZoneModel,
 )
 
 
@@ -54,7 +54,7 @@ async def cleanup_qr_test():
         uid_sfx = created.get("uid_sfx")
         bin_code_val = created.get("bin_code_val")
         zone_code_val = created.get("zone_code_val")
-        store_code_val = created.get("store_code_val")
+        warehouse_code_val = created.get("warehouse_code_val")
 
         if mat_code:
             await session.execute(text("DELETE FROM inventory_movement_history WHERE material_code = :mc;"), {"mc": mat_code})
@@ -76,13 +76,13 @@ async def cleanup_qr_test():
             await session.execute(text("DELETE FROM storage_location WHERE location_code LIKE :pat;"), {"pat": f"%{uid_sfx}%"})
 
         if bin_code_val:
-            await session.execute(text("DELETE FROM store_bin WHERE bin_code = :bc;"), {"bc": bin_code_val})
+            await session.execute(text("DELETE FROM warehouse_bin WHERE bin_code = :bc;"), {"bc": bin_code_val})
 
         if zone_code_val:
-            await session.execute(text("DELETE FROM store_zone WHERE zone_code = :zc;"), {"zc": zone_code_val})
+            await session.execute(text("DELETE FROM warehouse_zone WHERE zone_code = :zc;"), {"zc": zone_code_val})
 
-        if store_code_val:
-            await session.execute(text("DELETE FROM store WHERE store_code = :sc;"), {"sc": store_code_val})
+        if warehouse_code_val:
+            await session.execute(text("DELETE FROM warehouse WHERE warehouse_code = :sc;"), {"sc": warehouse_code_val})
 
         await session.commit()
 
@@ -103,7 +103,7 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
     grn_num = f"TEST_QR_GRN_{uid_sfx}"
     mat_code = f"TEST_QR_MAT_{uid_sfx}"
     batch_num = f"TEST_QR_BAT_{uid_sfx}"
-    store_code_val = f"TEST_QR_STR_{uid_sfx}"
+    warehouse_code_val = f"TEST_QR_STR_{uid_sfx}"
     zone_code_val = f"TEST_QR_ZON_{uid_sfx}"
     bin_code_val = f"TEST_QR_BIN_{uid_sfx}"
     qr_code_str = f"QR-BATCH-{batch_num}"
@@ -114,25 +114,25 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
         "grn_num": grn_num,
         "mat_code": mat_code,
         "batch_num": batch_num,
-        "store_code_val": store_code_val,
+        "warehouse_code_val": warehouse_code_val,
         "zone_code_val": zone_code_val,
         "bin_code_val": bin_code_val,
     })
 
     async with AsyncSessionFactory() as session:
-        # 1. Create Store, Zone, and Bins
-        store = StoreModel(
-            store_code=store_code_val,
-            store_name="Raw Material Store",
+        # 1. Create Warehouse, Zone, and Bins
+        warehouse = WarehouseModel(
+            warehouse_code=warehouse_code_val,
+            warehouse_name="Raw Material Warehouse",
             warehouse_id="Main Warehouse",
-            store_manager_name="store_mgr_alex",
+            warehouse_operator_name="warehouse_mgr_alex",
             status="ACTIVE",
         )
-        session.add(store)
+        session.add(warehouse)
         await session.flush()
 
-        zone = StoreZoneModel(
-            store_id=store.id,
+        zone = WarehouseZoneModel(
+            warehouse_ref_id=warehouse.id,
             zone_code=zone_code_val,
             zone_name="Raw Material Zone",
             status="ACTIVE",
@@ -140,8 +140,8 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
         session.add(zone)
         await session.flush()
 
-        bin_a = StoreBinModel(
-            store_id=store.id,
+        bin_a = WarehouseBinModel(
+            warehouse_ref_id=warehouse.id,
             zone_id=zone.id,
             bin_code=bin_code_val,
             bin_name="Primary Rack Bin",
@@ -232,19 +232,19 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
             uom="KG",
             warehouse_id="Main Warehouse",
             source_location="DOCK-01",
-            destination_store_id=store.id,
-            status="PUTAWAY_PENDING",
+            destination_warehouse_ref_id=warehouse.id,
+            status="READY_FOR_PUTAWAY",
             created_by="system",
             created_at=datetime.datetime.now(datetime.timezone.utc),
         )
         session.add(pt)
         await session.commit()
 
-    store_id_val = str(store.id)
+    warehouse_ref_id_val = str(warehouse.id)
 
     headers = {
         "Authorization": "Bearer mock-jwt-token",
-        "X-User-Roles": "STORE_MANAGER,WAREHOUSE_MANAGER",
+        "X-User-Roles": "WAREHOUSE_OPERATOR,WAREHOUSE_MANAGER",
         "X-User-Permissions": "storage:read,storage:write,putaway:execute",
         "X-Store-Id": store_id_val,
         "X-Store-Code": store_code_val,
@@ -271,7 +271,7 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
     # Step 2: Resolve Bin QR
     resp_resolve_bin = await client.post(
         "/api/storage/putaway-tasks/resolve-bin-qr",
-        json={"bin_scan": bin_code_val, "store_id": store_id_val},
+        json={"bin_scan": bin_code_val, "warehouse_ref_id": warehouse_ref_id_val},
         headers=headers,
     )
     assert resp_resolve_bin.status_code == 200, resp_resolve_bin.text
@@ -330,7 +330,7 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
         st = (await session.execute(select(MaterialStockModel).where(MaterialStockModel.material_code == mat_code))).scalar_one()
         assert st.available == Decimal("100.0")
 
-        bin_db = (await session.execute(select(StoreBinModel).where(StoreBinModel.bin_code == bin_code_val))).scalar_one()
+        bin_db = (await session.execute(select(WarehouseBinModel).where(WarehouseBinModel.bin_code == bin_code_val))).scalar_one()
         assert bin_db.occupied_quantity == Decimal("100.0")
 
         pt_db = (await session.execute(select(PutawayTaskModel).where(PutawayTaskModel.item_code == mat_code))).scalar_one()
